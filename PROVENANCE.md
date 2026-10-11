@@ -92,8 +92,7 @@ AND ONE THING ABOUT THAT RECORD IS WORTH KEEPING TOO: the commit that first repo
 (`0150d16`) printed a tidy `FAIL: CFGetTypeID(descriptor) is 256 and CTFontDescriptorGetTypeID() is 1` line
 that NEVER APPEARED. It was written from what the failure was expected to look like rather than read off the
 run, which is the exact error this tree keeps having to correct — a document, or in this case a commit
-message, describing a state that was assumed rather than measured. The corrective commit is `a commit that
-follows this one`, and this paragraph is why it exists.
+message, describing a state that was assumed rather than measured. The corrective commit is `87ba9f6`, and this paragraph is why it exists.
 
 ## Agora changes
 
