@@ -53,7 +53,23 @@ rows are the AAT/SFNT structure vocabulary, which is a data port of two headers 
   `kCTFontSymbolicTrait`, `kCTFontWeightTrait`, `kCTFontWidthTrait` and `kCTFontSlantTrait` as defined.
 - **No test suite yet**, and the values above are the first thing worth holding: the trait bits, the class
   numbers and the four strings are all facts a case can assert, including that the strings are the AppKit's.
-- **The surface continues in the order above**: `CTFontDescriptor.h` next, then `CTFont.h`.
+- **`CTFontDescriptor` is declared, and its keys are defined.** The header carries Apple's whole surface for
+  it — the opaque `CTFontDescriptorRef`, `GetTypeID`, the twenty-two attribute keys **with the value type each
+  carries**, `CTFontOrientation`, `CTFontFormat`, `CTFontPriority`, and the ten doors — and `CTFontDescriptor.c`
+  defines the twenty-two key strings. MEASURED: the build is clean and the suite is `3 of 3`, including a case
+  that names all twenty-two strings and checks they are distinct.
+- **THE TWENTY-TWO KEY STRINGS ARE A RECORDED GUESS** (`dec-4795696b09d362f6`). Apple publishes NO VALUE for
+  any of them — not in its headers, which declare them `extern const CFStringRef`, not in its documentation,
+  and not in its documentation index, which answers only `let kCTFontNameAttribute: CFString`. EIGHT of the
+  twenty-two pair by name with a constant the AppKit declares, so their value is provably
+  `"NSFont<Suffix>Attribute"`; the other fourteen have no counterpart, and the user's decision is that all
+  twenty-two take that form. `PROVENANCE.md` records where each part of that comes from.
+- **Two doors are OWED WITH THEIR REASON**: `CTFontDescriptorCreateMatchingFontDescriptors` and its singular
+  form answer "based on the original descriptor and system precedence" in Apple's own words, and this tier has
+  no registry of installed faces to take a precedence from. They are declared and not defined, so a caller who
+  reaches for one gets a link error rather than an invented answer.
+- **The type itself is next**: `__CTFontDescriptor` registered through `<CoreFoundation/CFRuntime.h>`, with
+  the attributes dictionary as its content and the accessors over it. Then `CTFont.h`.
 - **The one thing Apple's headers do not specify** is the character→glyph step — the half the Core Graphics
   plan called out as missing: Apple deprecated CG's glyph doors, so this tree struck them, and **Core Text
   owns that step** (`CTFontGetGlyphsForCharacters`). How it reaches the font's `cmap` is the first

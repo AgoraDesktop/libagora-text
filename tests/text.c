@@ -1,6 +1,6 @@
 /*
- * CTFontTraits — the facts of the leaf header: the values Apple publishes, the class numbers with their gaps,
- * the four strings, and the width of the two types.
+ * Core Text — the facts of the surface written so far: CTFontTraits' values and classes, and
+ * CTFontDescriptor's twenty-two attribute keys.
  *
  * Copyright © 2026 Kyle J. Cardoza. MIT licensed — see LICENSE.
  * SPDX-License-Identifier: MIT
@@ -13,6 +13,7 @@
  * ONE CHILD PER CASE, which is this tree's convention (libagora-drawing's suite) and not decoration: a wrong
  * answer is counted, a crash is not, and a crash in a single-process run would lose every case after it.
  */
+#include <CoreText/CTFontDescriptor.h>
 #include <CoreText/CTFontTraits.h>
 
 #include <CoreFoundation/CoreFoundation.h>
@@ -164,9 +165,66 @@ static int run_in_child(const char *name, int (*fn)(void))
 	return 1;
 }
 
+/* THE DESCRIPTOR'S KEY STRINGS, WHICH ARE A RECORDED GUESS RATHER THAN A FACT (dec-4795696b09d362f6) and
+ * are therefore worth holding precisely: the eight that pair with an AppKit constant are the ones with a
+ * reason behind them, and the other fourteen follow the same form. A change to any of them should be a
+ * deliberate act, so each is named. */
+static int case_descriptor_key_strings(void)
+{
+	int before = g_fail;
+	/* AUTOMATIC, NOT static AND NOT const: these keys are `extern const CFStringRef` VARIABLES, so their
+	 * values are not constant expressions. The same note is in libagora-drawing's suite, where the same
+	 * error was made; it is repeated rather than referenced because it has already failed to carry once. */
+	struct { CFStringRef key; const char *want; } keys[] = {
+		{ kCTFontURLAttribute, "NSFontURLAttribute" },
+		{ kCTFontNameAttribute, "NSFontNameAttribute" },
+		{ kCTFontDisplayNameAttribute, "NSFontDisplayNameAttribute" },
+		{ kCTFontFamilyNameAttribute, "NSFontFamilyNameAttribute" },
+		{ kCTFontStyleNameAttribute, "NSFontStyleNameAttribute" },
+		{ kCTFontTraitsAttribute, "NSFontTraitsAttribute" },
+		{ kCTFontVariationAttribute, "NSFontVariationAttribute" },
+		{ kCTFontSizeAttribute, "NSFontSizeAttribute" },
+		{ kCTFontMatrixAttribute, "NSFontMatrixAttribute" },
+		{ kCTFontCascadeListAttribute, "NSFontCascadeListAttribute" },
+		{ kCTFontCharacterSetAttribute, "NSFontCharacterSetAttribute" },
+		{ kCTFontLanguagesAttribute, "NSFontLanguagesAttribute" },
+		{ kCTFontBaselineAdjustAttribute, "NSFontBaselineAdjustAttribute" },
+		{ kCTFontMacintoshEncodingsAttribute, "NSFontMacintoshEncodingsAttribute" },
+		{ kCTFontFeaturesAttribute, "NSFontFeaturesAttribute" },
+		{ kCTFontFeatureSettingsAttribute, "NSFontFeatureSettingsAttribute" },
+		{ kCTFontFixedAdvanceAttribute, "NSFontFixedAdvanceAttribute" },
+		{ kCTFontOrientationAttribute, "NSFontOrientationAttribute" },
+		{ kCTFontFormatAttribute, "NSFontFormatAttribute" },
+		{ kCTFontRegistrationScopeAttribute, "NSFontRegistrationScopeAttribute" },
+		{ kCTFontPriorityAttribute, "NSFontPriorityAttribute" },
+		{ kCTFontEnabledAttribute, "NSFontEnabledAttribute" },
+	};
+	size_t i, j;
+
+	for (i = 0; i < sizeof keys / sizeof keys[0]; i++) {
+		char buf[96];
+
+		check(keys[i].key != NULL, "descriptor key %zu is NULL", i);
+		if (keys[i].key == NULL) {
+			continue;
+		}
+		buf[0] = '\0';
+		check(CFStringGetCString(keys[i].key, buf, (CFIndex)sizeof buf, kCFStringEncodingUTF8) &&
+		      strcmp(buf, keys[i].want) == 0,
+		      "a descriptor key is \"%s\", want \"%s\"", buf, keys[i].want);
+		for (j = i + 1; j < sizeof keys / sizeof keys[0]; j++) {
+			if (CFEqual(keys[i].key, keys[j].key)) {
+				check(0, "descriptor keys %zu and %zu are the same string", i, j);
+			}
+		}
+	}
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
+	{ "The descriptor's twenty-two key strings", case_descriptor_key_strings },
 };
 
 int main(void)
