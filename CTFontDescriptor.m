@@ -170,7 +170,7 @@ CTFontDescriptorRef CTFontDescriptorCreateWithNameAndSize(CFStringRef name, CGFl
 }
 
 CTFontDescriptorRef CTFontDescriptorCreateCopyWithAttributes(CTFontDescriptorRef original,
-							     NSDictionary *attributes)
+							     CFDictionaryRef attributes)
 {
 	NSMutableDictionary *merged;
 	id key;
@@ -187,7 +187,7 @@ CTFontDescriptorRef CTFontDescriptorCreateCopyWithAttributes(CTFontDescriptorRef
 	merged = [NSMutableDictionary dictionary];
 	[merged addEntriesFromDictionary:
 	 ((original != NULL) ? (NSDictionary *)original->attributes : [NSDictionary dictionary])];
-	for (key in attributes) {
+	for (key in (NSDictionary *)attributes) {
 		id value = [attributes objectForKey:key];
 		id existing = [merged objectForKey:key];
 
@@ -345,7 +345,7 @@ CFTypeRef CTFontDescriptorCopyAttribute(CTFontDescriptorRef descriptor, CFString
  * the era says what to do without it — so this is the door's own answer rather than a stub, and `*language` is
  * left NULL, which the contract allows. */
 CFTypeRef CTFontDescriptorCopyLocalizedAttribute(CTFontDescriptorRef descriptor, CFStringRef attribute,
-						 NSString **language)
+						 CFStringRef *language)
 {
 	if (language != NULL) {
 		*language = NULL;
@@ -372,8 +372,8 @@ static CTFontDescriptorRef ctd_copy_with(CTFontDescriptorRef original, NSString 
 /* "A copy of the original font descriptor modified with the given feature settings" — a new ENTRY appended to
  * the feature-settings array, whose two keys are the SFNT vocabulary §37 shipped. */
 CTFontDescriptorRef CTFontDescriptorCreateCopyWithFeature(CTFontDescriptorRef original,
-							  NSNumber *featureTypeIdentifier,
-							  NSNumber *featureSelectorIdentifier)
+							  CFNumberRef featureTypeIdentifier,
+							  CFNumberRef featureSelectorIdentifier)
 {
 	return ctd_copy_with(original, kCTFontFeatureSettingsAttribute,
 			     ^(id existing, NSMutableDictionary *target) {
@@ -397,7 +397,7 @@ CTFontDescriptorRef CTFontDescriptorCreateCopyWithFeature(CTFontDescriptorRef or
 /* "The variation axis identifier ... the four character code of the variation axis as a CFNumberRef" — so the
  * identifier is the KEY of the variation dictionary and the value is the instance's. */
 CTFontDescriptorRef CTFontDescriptorCreateCopyWithVariation(CTFontDescriptorRef original,
-							    NSNumber *variationIdentifier,
+							    CFNumberRef variationIdentifier,
 							    CGFloat variationValue)
 {
 	return ctd_copy_with(original, kCTFontVariationAttribute,
@@ -511,7 +511,7 @@ void ctf_descriptor_set_enabled(NSArray *descriptors, BOOL enable)
 	}
 }
 
-NSArray *CTFontDescriptorCreateMatchingFontDescriptors(CTFontDescriptorRef descriptor, NSSet *mandatoryAttributes)
+CFArrayRef CTFontDescriptorCreateMatchingFontDescriptors(CTFontDescriptorRef descriptor, CFSetRef mandatoryAttributes)
 {
 	NSMutableArray *matches = [NSMutableArray array];
 	char name[512];
@@ -532,7 +532,7 @@ NSArray *CTFontDescriptorCreateMatchingFontDescriptors(CTFontDescriptorRef descr
 		int matched = (candidate != NULL);
 
 		if (matched && mandatoryAttributes != nil) {
-			for (id key in mandatoryAttributes) {
+			for (id key in (NSSet *)mandatoryAttributes) {
 				id required = [(NSDictionary *)descriptor->attributes objectForKey:key];
 				id present = [(NSDictionary *)candidate->attributes objectForKey:key];
 
@@ -566,9 +566,9 @@ NSArray *CTFontDescriptorCreateMatchingFontDescriptors(CTFontDescriptorRef descr
  * the two could disagree about a face without either being wrong about its own answer. So this asks the plural
  * and takes its first. */
 CTFontDescriptorRef CTFontDescriptorCreateMatchingFontDescriptor(CTFontDescriptorRef descriptor,
-								 NSSet *mandatoryAttributes)
+								 CFSetRef mandatoryAttributes)
 {
-	NSArray *matches = CTFontDescriptorCreateMatchingFontDescriptors(descriptor, mandatoryAttributes);
+	CFArrayRef matches = CTFontDescriptorCreateMatchingFontDescriptors(descriptor, mandatoryAttributes);
 	CTFontDescriptorRef first = NULL;
 
 	if (matches != nil && [matches count] > 0) {

@@ -128,7 +128,7 @@ void CTFontDescriptorRelease(CTFontDescriptorRef descriptor);
 CTFontDescriptorRef CTFontDescriptorCreateWithAttributes(CFDictionaryRef attributes);
 CTFontDescriptorRef CTFontDescriptorCreateWithNameAndSize(CFStringRef name, CGFloat size);
 CTFontDescriptorRef CTFontDescriptorCreateCopyWithAttributes(CTFontDescriptorRef original,
-							     NSDictionary *attributes);
+							     CFDictionaryRef attributes);
 
 /* AND THE ACCESSOR THAT NEEDS NO NEW TYPE: the dictionary itself, retained. */
 CFDictionaryRef CTFontDescriptorCopyAttributes(CTFontDescriptorRef descriptor) CG_RETURNS_RETAINED;
@@ -200,15 +200,15 @@ typedef enum {
 CFTypeRef CTFontDescriptorCopyAttribute(CTFontDescriptorRef descriptor, CFStringRef attribute)
 	CG_RETURNS_RETAINED;
 CFTypeRef CTFontDescriptorCopyLocalizedAttribute(CTFontDescriptorRef descriptor, CFStringRef attribute,
-						     NSString **language) CG_RETURNS_RETAINED;
+						     CFStringRef *language) CG_RETURNS_RETAINED;
 CTFontDescriptorRef CTFontDescriptorCreateCopyWithFeature(CTFontDescriptorRef original,
-							  NSNumber *featureTypeIdentifier,
-							  NSNumber *featureSelectorIdentifier);
+							  CFNumberRef featureTypeIdentifier,
+							  CFNumberRef featureSelectorIdentifier);
 CTFontDescriptorRef CTFontDescriptorCreateCopyWithVariation(CTFontDescriptorRef original,
-							    NSNumber *variationIdentifier,
+							    CFNumberRef variationIdentifier,
 							    CGFloat variationValue);
-NSArray *CTFontDescriptorCreateMatchingFontDescriptors(CTFontDescriptorRef descriptor,
-						       NSSet *mandatoryAttributes) CG_RETURNS_RETAINED;
+CFArrayRef CTFontDescriptorCreateMatchingFontDescriptors(CTFontDescriptorRef descriptor,
+						       CFSetRef mandatoryAttributes) CG_RETURNS_RETAINED;
 
 /* **M7l: THE SINGLE PREFERRED MATCH.** Apple's sentence: "Returns an the single preferred matching font
  * descriptor based on the original descriptor and **system precedence**" — which is the PLURAL's answer above,
@@ -216,7 +216,7 @@ NSArray *CTFontDescriptorCreateMatchingFontDescriptors(CTFontDescriptorRef descr
  * already implements. An empty match answers NULL, which is Apple's "the original descriptor may be returned in
  * normalized form" read strictly: there is no normalized form of nothing. */
 CTFontDescriptorRef CTFontDescriptorCreateMatchingFontDescriptor(CTFontDescriptorRef descriptor,
-								 NSSet *mandatoryAttributes)
+								 CFSetRef mandatoryAttributes)
 	CG_RETURNS_RETAINED;
 
 #endif /* CORE_TEXT_CTFONTDESCRIPTOR_H */
