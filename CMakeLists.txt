@@ -84,6 +84,9 @@ target_link_libraries(Text
         CoreFoundation::CoreFoundation
         AgoraDrawing::Drawing)
 
+enable_testing()
+add_subdirectory(tests)
+
 install(DIRECTORY . DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/CoreText
         FILES_MATCHING PATTERN "*.h")
 install(TARGETS Text

@@ -19,10 +19,13 @@
  * happened to land on the correct numbers anyway. Nothing is guessed this time.
  *
  * AND THE FOUR KEYS ARE THE APPKIT'S STRINGS — `NSFontSymbolicTrait` and its three siblings — WHICH IS THE
- * POINT OF THEM RATHER THAN A COINCIDENCE: a traits dictionary is EXCHANGED between Foundation and Core Text,
- * so Apple's two frameworks necessarily name the same trait the same way. The AppKit's declarations are one
- * tier up in libagora-base, and a caller bridging a traits dictionary between the two needs these strings to
- * be those.
+ * POINT OF THEM RATHER THAN A COINCIDENCE: a traits dictionary is exchanged between the frameworks, so Apple's
+ * Core Text and its `NSFontDescriptor` necessarily name the same trait the same way.
+ *
+ * AND NOTHING HERE CAN BE CHECKED AGAINST THAT COUNTERPART YET, WHICH IS SAID RATHER THAN IMPLIED: the AppKit's
+ * declarations belong to `NSFontDescriptor`, THAT lives in the AppKit and not in Foundation, and the AppKit
+ * repository (`libagora-app`) is an empty one with a `.gitignore`. So the strings are asserted in the suite for
+ * what they ARE — literals matching Apple's vocabulary — and not against a local peer that does not exist.
  */
 #ifndef CORE_TEXT_CTFONT_TRAITS_H
 #define CORE_TEXT_CTFONT_TRAITS_H
