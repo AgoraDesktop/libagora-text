@@ -46,9 +46,14 @@ rows are the AAT/SFNT structure vocabulary, which is a data port of two headers 
 
 ## Status
 
-- **No implementation files yet.** The build says so in its own words rather than failing obscurely: the
-  public surface is being written first, in the order above, and the first `.c` arrives with the first type
-  that has behaviour.
+- **The leaf is done and the library BUILDS.** `CTFontTraits.h` and `CTFontTraits.c` — the four trait keys,
+  `kCTFontClassMaskShift`, the symbolic traits and the eleven stylistic classes — written from Apple's header,
+  **with Apple's published values rather than a guess at their order.** MEASURED: `cmake --build build`
+  exits 0 with no errors from a clean directory, and `nm -D build/libagora-text.so` lists
+  `kCTFontSymbolicTrait`, `kCTFontWeightTrait`, `kCTFontWidthTrait` and `kCTFontSlantTrait` as defined.
+- **No test suite yet**, and the values above are the first thing worth holding: the trait bits, the class
+  numbers and the four strings are all facts a case can assert, including that the strings are the AppKit's.
+- **The surface continues in the order above**: `CTFontDescriptor.h` next, then `CTFont.h`.
 - **The one thing Apple's headers do not specify** is the character→glyph step — the half the Core Graphics
   plan called out as missing: Apple deprecated CG's glyph doors, so this tree struck them, and **Core Text
   owns that step** (`CTFontGetGlyphsForCharacters`). How it reaches the font's `cmap` is the first

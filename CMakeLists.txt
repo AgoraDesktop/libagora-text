@@ -63,6 +63,11 @@ add_library(Text SHARED ${TEXT_SOURCES})
 
 set_target_properties(Text PROPERTIES OUTPUT_NAME agora-text)
 
+# -fconstant-cfstrings, so a CFSTR in a .c file is a constant rather than a call -- the same flag
+# libagora-drawing compiles its own C sources with. -fblocks arrives on the INTERFACE of AgoraDrawing, whose
+# Core Foundation headers need it, so this target gets it from the link rather than declaring it twice.
+target_compile_options(Text PRIVATE -fconstant-cfstrings)
+
 target_include_directories(Text
     PUBLIC
         "$<BUILD_INTERFACE:${_agora_include_dir}>"
