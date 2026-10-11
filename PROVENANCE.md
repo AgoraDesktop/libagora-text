@@ -73,6 +73,28 @@ Two more instruments live in the Fiwix tree and both were used before the restar
   deprecated Core Graphics' glyph doors, this tree struck them, and reaching a font's `cmap` is the first
   architectural question of the restart.
 
+## What a type identity is worth, measured
+
+**A TYPE ID THAT COMES FROM A CONSTANT RATHER THAN FROM THE RUNTIME MAKES CORE FOUNDATION HALT AT CREATION.**
+The deleted library answered all eleven `CT…GetTypeID` doors from a table of constants kept in a file beside
+the objects, and this library's first object takes its identity from `_CFRuntimeRegisterClass` instead. The
+difference was measured by forcing the old arrangement back into `CTFontDescriptorGetTypeID`:
+
+    FAIL: The descriptor is an object, and its identity is the runtime's: killed by signal 4
+    text: 3 of 4 cases passed, 1 failed
+
+SIGILL, AND NOTHING PRINTED BY THE CHILD AT ALL — `_CFRuntimeCreateInstance` halts before a single assertion
+runs, because Core Foundation will not build an object whose type id it does not recognise. The failure is
+therefore earlier and louder than a wrong answer: an identity the runtime does not own cannot be given to an
+object in the first place. Restored, the suite is `text: 4 of 4 cases passed, 0 failed`.
+
+AND ONE THING ABOUT THAT RECORD IS WORTH KEEPING TOO: the commit that first reported this falsification
+(`0150d16`) printed a tidy `FAIL: CFGetTypeID(descriptor) is 256 and CTFontDescriptorGetTypeID() is 1` line
+that NEVER APPEARED. It was written from what the failure was expected to look like rather than read off the
+run, which is the exact error this tree keeps having to correct — a document, or in this case a commit
+message, describing a state that was assumed rather than measured. The corrective commit is `a commit that
+follows this one`, and this paragraph is why it exists.
+
 ## Agora changes
 
 **The restart itself is this section's first entry**: the import deleted, the build rewritten for a C-only
