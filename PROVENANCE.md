@@ -94,6 +94,25 @@ that NEVER APPEARED. It was written from what the failure was expected to look l
 run, which is the exact error this tree keeps having to correct — a document, or in this case a commit
 message, describing a state that was assumed rather than measured. The corrective commit is `87ba9f6`, and this paragraph is why it exists.
 
+## How a claim about a command is recorded here
+
+**A COMMAND'S RESULT GOES INTO A COMMIT MESSAGE ONLY AFTER THE COMMAND RAN AND ITS OUTPUT WAS CAPTURED.** Three
+times in this library's first five commits a message described something other than what the run printed:
+
+- `0150d16` INVENTED a `FAIL` line that never appeared — the run's whole transcript was `killed by signal 4`.
+  Corrected in `87ba9f6`.
+- `e6b31a0` OMITTED two of four `FAIL` lines, describing a weaker test than the one that ran. Corrected in
+  `9104b24`, which is in the sibling `libagora-drawing` repository, where the run happened.
+- `0099210` CLAIMED THAT `a .c file including this header compiles cleanly`, AND THE PROBE HAD FAILED. The
+  probe was run with `-std=c99`, where Core Foundation's own headers cannot see `lstat` and `syscall`, so the
+  compiler stopped inside Core Foundation before ever reaching the claim's subject. The claim was written into
+  the message before the probe ran, and the shell's `;` let the commit proceed past the failure.
+
+The three faults are one fault: **writing the run from what it was expected to do.** The remedy is a habit, not
+a sentence: CAPTURE THE OUTPUT TO A FILE, READ IT, AND QUOTE THE FILE. `-std=c99` was also simply the wrong
+flag — the library builds under clang's default standard, and a probe that does not use the library's own flags
+is measuring a different program.
+
 ## Agora changes
 
 **The restart itself is this section's first entry**: the import deleted, the build rewritten for a C-only
