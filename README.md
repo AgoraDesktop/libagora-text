@@ -8,8 +8,22 @@ Agora is an installable desktop environment for Linux and BSD; see the project R
 (`../README.md`).
 
 **APPLE'S CORE TEXT SITS BELOW FOUNDATION, AND SO MUST THIS ONE** (user, 2026-10-11): it depends on Core
-Foundation and Core Graphics and on nothing else, and Foundation is what bridges *to* it. That is two
-dependencies, not three:
+Foundation and Core Graphics and on nothing else, and Foundation is what bridges *to* it.
+
+**AND THE WHOLE FRAMEWORK IS PLAIN C** (same decision): Apple's Core Text has NO CLASSES AT ALL — `CTFontRef`
+is a typealias and its doors are C functions, measured from Apple's own index by
+`../Fiwix/tools/coretext-sweep.py` — so the eight Objective-C classes this import declares are its own
+invention and are being replaced with Core Foundation types registered through
+`<CoreFoundation/CFRuntime.h>`, exactly as `libagora-drawing` registers `CGColor`. The end state is eighteen
+`.c` files and no `.m` at all.
+
+THE RECONSTRUCTION IS MEASURED AGAINST APPLE'S OWN SURFACE, which the Fiwix tree keeps as a ledger:
+`../Fiwix/docs/reference/coretext-apple-surface.txt` — 2032 rows, of which **1038 are already matched** (144
+of the 152 functions among them) and **534 are open**: 388 properties, 93 structs, 38 typealiases, 8
+functions, 5 unions, 2 vars. `../Fiwix/tools/coretext-sweep.py --check` verifies it offline and is the
+progress metric. `PROVENANCE.md` says what the guide is and what the disagreement costs.
+
+That is two dependencies, not three:
 
 - **`libagora-core`** (Core Foundation) — the types its API is spelled with once the conversion below is made;
 - **`libagora-drawing`** (Core Graphics) — `CGFontRef`, `CGPathRef`, `CGRect`, and the rest of its geometry.
