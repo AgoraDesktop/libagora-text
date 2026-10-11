@@ -2,10 +2,11 @@
 
 # Consume Core Text (libagora-text), Agora's Core Text.
 #
-# ALL THREE OF ITS SIBLINGS ARE FOUND, BECAUSE ALL THREE ARE IN ITS INTERFACE. A consumer of Core Text
+# BOTH OF ITS DEPENDENCIES ARE FOUND, BECAUSE BOTH ARE IN ITS INTERFACE -- AND THERE ARE TWO, NOT THREE:
+# Foundation is NOT among them and must not be, because Apple's Core Text sits BELOW Foundation (user,
+# 2026-10-11). A consumer of Core Text reaches Core Foundation itself (CFStringRef for a name,
+# CFAttributedStringRef for the text) and Core Graphics itself (CGFont, CGSize, CGRect). A consumer of Core Text
 # reaches Core Foundation itself (`CFStringRef` for a format, `CFTypeID` for what a bridged object is),
-# Foundation itself (`NSAttributedString`, `NSDictionary` of attributes -- the classes this API is built
-# around), and Core Graphics itself (`CGFontRef`, `CGRect`, `CGPathRef` -- what a line is laid out with).
 # Each is linked PUBLIC for that reason, and each is found here for the same one.
 #
 # AND IT HAS TO BE BUILT BY A COMPILER THAT ACCEPTS -fblocks, which GCC does not: the dependencies bring
@@ -16,7 +17,6 @@
 include(CMakeFindDependencyMacro)
 
 find_dependency(CoreFoundation CONFIG)
-find_dependency(Foundation CONFIG)
 find_dependency(AgoraDrawing CONFIG)
 
 if(CMAKE_C_COMPILER_ID STREQUAL "GNU")

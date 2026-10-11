@@ -1,258 +1,83 @@
 # Provenance
 
-`libagora-text` is Core Text for Agora. Its source is taken from the CoreText that lives in the Fiwix tree.
+`libagora-text` is Core Text for Agora.
+
+**THE REPOSITORY WAS STARTED OVER ON 2026-10-11.** Its first content was the whole CoreText tree from Fiwix
+(`../Fiwix/userland/CoreText`, revision `6f5d90d97763e042c3653cce376e4c1b00ef4e93`), imported verbatim as 41
+files. That import is **deleted**, and it was the wrong shape twice over: it was Objective-C over Foundation,
+and it declared eight classes that Apple's framework does not have. It remains in this repository's history at
+`d14dc67` — nothing is lost, and anything wanted as a reference can be read there — but it is not what this
+library is. Two of its fourteen implementation files had been converted to Core Foundation types before the
+restart; that work is in `e303320`, `8edaa04` and `1d3c4dd`.
 
 | | |
 |---|---|
-| Source | `../Fiwix/userland/CoreText` |
-| Source revision | Fiwix `6f5d90d97763e042c3653cce376e4c1b00ef4e93` |
-| Extraction date | 2026-10-11 |
-| Extraction | the whole `userland/CoreText` tree, verbatim — 41 files (25 `.h`, 14 `.m`, 2 `.c`) |
-| Licence | MIT, © 2026 Kyle J. Cardoza (per the per-file headers; see `LICENSE`) |
+| The library | Core Text, written from scratch against Apple's 10.6 headers |
+| Dependencies | **two**: Core Foundation (`libagora-core`) and Core Graphics (`libagora-drawing`) |
+| Language | **plain C**. Every implementation file is a `.c`; there are no classes |
+| Licence | MIT, © 2026 Kyle J. Cardoza — see `LICENSE` |
 
-THE REVISION IS NOT THE ONE `libagora-drawing` RECORDED. That import names Fiwix
-`df3147a451e88d8d2256537e6d6dcdf69471695f`; this one is from `6f5d90d9` because the tree has moved since, and a
-provenance that named the wrong revision would make the import unreproducible. The import was checked by
-`diff -r`: the copy is identical to the source, file for file.
+## The two rules, and both are Apple's
 
-AND THE LICENCE TOOK A SECOND LOOK. `Fiwix/LICENSE` is FIWIX'S OWN — "Copyright (c) 2018 Jordi Sanfeliu, et
-al.", with the kernel's authors listed below it — and the first pass at this import copied it, which is the
-wrong licence for MIT-licensed userland code whose every file header says "Copyright © 2026 Kyle J. Cardoza.
-MIT licensed — see LICENSE". `libagora-drawing/LICENSE` is the right one and this repository's is byte-identical
-to it. All sixteen implementation files carry the MIT header.
+**CORE FOUNDATION AND CORE GRAPHICS ONLY.** Apple's Core Text sits *below* Foundation (user, 2026-10-11): its
+API is Core-Foundation-typed and Foundation bridges *to* it. This library has no `find_dependency(Foundation)`
+and will not have one.
 
-## What it is
+**PLAIN C, NO OBJECTIVE-C**, which is not a style preference but a fact about the framework that the tree's own
+tooling measures. `../Fiwix/tools/coretext-sweep.py` says it outright:
 
-Core Text: the type-setting and layout half of the text stack. Thirteen public headers — `CTFont`,
-`CTFontCollection`, `CTFontDescriptor`, `CTFontManager`, `CTFrame`, `CTFramesetter`, `CTGlyphInfo`, `CTLine`,
-`CTRun`, `CTParagraphStyle`, `CTStringAttributes`, `CTTextTab`, `CTTypesetter` — plus the private ones each
-of those is written against, and two C files (`CTTypeID.c`, `CTVersion.c`) that answer type identities and
-the version. There is no build file in the source directory; the dependency surface below is read from what
-the sources include.
+> NO CLASS-CHAIN OR BLOCK-SCOPED CREDIT … CORE TEXT HAS NO CLASSES AT ALL — `CTFontRef` is a typealias, its
+> doors are C functions, and the one `protocol` in the whole framework owns one method — so there is no chain
+> to walk and no block to scope a credit to.
 
-## Why it is being changed
+measured from Apple's index's top-level children: **classes 0, protocols 1**. The deleted import disagreed: it
+declared nine classes (eight in its `.m` files and `CTFont` in its internal header), carried 145 message sends
+and 38 `@`-directives, and had sixteen `.m` files against two `.c`.
 
-**AND THE LAYERING IS THE REASON, NOT A PREFERENCE FOR ONE SPELLING OVER ANOTHER** (user, 2026-10-11).
-Apple's Core Text sits BELOW Foundation: it depends on Core Foundation and Core Graphics and on nothing else,
-its API is Core-Foundation-typed — `CTFontCreateWithName(CFStringRef, …)`,
-`CTFramesetterCreateWithAttributedString(CFAttributedStringRef)`, `CTRunGetAttributes` answering a
-`CFDictionaryRef` — and Foundation is what bridges *to* it rather than the other way round.
+## The guide
 
-**THIS IMPORT IS INVERTED**, and the build measured it rather than anyone having to argue it: after the one
-mechanical missing include was answered, the next failure was a PUBLIC header a C compiler cannot read —
+**APPLE'S 10.6 HEADERS ARE THE GUIDE, AND THEY ARE NOT IN THIS REPOSITORY.** They were downloaded (user,
+2026-10-11) from the canonical SDK mirror into `/tmp/apple-sdk106/` — 16 CoreText headers, 8 from ATS — and
+the tree's own ledger states the rule that keeps them out of here: "THE SDK ITSELF IS NOT IN THIS TREE AND IS
+NOT REDISTRIBUTABLE: what ships is this NAME LIST". What is committed is the recipe:
 
-    CoreText/CTFontDescriptor.h:90:8: error: unknown type name 'NSString'      (38 times, then it stops)
-
-— because `NSString` is in fourteen of these twenty-five headers, `NSDictionary` in nine, `NSArray` in eight,
-`NSAttributedString` in three. Apple's `CTFontDescriptor.h` says `CFStringRef` at that line.
-
-The Fiwix Core Text was written **against Foundation and on top of Core Graphics**, and Agora has both, so the
-question is which of its two bindings has to move — and the answer is Foundation: Core Graphics stays, as the
-table below shows, and every one of those Foundation classes becomes the Core Foundation type Apple's own
-header names. MEASURED, from the sources themselves:
-
-| | |
-|---|---|
-| `#import <Foundation/Foundation.h>` | 18 files |
-| `#include <CoreGraphics/CGBase.h>` | 15 files, plus `CGPath.h`, `CGGeometry.h`, and **`CGFont_internal.h`** |
-| `<ft2build.h>` | 4 files — FreeType, the same engine `libagora-drawing` uses for fonts |
-| `NSString` / `NSArray` / `NSDictionary` / `NSUInteger` / `NSRange` / `NSAttributedString` | 272 / 80 / 67 / 68 / 51 / 20 uses |
-
-SO IT SITS ON BOTH OF AGORA'S TIERS ALREADY, and neither has to be invented: `CGFontRef` is where its fonts
-come from, `CGPathRef`/`CGRect` where its geometry does, and `NSAttributedString` is the one Foundation class
-its public API is built around — which `libagora-base` has, and which the toll-free bridge work has already
-taken through the rounded trip of being a Core Foundation object that Foundation owns.
-
-WHAT IS OWED IS THE SAME CONVERSION `libagora-drawing` HAD, AND IN THE SAME ORDER: a build first, so the thing
-compiles and links against what exists, and the CF types after that, name by name, with each one recorded
-where it changed. The drawing repository's own history is the precedent — its first commit was the import and
-its second gave it a build.
-
-## The guide: Apple's surface, and where the tree keeps it
-
-**THE RECONSTRUCTION IS MEASURED AGAINST A LEDGER THE FIWIX TREE ALREADY KEEPS**, and the user's instruction
-is to use it (2026-10-11). No download is needed and none should be invented: the SDK is not redistributable
-and the tree does not pretend to ship it.
-
-| | |
-|---|---|
-| `../Fiwix/docs/reference/coretext-apple-surface.txt` | **the work list.** 2032 rows of Apple's documented surface, generated by `../Fiwix/tools/coretext-sweep.py` from Apple's own documentation index (`developer.apple.com/tutorials/data/index/coretext`). Seven columns — kind, status, name, owner, family, why, src — and three statuses |
-| `../Fiwix/docs/reference/coretext-sdk106.txt` | a PRESENCE oracle for the era: 1836 names with the header each was found in, and whether the 10.6 SDK mentions it. "The SDK itself is not in this tree and is not redistributable: what ships is this NAME LIST" |
-| `../Fiwix/docs/design/coretext-plan.md` | the plan this is milestone set against, 2239 lines |
-
-`tools/coretext-sweep.py --check` IS OFFLINE — "the only mode that touches the network" is `--refresh` — and it
-COMPARES THE LEDGER AGAINST THE HEADERS, so it is the progress metric for all of this work:
-
-    coretext-sweep: consistent — every shipped name is declared, every open name is absent, and every
-                    struck row is one the era's headers do NOT mention
-    1038 shipped · 534 open · 460 struck
-
-    func      shipped 144   struck  52   open  8     the DOORS are essentially complete
-    property  open    388   shipped  3   struck 28    the largest gap
-    struct    open     93   shipped  1   struck 21
-    typealias open     38   shipped 16   struck 14
-    union     open      5   struck   1
-    var       shipped  78   open      2   struck 52
-    case      shipped 771   struck 263   enum shipped 20, macro shipped 5
-
-SO "MATCH APPLE'S API SURFACE" HAS A SHAPE, AND IT IS NOT THE ONE THE ERROR LIST SUGGESTED. The import already
-matches 1038 of the 2032 symbols — 144 of the 152 functions among them — and what is open is the VOCABULARY:
-388 properties, 93 structs, 38 typealiases, 5 unions, 2 vars, and 8 functions.
-
-## AND THE FRAMEWORK IS C, WHICH THE LEDGER ITSELF MEASURES
-
-**Core Text must end up all plain C, not Objective-C (user, 2026-10-11), and Apple's own framework agrees:
-`tools/coretext-sweep.py` states that it has "NO CLASS-CHAIN OR BLOCK-SCOPED CREDIT … CORE TEXT HAS NO CLASSES
-AT ALL — `CTFontRef` is a typealias, its doors are C functions, and the one `protocol` in the whole framework
-owns one method — so there is no chain to walk", measured from the index's own top-level children: classes 0,
-protocols 1.**
-
-THE IMPORT DISAGREES WITH THAT, AND THIS IS THE SCOPE OF THE DISAGREEMENT, MEASURED:
-
-  8 Objective-C classes declared   CTFontCollection, CTFontDescriptor, CTFramesetter, CTGlyphInfo, CTLine,
-                                   CTParagraphStyle, CTTextTab, CTTypesetter — every one of them `: NSObject`,
-                                   and NONE of them Apple's
-  145  message sends               concentrated in CTFont (53), CTFontDescriptor (38), CTLine (26),
-                                   CTFontCollection (10), CTFontManager (8), CTFramesetter (5), CTTypesetter (5)
-  38   @-directives                @interface, @implementation, @end, and their kin
-  16   .m files                    against 2 .c — and the end state is 18 .c and no .m at all
-
-THE MECHANISM FOR REPLACING THE CLASSES IS IN THE TREE ALREADY: Core Foundation's own type runtime is
-installed (`<CoreFoundation/CFRuntime.h>`, with `_CFRuntimeRegisterClass`, `_CFRuntimeCreateInstance`,
-`_CFRuntimeGetClassWithTypeID`), and `libagora-drawing` registers its types that way — `CGColor.c` calls
-`_CFRuntimeRegisterClass(&cg_color_class)` and allocates through `_CFRuntimeCreateInstance`. A C file can do
-what an Objective-C class was doing, which is what Apple's `CTFontRef` and friends are.
-
-## THE GUIDE, FETCHED (user, 2026-10-11), AND IT IS OUTSIDE THE REPOSITORIES ON PURPOSE
-
-The user asked for Apple's 10.6 Core Text headers to be downloaded and used as the guide to what needs
-implementing. THEY ARE DOWNLOADED, and they live in `/tmp/apple-sdk106/` RATHER THAN IN THIS REPOSITORY: the
-tree's own ledger states the rule — "THE SDK ITSELF IS NOT IN THIS TREE AND IS NOT REDISTRIBUTABLE: what ships
-is this NAME LIST" — so what is kept here is the RECIPE, and the bytes stay outside.
-
-    BASE=https://raw.githubusercontent.com/phracker/MacOSX-SDKs/master/MacOSX10.6.sdk/System/Library/\
+    BASE=https://raw.githubusercontent.com/phracker/MacOSX-SDKs/master/MacOSX10.6.sdk/System/Library/\\
 Frameworks/ApplicationServices.framework/Versions/A/Frameworks
-    API=https://api.github.com/repos/phracker/MacOSX-SDKs/contents/MacOSX10.6.sdk/System/Library/\
+    API=https://api.github.com/repos/phracker/MacOSX-SDKs/contents/MacOSX10.6.sdk/System/Library/\\
 Frameworks/ApplicationServices.framework/Versions/A/Frameworks
-    # list a directory, then fetch each name from $BASE/<Framework>.framework/Versions/A/Headers/
     curl -sS "$API/CoreText.framework/Versions/A/Headers" | grep -oE '"name": *"[^"]+"'
-    # CoreText: 16 headers.  ATS (where the SFNT vocabulary lives): 8, including SFNTTypes.h and
-    # SFNTLayoutTypes.h.  Apple's SFNTLayoutTypes.h is 52181 bytes; OURS IS 13826.
+    # then, per name:  $BASE/CoreText.framework/Versions/A/Headers/<name>
+    # and the ATS headers, where the SFNT vocabulary lives:  .../ATS.framework/Versions/A/Headers/<name>
 
-### AND EVERY CONVERSION MADE SO FAR MATCHES APPLE EXACTLY
+**AND THE HEADERS ARE A GUIDE TO THE SURFACE, NOT A SOURCE TO COPY.** An API surface is a fact — a name, a
+parameter list, a value — and this library declares the same facts in its own files with its own comments.
+Apple's expression of them is Apple's.
 
-Checked signature by signature against the downloaded headers rather than trusted:
+Two more instruments live in the Fiwix tree and both were used before the restart:
 
-    Apple  CTFontRef            CTFontCreateWithName(      ours: CFStringRef name, CGFloat size, ...
-    Apple  CFStringRef          CTFontCopyName(            ours: the same
-    Apple  CFCharacterSetRef    CTFontCopyCharacterSet(    ours: CFCharacterSetRef  (the compiler's hint, confirmed)
-    Apple  CFArrayRef           CTFontCopyAvailableTables( ours: the same
-    Apple  CFDataRef            CTFontCopyTable(           ours: the same
-    Apple  CTFontDescriptorRef  CTFontDescriptorCreateWithAttributes(   ours: CFDictionaryRef
-    Apple  CFDictionaryRef      CTFontDescriptorCopyAttributes(         ours: CFDictionaryRef
+| | |
+|---|---|
+| `../Fiwix/docs/reference/coretext-apple-surface.txt` | Apple's documented surface as **2032 rows** with a status each, generated from Apple's documentation index. Read at the restart: 1038 shipped, 534 open, 460 struck — and 515 of the open rows are the AAT/SFNT structure vocabulary |
+| `../Fiwix/tools/coretext-sweep.py --check` | verifies that ledger **offline** ("the only mode that touches the network" is `--refresh`) and is therefore the progress metric for all of this work |
+| `../Fiwix/docs/reference/coretext-sdk106.txt` | a presence oracle for the era: 1836 names, each with the header it was found in |
+| `../Fiwix/docs/design/coretext-plan.md` | the plan this work is a milestone of |
 
-AND APPLE'S HEADERS SETTLE THE C QUESTION FROM THE OTHER SIDE: there is NO `#import`, `@interface` or `@class`
-anywhere in the sixteen. The CF types they use are exactly the set this conversion has been moving toward —
-`CFStringRef` in eleven files, `CFDictionaryRef` in nine, `CFArrayRef` and `CFNumberRef` in six each,
-`CFAttributedStringRef` in four, `CFURLRef`, `CFSetRef`, `CFCharacterSetRef`, `CFDataRef`, `CFErrorRef`.
+## What Apple's headers settled that no local file could
 
-### WHAT NEEDS IMPLEMENTING, SIZED FROM THE TWO INSTRUMENTS AT ONCE
-
-The ledger's 534 open rows and Apple's headers agree about where the bulk is, and it is NOT Core Text's API:
-
-    family "SFNT Support"    515 of the 534 open rows
-    Apple  SFNTLayoutTypes.h 945 lines of declarations   ours 424
-    Apple  SFNTTypes.h       372                         ours 231
-
-so roughly SIX HUNDRED AND SIXTY DECLARATION LINES of the AAT/SFNT vocabulary are missing, which is a DATA
-port of two headers rather than a behaviour to write. Every struct the ledger calls open — `ALMXHeader`,
-`ROTAGlyphEntry`, `JustPCAction`, `BslnTable` in SFNTLayoutTypes.h; `sfntVariationHeader`, `FontVariation` in
-SFNTTypes.h — is in Apple's, and the ledger's own `--check` says the open names are genuinely absent from ours.
-
-WHAT IS ACTUALLY MISSING FROM CORE TEXT ITSELF IS SMALL: SIX functions, 38 typealiases, and the singletons —
-and the 8 open functions are the next thing to read out of Apple's headers, door by door.
-
-## THE ORDER THE EIGHT OPEN FUNCTIONS FORCED, WHICH IS NOT THE ORDER THEY WERE LISTED IN
-
-Apple's eight open functions read cleanly out of the downloaded headers — `CTFontCopySupportedLanguages`,
-`CTFontCreateCopyWithSymbolicTraits`, `CTFontCreateForString`, `CTFontGetStringEncoding`,
-`CTFontGetVerticalTranslationsForGlyphs` and `CTTypesetterSuggestClusterBreak` are ordinary doors;
-`CTFontManagerCreateFontRequestRunLoopSource` wants a block and a run-loop source, which this tree HAS; and
-`CTFontCreateWithQuickdrawInstance` wants QUICKDRAW, which it does not — an owed door with its reason, the same
-shape `libagora-drawing` uses.
-
-**AND SIX OF THE EIGHT CANNOT BE WRITTEN AS PLAIN C YET, WHICH REORDERS THE WORK.** `CTFont` is not a struct:
-it is an Objective-C class, declared in `CTFont_internal.h`. A `.c` file cannot preprocess an internal header
-containing `@interface`, so NO new plain-C door can land until the class conversion does — and that is the
-C-ification, arriving as a PRECONDITION rather than as tidying.
-
-**AND `CTFont` IS THE CLASS TO CONVERT FIRST, because it is almost C already.** MEASURED, read straight out of
-`CTFont_internal.h`:
-
-    @interface CTFont : NSObject {
-        @public
-        CGFontRef           graphics;   /* RETAINED by the object's own lifetime; -dealloc releases it */
-        CGFloat             size;
-        CGAffineTransform   matrix;
-    }
-
-THREE IVARS AND EVERY ONE OF THEM IS ALREADY A C TYPE — a Core Graphics type, a `CGFloat` and a struct. THERE
-ARE NO OBJECTIVE-C OBJECTS IN IT AND NO `NS` ANYTHING. Its `-dealloc` releases a CGFontRef, which a CF type's
-FINALIZER does; its allocation becomes `_CFRuntimeCreateInstance`; its identity becomes
-`_CFRuntimeRegisterClass`. That is the pattern `libagora-drawing` already uses for `CGColor`, and it is the
-first class of nine.
-
-WHAT IS NOT MEASURED AND SHOULD NOT BE QUOTED: I tried to count the other eight classes' ivars with a `sed`
-one-liner and it reported ZERO for seven of them, which is a fact about the one-liner rather than about the
-classes. The `@interface` blocks of the other eight are formatted differently and that instrument does not
-read them. Their size is known only from their MESSAGE SEND counts — CTLine 62, CTFontDescriptor 59,
-CTFontCollection 25, CTFramesetter 23, CTTypesetter 13, CTGlyphInfo and CTTextTab 4, CTParagraphStyle 3 —
-which is the honest scale until each one is read.
+- **The dependency set is two, not three** — and the leading one of the sixteen headers states it: no
+  `#import`, no `@interface`, no `@class` anywhere in them.
+- **`ATSFontRef` IS A `UInt32`**, so `CTFont.h`'s include of `ATS/ATSTypes.h` needs no ATS header: one typedef
+  of an integer, and the doors that take it are owed doors anyway.
+- **The include graph**, which fixes the order the headers have to be written in (see `README.md`).
+- **The character→glyph step is Core Text's own**, and it is the one thing a signature cannot answer: Apple
+  deprecated Core Graphics' glyph doors, this tree struck them, and reaching a font's `cmap` is the first
+  architectural question of the restart.
 
 ## Agora changes
 
-**THE IMPORT IS STILL VERBATIM — no source file has been edited — and this section records what has been added
-around it and what has been DECIDED about it.** It is being written in the same commit as the change, which is
-what the note below asks for.
+**The restart itself is this section's first entry**: the import deleted, the build rewritten for a C-only
+library with two dependencies, and the package config's `find_dependency(Foundation)` removed.
 
-### 1. A build (`CMakeLists.txt`), and the one thing it stops on
-
-The house shape, copied from `libagora-drawing`: the include shim so these headers are `<CoreText/...>`, every
-`.m` and `.c` compiled as one target, the tree's Objective-C runtime and `-fconstant-cfstrings`, and an EXPORT
-BLOCK FROM THE FIRST COMMIT, which is where the drawing library's should have been. It configures, and then:
-
-    CTFontManager.m:32:10: fatal error: 'libconfig.h' file not found
-
-**ONE, OUT OF SIXTEEN IMPLEMENTATION FILES AND TWENTY-FIVE HEADERS.** That is the measurement this build exists
-to make: the imported source is otherwise ready to compile against what this tree already has.
-
-### 2. `libconfig` is not coming, and the store is `CFPreferences` — APPLE'S OWN MECHANISM (`dec-750b32baf39ba5cb`)
-
-The font manager keeps the set of ENABLED FONTS through Fiwix's `libconfig` — "universal configuration access
-for the FNX OS userland", four files and about 135 KB, with a `Configuration/` directory tree and first-party
-domains as its model. `CTFontManager.h` never exposed it: its doors are Apple's own. The use was two calls in
-`CTFontManager.m`, `config_set_int` and `config_get_int`, behind `CTFontManagerSetAutoActivationSetting` and
-`CTFontManagerGetAutoActivationSetting`, and THEY NOW CALL `CFPreferences` — `CFPreferencesSetAppValue` and
-`CFPreferencesCopyAppValue` with `CFPreferencesAppSynchronize` — which is what Apple's Core Text uses for the
-same job, which is Core Foundation, and which is PLIST-BACKED, so the user's chosen on-disk format is what
-lands either way. ONE MECHANISM SATISFIES BOTH CONSTRAINTS.
-
-The domain becomes the application id and the per-bundle key stays the key, which is how Fiwix's model — a file
-per domain, a key per application — maps onto Core Foundation's — where the application id IS the domain. A
-write goes to the user's own store and the read uses Core Foundation's ordinary search, so an administrator's
-default is overridden by the user's setting, which is the property that door's comment has always claimed.
-
-### 3. AND THE FINDING THAT PICKED THAT MECHANISM IS ABOUT `libagora-base`, RECORDED WHERE IT SURFACED
-
-Foundation HAS `NSUserDefaults`, and it cannot work on this machine:
-
-    *** Terminating due to uncaught exception 'NSInternalInconsistencyException', reason:
-        'NSUserDefaults: cannot create /Users/kyle/Configuration: Read-only file system'
-
-IT COMPUTED ITS STORE AS `/Users/kyle/Configuration` — the macOS home shape — AND IT IGNORED
-`XDG_CONFIG_HOME`, WHICH WAS SET. Core Foundation, by contrast, resolves the XDG configuration directories in
-`CFFileUtilities.c`, so **the two halves of this tree disagree about where a preference lives**, and the
-Foundation half is the one that cannot write. THAT IS `libagora-base`'S TO FIX AND NOT THIS LIBRARY'S; it is
-recorded here because this is where it surfaced, and because it is the second reason the store is
-`CFPreferences`: the Foundation route was measured and does not work, and the Core Foundation route is the one
-Apple's Core Text takes anyway.
+This section is changed IN THE SAME COMMIT as the change it describes, and `README.md`'s status with it. The
+previous repository got that wrong — its `PROVENANCE.md` said "not yet made" long after the work was finished
+and its `README.md` went on claiming the NS types were unconverted — and the only defence is the rule.

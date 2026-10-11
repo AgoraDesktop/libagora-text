@@ -2,24 +2,28 @@
 #
 # Agora's build for Core Text (libagora-text).
 #
-# IMPORTED FROM FIWIX AND NOT YET CONVERTED — see PROVENANCE.md. The sources are Objective-C over
-# FOUNDATION (18 of them import it) and they already sit on CORE GRAPHICS for their fonts and their
-# geometry (`CGFontRef`, `CGPathRef`, `CGRect`). So this library needs three of its siblings:
+# CORE TEXT, WRITTEN FROM SCRATCH AGAINST APPLE'S 10.6 HEADERS (user, 2026-10-11). The Fiwix import that
+# used to be here is deleted -- it was Objective-C over Foundation, and it is still in this repository's
+# history (`d14dc67`) if anything in it is ever wanted as a reference.
 #
-#   libagora-core      Core Foundation, which the target is linked with once the conversion is made
-#   libagora-base      Foundation, which the imported sources are written against today
-#   libagora-drawing   Core Graphics, for the fonts and the geometry it already uses
+# TWO DEPENDENCIES, WHICH ARE APPLE'S OWN TWO: Core Foundation (libagora-core) and Core Graphics
+# (libagora-drawing). NOT FOUNDATION, AND NOT OBJECTIVE-C. Apple's Core Text has no classes at all --
+# `CTFontRef` is a typealias and its doors are C functions, measured from Apple's own index by
+# ../Fiwix/tools/coretext-sweep.py -- so this target is `LANGUAGES C` and every implementation file is a
+# `.c`. The import was `LANGUAGES C OBJC` with fourteen `.m` files; there will be none.
 #
-# FreeType is the fourth thing it stands on, and it IS named here even though the fonts arrive as CGFontRef:
-# four of these files #include <ft2build.h> themselves, and AN INCLUDE IS NOT SOMETHING A LINK DEPENDENCY
-# CARRIES. The first version of this comment said the drawing library's link was enough, which is true for
-# the linker and false for the preprocessor.
+# THE GUIDE: Apple's 10.6 headers are downloaded to /tmp/apple-sdk106/ (16 CoreText, 8 ATS) by the recipe
+# in PROVENANCE.md, and Apple's documented surface is the ledger at
+# ../Fiwix/docs/reference/coretext-apple-surface.txt -- 2032 rows with a status each, and
+# `../Fiwix/tools/coretext-sweep.py --check` verifies it offline. THE HEADERS ARE NOT IN THIS REPOSITORY
+# AND MUST NOT BE: the tree's own ledger says the SDK "is not redistributable", so what is committed is
+# the recipe and the declarations written from it.
 #
 #===----------------------------------------------------------------------===#
 
 cmake_minimum_required(VERSION 3.24)
 
-project(AgoraText LANGUAGES C OBJC)
+project(AgoraText LANGUAGES C)
 
 include(GNUInstallDirs)
 
@@ -29,13 +33,11 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 find_package(CoreFoundation CONFIG REQUIRED)
-find_package(Foundation CONFIG REQUIRED)
 find_package(AgoraDrawing CONFIG REQUIRED)
-find_package(Freetype REQUIRED)
 
 # ---------------------------------------------------------------------------
-# Include shim: these headers are included as <CoreText/...>, and CTFont.h
-# includes its siblings the same way.
+# Include shim: these headers are included as <CoreText/...>, which is how
+# Apple's own include each other and how a consumer writes them.
 # ---------------------------------------------------------------------------
 set(_agora_include_dir "${CMAKE_BINARY_DIR}/agora-include")
 file(REMOVE_RECURSE "${_agora_include_dir}")
@@ -43,14 +45,19 @@ file(MAKE_DIRECTORY "${_agora_include_dir}")
 file(CREATE_LINK "${CMAKE_CURRENT_SOURCE_DIR}" "${_agora_include_dir}/CoreText" SYMBOLIC)
 
 # ---------------------------------------------------------------------------
-# The library: every .m and .c in the directory. THE OBJECTIVE-C FILES ARE NOT A
-# SUBSET HERE, unlike libagora-core's dispatch translation units: this library is
-# Objective-C by construction -- 14 of its 16 implementation files -- so the whole
-# target is compiled with the tree's runtime and the cfstrings convention.
+# The library: every .c in the directory. THERE ARE NONE YET, and that is a
+# state rather than an accident: the surface is being written in Apple's own
+# include order -- CTFontTraits, CTFontDescriptor, CTFont, then the layout
+# headers above them -- and the first implementation file arrives with the first
+# type that has behaviour.
 # ---------------------------------------------------------------------------
-file(GLOB TEXT_SOURCES CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/*.m"
-    "${CMAKE_CURRENT_SOURCE_DIR}/*.c")
+file(GLOB TEXT_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.c")
+
+if(NOT TEXT_SOURCES)
+  message(FATAL_ERROR
+    "libagora-text has no implementation files yet: the public surface is being written first, in the "
+    "order Apple's headers include each other. See README.md for where that has got to.")
+endif()
 
 add_library(Text SHARED ${TEXT_SOURCES})
 
@@ -63,33 +70,15 @@ target_include_directories(Text
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}")
 
-# CORE FOUNDATION AND THE TWO SIBLINGS ARE PUBLIC, THE WAY THEY ARE IN BOTH OTHER LIBRARIES: a consumer of
-# Core Text reaches all three itself -- CFStringRef for a format, NSAttributedString for the attributes, and
-# CGFontRef and CGRect for what a line is laid out with. A PRIVATE link would fail at that consumer's first
-# call, which is how exactly that was found when libagora-drawing got its first client.
+# CORE FOUNDATION AND CORE GRAPHICS ARE PUBLIC, BECAUSE A CONSUMER OF CORE TEXT REACHES BOTH ITSELF:
+# CFStringRef for a name, CFAttributedStringRef for the text being laid out, CGFont/CGSize/CGRect for what
+# a line is measured and drawn with. A PRIVATE link would fail at that consumer's first call -- the reason
+# libagora-drawing's own Core Foundation link had to be made public when it got its first client.
 target_link_libraries(Text
     PUBLIC
         CoreFoundation::CoreFoundation
-        Foundation::Foundation
-        AgoraDrawing::Drawing
-    PRIVATE
-        Freetype::Freetype
-        objc)
+        AgoraDrawing::Drawing)
 
-target_compile_options(Text PRIVATE
-    -fobjc-runtime=gnustep-2.0
-    -fblocks
-    -fconstant-cfstrings
-    -Wno-objc-missing-super-calls
-    -Wno-incomplete-implementation
-    -Wno-objc-root-class)
-
-# ---------------------------------------------------------------------------
-# Install and export. THE EXPORT IS HERE FROM THE FIRST COMMIT, which is where
-# libagora-drawing's should have been: it installed a library and a directory of
-# headers and no package, so nothing could find_package it, and a client written
-# later found the library's own Core Foundation link PRIVATE for the same reason.
-# ---------------------------------------------------------------------------
 install(DIRECTORY . DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/CoreText
         FILES_MATCHING PATTERN "*.h")
 install(TARGETS Text
