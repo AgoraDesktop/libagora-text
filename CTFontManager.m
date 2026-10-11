@@ -29,7 +29,16 @@
  * libconfig for the reason `cg_font_create_with_name` records: it has no domain of its own, so reading one
  * would be reading someone else's. This framework HAS one — `system.fontmanager` — which is the whole
  * difference. */
-#include <libconfig.h>
+/* AND THE PREFERENCE STORE IS CORE FOUNDATION'S, WHICH IS BOTH WHAT APPLE DOES AND WHAT THIS LIBRARY'S
+ * LAYERING REQUIRES (user, `dec-750b32baf39ba5cb`, corrected the same day). Core Text sits BELOW Foundation:
+ * Apple's own Core Text depends on Core Foundation and Core Graphics and on nothing else, and it keeps its
+ * font-manager state through `CFPreferences` -- which is what the doors below now call, and which is
+ * plist-backed, so Apple's FORMAT is what lands on disk either way.
+ *
+ * THE INCLUDE THAT STOOD HERE WAS FIWIX'S, NOT THIS TREE'S: `<libconfig.h>`, "universal configuration access
+ * for the FNX OS userland", four files and about 135 KB of Configuration/-directory machinery. It was the ONE
+ * thing the first build of this import stopped on, out of sixteen implementation files. */
+#include <CoreFoundation/CoreFoundation.h>
 
 /* **THE MATCHER'S ENABLE/DISABLE SET LIVES WITH THE MATCHER** (CT-M7k) — see `CTFontDescriptor_internal.h`
  * for why the list is there rather than here. */
@@ -471,8 +480,18 @@ void CTFontManagerSetAutoActivationSetting(NSString *bundleIdentifier, CTFontMan
 	if (key == nil) {
 		return;	/* no key to write under; see the header */
 	}
-	(void)config_set_int(CONFIG_SCOPE_USER, CT_FONT_MANAGER_SETTINGS_DOMAIN, [key UTF8String],
-			     (long)setting);
+	/* THE DOMAIN IS THE APPLICATION ID AND THE KEY IS THE PER-BUNDLE ONE, which is how Fiwix's model -- a file
+	 * per domain, a key per application -- maps onto Core Foundation's, where the application id IS the
+	 * domain. A WRITE GOES TO THE USER'S OWN STORE and the read below goes through Core Foundation's ordinary
+	 * search, so an administrator's default is overridden by the user's setting rather than the other way
+	 * round, which is the property the comment above this function has always claimed. */
+	CFNumberRef value = CFNumberCreate(kCFAllocatorDefault, kCFNumberLongType, &setting);
+
+	if (value != NULL) {
+		CFPreferencesSetAppValue((CFStringRef)key, value, (CFStringRef)CT_FONT_MANAGER_SETTINGS_DOMAIN);
+		CFPreferencesAppSynchronize((CFStringRef)CT_FONT_MANAGER_SETTINGS_DOMAIN);
+		CFRelease(value);
+	}
 }
 
 CTFontManagerAutoActivationSetting CTFontManagerGetAutoActivationSetting(NSString *bundleIdentifier)
@@ -483,10 +502,21 @@ CTFontManagerAutoActivationSetting CTFontManagerGetAutoActivationSetting(NSStrin
 	if (key == nil) {
 		return kCTFontManagerAutoActivationDefault;
 	}
-	if (config_get_int(CT_FONT_MANAGER_SETTINGS_DOMAIN, [key UTF8String], &value) != CONFIG_OK) {
-		/* "Default is false" for the disable flag and "default" for this setting: a key that was never written
-		 * is the era's own DEFAULT, not an error a caller has to interpret. */
-		return kCTFontManagerAutoActivationDefault;
+	{
+		CFNumberRef stored = (CFNumberRef)CFPreferencesCopyAppValue(
+			(CFStringRef)key, (CFStringRef)CT_FONT_MANAGER_SETTINGS_DOMAIN);
+
+		if (stored == NULL || CFGetTypeID(stored) != CFNumberGetTypeID() ||
+		    !CFNumberGetValue(stored, kCFNumberLongType, &value)) {
+			/* "Default is false" for the disable flag and "default" for this setting: a key that was never written
+			 * is the era's own DEFAULT, not an error a caller has to interpret. A stored value that is somehow
+			 * not a number is treated the same way rather than trusted. */
+			if (stored != NULL) {
+				CFRelease(stored);
+			}
+			return kCTFontManagerAutoActivationDefault;
+		}
+		CFRelease(stored);
 	}
 	return (CTFontManagerAutoActivationSetting)value;
 }

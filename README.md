@@ -5,12 +5,20 @@ descriptors, the attributes a run of text carries, and the line-, run- and frame
 string and a width into glyphs in the right places.
 
 Agora is an installable desktop environment for Linux and BSD; see the project README in the parent directory
-(`../README.md`). `libagora-text` sits on three of its siblings already:
+(`../README.md`).
+
+**APPLE'S CORE TEXT SITS BELOW FOUNDATION, AND SO MUST THIS ONE** (user, 2026-10-11): it depends on Core
+Foundation and Core Graphics and on nothing else, and Foundation is what bridges *to* it. That is two
+dependencies, not three:
 
 - **`libagora-core`** (Core Foundation) — the types its API is spelled with once the conversion below is made;
-- **`libagora-drawing`** (Core Graphics) — `CGFontRef`, `CGPathRef`, `CGRect`, and the rest of its geometry;
-- **`libagora-base`** (Foundation) — `NSAttributedString`, which its public API is built around, and the
-  `NSDictionary` of attributes every one of its calls takes.
+- **`libagora-drawing`** (Core Graphics) — `CGFontRef`, `CGPathRef`, `CGRect`, and the rest of its geometry.
+
+**THE IMPORT SITS ON FOUNDATION AS WELL, AND THAT IS THE HALF OF THE CONVERSION STILL OWED.** It imports
+`Foundation/Foundation.h` in eighteen files and spells its public API with Foundation classes where Apple's
+headers name Core Foundation types — `NSString` in fourteen of the twenty-five headers, `NSDictionary` in
+nine, `NSArray` in eight, `NSAttributedString` in three. That is why a C compiler cannot read
+`CTFontDescriptor.h` today, which is the first thing the build says once its imports are satisfied.
 
 ## Provenance
 
@@ -20,9 +28,12 @@ licence took a second look.
 
 ## Status
 
-**Imported, and the build is written: it configures and stops on exactly one include.** The NS types have
-not been converted back to CF yet, which is the larger half and comes after the build — `PROVENANCE.md` says
-why that order, and records the decisions taken in the same commits as the changes.
+**Imported, and the build is written: it configures and gets as far as the public headers.** The one
+mechanical include it was missing — Fiwix's `libconfig`, for the font manager's preference store — is answered,
+and the store is now Core Foundation's own `CFPreferences`, which is Apple's mechanism for it. What it stops on
+next is the layering: **38 × `error: unknown type name 'NSString'` in `CTFontDescriptor.h`**, because a public
+header is Foundation-typed where Apple's is not. That conversion is the next unit and it is not tidying —
+`PROVENANCE.md` says why.
 
 ### What the import brings with it, measured rather than assumed
 
@@ -47,12 +58,9 @@ why that order, and records the decisions taken in the same commits as the chang
 
 ### What is not done
 
-- **The build does not finish, on one include.** `CTFontManager.m` wants Fiwix's `libconfig` for the set of
-  ENABLED FONTS — a 135 KB FNX-OS configuration library that is not coming, because the preference format is
-  Apple's plist (`dec-750b32baf39ba5cb`). A plist-backed store replaces its two calls, and the thing that store
-  would naturally sit on — Foundation's `NSUserDefaults` — cannot work on this machine: it computes
-  `/Users/<user>/Configuration`, ignores `XDG_CONFIG_HOME`, and throws. Measured, and recorded in
-  `PROVENANCE.md` because it is a finding about `libagora-base` rather than about this library.
+- **The build does not finish, on the layering.** The public headers are Foundation-typed, so a C
+  translation unit cannot include them: 38 errors, all `unknown type name 'NSString'`. Converting them is the
+  next unit, and the conversion is a LAYER rather than a spelling — `PROVENANCE.md` has the shape of it.
 - **No test suite.** `libagora-drawing`'s suite exists because nothing else held that library; the same will
   be true here, and its own history shows a suite finds far more defects in its *instrument* than in the
   library — nineteen cases against twelve instrument errors.

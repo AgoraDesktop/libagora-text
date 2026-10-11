@@ -32,8 +32,24 @@ the sources include.
 
 ## Why it is being changed
 
+**AND THE LAYERING IS THE REASON, NOT A PREFERENCE FOR ONE SPELLING OVER ANOTHER** (user, 2026-10-11).
+Apple's Core Text sits BELOW Foundation: it depends on Core Foundation and Core Graphics and on nothing else,
+its API is Core-Foundation-typed — `CTFontCreateWithName(CFStringRef, …)`,
+`CTFramesetterCreateWithAttributedString(CFAttributedStringRef)`, `CTRunGetAttributes` answering a
+`CFDictionaryRef` — and Foundation is what bridges *to* it rather than the other way round.
+
+**THIS IMPORT IS INVERTED**, and the build measured it rather than anyone having to argue it: after the one
+mechanical missing include was answered, the next failure was a PUBLIC header a C compiler cannot read —
+
+    CoreText/CTFontDescriptor.h:90:8: error: unknown type name 'NSString'      (38 times, then it stops)
+
+— because `NSString` is in fourteen of these twenty-five headers, `NSDictionary` in nine, `NSArray` in eight,
+`NSAttributedString` in three. Apple's `CTFontDescriptor.h` says `CFStringRef` at that line.
+
 The Fiwix Core Text was written **against Foundation and on top of Core Graphics**, and Agora has both, so the
-question is which of its two bindings has to move. MEASURED, from the sources themselves:
+question is which of its two bindings has to move — and the answer is Foundation: Core Graphics stays, as the
+table below shows, and every one of those Foundation classes becomes the Core Foundation type Apple's own
+header names. MEASURED, from the sources themselves:
 
 | | |
 |---|---|
@@ -69,18 +85,23 @@ BLOCK FROM THE FIRST COMMIT, which is where the drawing library's should have be
 **ONE, OUT OF SIXTEEN IMPLEMENTATION FILES AND TWENTY-FIVE HEADERS.** That is the measurement this build exists
 to make: the imported source is otherwise ready to compile against what this tree already has.
 
-### 2. `libconfig` is not coming, and the preference format is APPLE'S PLIST (user, `dec-750b32baf39ba5cb`)
+### 2. `libconfig` is not coming, and the store is `CFPreferences` — APPLE'S OWN MECHANISM (`dec-750b32baf39ba5cb`)
 
 The font manager keeps the set of ENABLED FONTS through Fiwix's `libconfig` — "universal configuration access
-for the FNX OS userland", five files, about 135 KB, with a `Configuration/` directory tree and first-party
-domains as its model. `CTFontManager.h` does not expose it: its doors are Apple's own
-(`CTFontManagerCopyAvailableFontFamilyNames`, `…RegisterFontsForURL`, `…GetScopeForURL`,
-`…CompareFontFamilyNames`), and `libconfig` appears there in comments only. The use is two calls in
-`CTFontManager.m` — `config_set_int` and `config_get_int` — behind `CTFontManagerSetAutoActivationSetting` and
-`CTFontManagerGetAutoActivationSetting`. A PLIST-BACKED STORE REPLACES THEM, which is what Apple's Core Text
-does with a per-application preference.
+for the FNX OS userland", four files and about 135 KB, with a `Configuration/` directory tree and first-party
+domains as its model. `CTFontManager.h` never exposed it: its doors are Apple's own. The use was two calls in
+`CTFontManager.m`, `config_set_int` and `config_get_int`, behind `CTFontManagerSetAutoActivationSetting` and
+`CTFontManagerGetAutoActivationSetting`, and THEY NOW CALL `CFPreferences` — `CFPreferencesSetAppValue` and
+`CFPreferencesCopyAppValue` with `CFPreferencesAppSynchronize` — which is what Apple's Core Text uses for the
+same job, which is Core Foundation, and which is PLIST-BACKED, so the user's chosen on-disk format is what
+lands either way. ONE MECHANISM SATISFIES BOTH CONSTRAINTS.
 
-### 3. AND WHAT THAT WOULD BE BUILT ON IS NOT READY EITHER — MEASURED, AND IT IS A FINDING ABOUT `libagora-base`
+The domain becomes the application id and the per-bundle key stays the key, which is how Fiwix's model — a file
+per domain, a key per application — maps onto Core Foundation's — where the application id IS the domain. A
+write goes to the user's own store and the read uses Core Foundation's ordinary search, so an administrator's
+default is overridden by the user's setting, which is the property that door's comment has always claimed.
+
+### 3. AND THE FINDING THAT PICKED THAT MECHANISM IS ABOUT `libagora-base`, RECORDED WHERE IT SURFACED
 
 Foundation HAS `NSUserDefaults`, and it cannot work on this machine:
 
@@ -88,17 +109,9 @@ Foundation HAS `NSUserDefaults`, and it cannot work on this machine:
         'NSUserDefaults: cannot create /Users/kyle/Configuration: Read-only file system'
 
 IT COMPUTED ITS STORE AS `/Users/kyle/Configuration` — the macOS home shape — AND IT IGNORED
-`XDG_CONFIG_HOME`, WHICH WAS SET. Core Foundation, by contrast, implements the XDG config directories in
-`CFFileUtilities.c` (`$XDG_CONFIG_HOME`, `$XDG_CONFIG_DIRS`), so **the two halves of this tree disagree about
-where a preference lives**, and the Foundation half is the one that cannot write.
-
-THAT IS NOT THIS LIBRARY'S BUG AND IT IS NOT THIS COMMIT'S TO FIX. It is recorded here because this is where it
-surfaced, and it gives the replacement above two routes: a small plist store local to `CTFontManager.m`, or
-Foundation's `NSUserDefaults` fixed to use the directories Core Foundation already resolves — the second being
-the one that would make this library's code look like Apple's.
-
-A NOTE ON HOW THIS FILE STAYS TRUE, because the same sentence in `libagora-drawing/PROVENANCE.md` said "not
-yet made" for a long stretch after the work was finished, and its README went on claiming the NS types had not
-been converted and that lcms2 was not installed on the machine. THAT IS THE ONE MISTAKE THIS TREE HAS MADE
-REPEATEDLY: a status sentence that is not re-read against the code. So: this section is changed IN THE SAME
-COMMIT as the change it describes, and `README.md`'s status section with it.
+`XDG_CONFIG_HOME`, WHICH WAS SET. Core Foundation, by contrast, resolves the XDG configuration directories in
+`CFFileUtilities.c`, so **the two halves of this tree disagree about where a preference lives**, and the
+Foundation half is the one that cannot write. THAT IS `libagora-base`'S TO FIX AND NOT THIS LIBRARY'S; it is
+recorded here because this is where it surfaced, and because it is the second reason the store is
+`CFPreferences`: the Foundation route was measured and does not work, and the Core Foundation route is the one
+Apple's Core Text takes anyway.
