@@ -123,6 +123,55 @@ installed (`<CoreFoundation/CFRuntime.h>`, with `_CFRuntimeRegisterClass`, `_CFR
 `_CFRuntimeRegisterClass(&cg_color_class)` and allocates through `_CFRuntimeCreateInstance`. A C file can do
 what an Objective-C class was doing, which is what Apple's `CTFontRef` and friends are.
 
+## THE GUIDE, FETCHED (user, 2026-10-11), AND IT IS OUTSIDE THE REPOSITORIES ON PURPOSE
+
+The user asked for Apple's 10.6 Core Text headers to be downloaded and used as the guide to what needs
+implementing. THEY ARE DOWNLOADED, and they live in `/tmp/apple-sdk106/` RATHER THAN IN THIS REPOSITORY: the
+tree's own ledger states the rule — "THE SDK ITSELF IS NOT IN THIS TREE AND IS NOT REDISTRIBUTABLE: what ships
+is this NAME LIST" — so what is kept here is the RECIPE, and the bytes stay outside.
+
+    BASE=https://raw.githubusercontent.com/phracker/MacOSX-SDKs/master/MacOSX10.6.sdk/System/Library/\
+Frameworks/ApplicationServices.framework/Versions/A/Frameworks
+    API=https://api.github.com/repos/phracker/MacOSX-SDKs/contents/MacOSX10.6.sdk/System/Library/\
+Frameworks/ApplicationServices.framework/Versions/A/Frameworks
+    # list a directory, then fetch each name from $BASE/<Framework>.framework/Versions/A/Headers/
+    curl -sS "$API/CoreText.framework/Versions/A/Headers" | grep -oE '"name": *"[^"]+"'
+    # CoreText: 16 headers.  ATS (where the SFNT vocabulary lives): 8, including SFNTTypes.h and
+    # SFNTLayoutTypes.h.  Apple's SFNTLayoutTypes.h is 52181 bytes; OURS IS 13826.
+
+### AND EVERY CONVERSION MADE SO FAR MATCHES APPLE EXACTLY
+
+Checked signature by signature against the downloaded headers rather than trusted:
+
+    Apple  CTFontRef            CTFontCreateWithName(      ours: CFStringRef name, CGFloat size, ...
+    Apple  CFStringRef          CTFontCopyName(            ours: the same
+    Apple  CFCharacterSetRef    CTFontCopyCharacterSet(    ours: CFCharacterSetRef  (the compiler's hint, confirmed)
+    Apple  CFArrayRef           CTFontCopyAvailableTables( ours: the same
+    Apple  CFDataRef            CTFontCopyTable(           ours: the same
+    Apple  CTFontDescriptorRef  CTFontDescriptorCreateWithAttributes(   ours: CFDictionaryRef
+    Apple  CFDictionaryRef      CTFontDescriptorCopyAttributes(         ours: CFDictionaryRef
+
+AND APPLE'S HEADERS SETTLE THE C QUESTION FROM THE OTHER SIDE: there is NO `#import`, `@interface` or `@class`
+anywhere in the sixteen. The CF types they use are exactly the set this conversion has been moving toward —
+`CFStringRef` in eleven files, `CFDictionaryRef` in nine, `CFArrayRef` and `CFNumberRef` in six each,
+`CFAttributedStringRef` in four, `CFURLRef`, `CFSetRef`, `CFCharacterSetRef`, `CFDataRef`, `CFErrorRef`.
+
+### WHAT NEEDS IMPLEMENTING, SIZED FROM THE TWO INSTRUMENTS AT ONCE
+
+The ledger's 534 open rows and Apple's headers agree about where the bulk is, and it is NOT Core Text's API:
+
+    family "SFNT Support"    515 of the 534 open rows
+    Apple  SFNTLayoutTypes.h 945 lines of declarations   ours 424
+    Apple  SFNTTypes.h       372                         ours 231
+
+so roughly SIX HUNDRED AND SIXTY DECLARATION LINES of the AAT/SFNT vocabulary are missing, which is a DATA
+port of two headers rather than a behaviour to write. Every struct the ledger calls open — `ALMXHeader`,
+`ROTAGlyphEntry`, `JustPCAction`, `BslnTable` in SFNTLayoutTypes.h; `sfntVariationHeader`, `FontVariation` in
+SFNTTypes.h — is in Apple's, and the ledger's own `--check` says the open names are genuinely absent from ours.
+
+WHAT IS ACTUALLY MISSING FROM CORE TEXT ITSELF IS SMALL: SIX functions, 38 typealiases, and the singletons —
+and the 8 open functions are the next thing to read out of Apple's headers, door by door.
+
 ## Agora changes
 
 **THE IMPORT IS STILL VERBATIM — no source file has been edited — and this section records what has been added
