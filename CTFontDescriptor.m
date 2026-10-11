@@ -48,28 +48,28 @@
 /* -------------------------------------------------------------------------------------------------
  * THE ATTRIBUTE KEYS, in Apple's own order in its own header.
  * ---------------------------------------------------------------------------------------------- */
-NSString *const kCTFontURLAttribute = @"CTFontURL";
-NSString *const kCTFontNameAttribute = @"CTFontName";
-NSString *const kCTFontDisplayNameAttribute = @"CTFontDisplayName";
-NSString *const kCTFontFamilyNameAttribute = @"CTFontFamilyName";
-NSString *const kCTFontStyleNameAttribute = @"CTFontStyleName";
-NSString *const kCTFontTraitsAttribute = @"CTFontTraits";
-NSString *const kCTFontVariationAttribute = @"CTFontVariation";
-NSString *const kCTFontSizeAttribute = @"CTFontSize";
-NSString *const kCTFontMatrixAttribute = @"CTFontMatrix";
-NSString *const kCTFontCascadeListAttribute = @"CTFontCascadeList";
-NSString *const kCTFontCharacterSetAttribute = @"CTFontCharacterSet";
-NSString *const kCTFontLanguagesAttribute = @"CTFontLanguages";
-NSString *const kCTFontBaselineAdjustAttribute = @"CTFontBaselineAdjust";
-NSString *const kCTFontMacintoshEncodingsAttribute = @"CTFontMacintoshEncodings";
-NSString *const kCTFontFeaturesAttribute = @"CTFontFeatures";
-NSString *const kCTFontFeatureSettingsAttribute = @"CTFontFeatureSettings";
-NSString *const kCTFontFixedAdvanceAttribute = @"CTFontFixedAdvance";
-NSString *const kCTFontOrientationAttribute = @"CTFontOrientation";
-NSString *const kCTFontFormatAttribute = @"CTFontFormat";
-NSString *const kCTFontRegistrationScopeAttribute = @"CTFontRegistrationScope";
-NSString *const kCTFontPriorityAttribute = @"CTFontPriority";
-NSString *const kCTFontEnabledAttribute = @"CTFontEnabled";
+const CFStringRef kCTFontURLAttribute = CFSTR("CTFontURL");
+const CFStringRef kCTFontNameAttribute = CFSTR("CTFontName");
+const CFStringRef kCTFontDisplayNameAttribute = CFSTR("CTFontDisplayName");
+const CFStringRef kCTFontFamilyNameAttribute = CFSTR("CTFontFamilyName");
+const CFStringRef kCTFontStyleNameAttribute = CFSTR("CTFontStyleName");
+const CFStringRef kCTFontTraitsAttribute = CFSTR("CTFontTraits");
+const CFStringRef kCTFontVariationAttribute = CFSTR("CTFontVariation");
+const CFStringRef kCTFontSizeAttribute = CFSTR("CTFontSize");
+const CFStringRef kCTFontMatrixAttribute = CFSTR("CTFontMatrix");
+const CFStringRef kCTFontCascadeListAttribute = CFSTR("CTFontCascadeList");
+const CFStringRef kCTFontCharacterSetAttribute = CFSTR("CTFontCharacterSet");
+const CFStringRef kCTFontLanguagesAttribute = CFSTR("CTFontLanguages");
+const CFStringRef kCTFontBaselineAdjustAttribute = CFSTR("CTFontBaselineAdjust");
+const CFStringRef kCTFontMacintoshEncodingsAttribute = CFSTR("CTFontMacintoshEncodings");
+const CFStringRef kCTFontFeaturesAttribute = CFSTR("CTFontFeatures");
+const CFStringRef kCTFontFeatureSettingsAttribute = CFSTR("CTFontFeatureSettings");
+const CFStringRef kCTFontFixedAdvanceAttribute = CFSTR("CTFontFixedAdvance");
+const CFStringRef kCTFontOrientationAttribute = CFSTR("CTFontOrientation");
+const CFStringRef kCTFontFormatAttribute = CFSTR("CTFontFormat");
+const CFStringRef kCTFontRegistrationScopeAttribute = CFSTR("CTFontRegistrationScope");
+const CFStringRef kCTFontPriorityAttribute = CFSTR("CTFontPriority");
+const CFStringRef kCTFontEnabledAttribute = CFSTR("CTFontEnabled");
 
 /* =================================================================================================
  * THE CLASS ITSELF — `dec-35c114bf75c7c2d7` (user, 2026-10-09): A CORE TEXT OBJECT IS A REAL
@@ -126,7 +126,7 @@ void CTFontDescriptorRelease(CTFontDescriptorRef descriptor)
  * refusal — Apple's door takes a dictionary and says nothing about NULL, while a descriptor with no
  * attributes is a perfectly ordinary descriptor ("the global cascade list is used" is what an absent
  * cascade means, and the default size is 12.0 when none is given). */
-static CTFontDescriptorRef ctf_descriptor_with_dictionary(NSDictionary *attributes)
+static CTFontDescriptorRef ctf_descriptor_with_dictionary(CFDictionaryRef attributes)
 {
 	CTFontDescriptor *d = [[CTFontDescriptor alloc] init];
 
@@ -135,16 +135,24 @@ static CTFontDescriptorRef ctf_descriptor_with_dictionary(NSDictionary *attribut
 	}
 	/* NO `retain = 1` LINE ANY MORE: `+alloc` comes back with a count of one, which is what that line
 	 * was spelling by hand. */
-	d->attributes = [(attributes != nil) ? attributes : [NSDictionary dictionary] retain];
+	/* THE FALLBACK IS SPELLED AS A Core Foundation DICTIONARY, WHICH IS WHERE THIS FIELD IS GOING, AND THE
+	 * CAST IS THE BRIDGE RATHER THAN A WORKAROUND. The signature above is `CFDictionaryRef` now -- Apple's --
+	 * while the BODY is still Foundation's, so a conditional expression mixing the two is not something clang
+	 * will type: "incompatible operand types ('CFDictionaryRef' ... and 'NSDictionary * _Nonnull')". The
+	 * object is the same one either way; THE BODY IS THE NEXT SLICE and this is the seam it will cross. */
+	if (attributes == nil) {
+		attributes = (CFDictionaryRef)[NSDictionary dictionary];
+	}
+	d->attributes = [attributes retain];
 	return (CTFontDescriptorRef)(uintptr_t)d;
 }
 
-CTFontDescriptorRef CTFontDescriptorCreateWithAttributes(NSDictionary *attributes)
+CTFontDescriptorRef CTFontDescriptorCreateWithAttributes(CFDictionaryRef attributes)
 {
 	return ctf_descriptor_with_dictionary(attributes);
 }
 
-CTFontDescriptorRef CTFontDescriptorCreateWithNameAndSize(NSString *name, CGFloat size)
+CTFontDescriptorRef CTFontDescriptorCreateWithNameAndSize(CFStringRef name, CGFloat size)
 {
 	NSMutableDictionary *attributes = [NSMutableDictionary dictionary];
 
@@ -205,7 +213,7 @@ CTFontDescriptorRef CTFontDescriptorCreateCopyWithAttributes(CTFontDescriptorRef
 	return ctf_descriptor_with_dictionary(merged);
 }
 
-NSDictionary *CTFontDescriptorCopyAttributes(CTFontDescriptorRef descriptor)
+CFDictionaryRef CTFontDescriptorCopyAttributes(CTFontDescriptorRef descriptor)
 {
 	if (descriptor == NULL) {
 		return nil;
@@ -323,7 +331,7 @@ CTFontDescriptorRef ctf_descriptor_from_font(CTFontRef font)
  * ================================================================================================== */
 
 /* "A retained reference to the requested attribute, or **NULL if** the requested attribute is not present." */
-CFTypeRef CTFontDescriptorCopyAttribute(CTFontDescriptorRef descriptor, NSString *attribute)
+CFTypeRef CTFontDescriptorCopyAttribute(CTFontDescriptorRef descriptor, CFStringRef attribute)
 {
 	if (descriptor == NULL || attribute == nil) {
 		return NULL;
@@ -336,7 +344,7 @@ CFTypeRef CTFontDescriptorCopyAttribute(CTFontDescriptorRef descriptor, NSString
  * `CTFontDescriptorCopyAttribute()`**." The global language list is a SYSTEM input this tier does not have, and
  * the era says what to do without it — so this is the door's own answer rather than a stub, and `*language` is
  * left NULL, which the contract allows. */
-CFTypeRef CTFontDescriptorCopyLocalizedAttribute(CTFontDescriptorRef descriptor, NSString *attribute,
+CFTypeRef CTFontDescriptorCopyLocalizedAttribute(CTFontDescriptorRef descriptor, CFStringRef attribute,
 						 NSString **language)
 {
 	if (language != NULL) {

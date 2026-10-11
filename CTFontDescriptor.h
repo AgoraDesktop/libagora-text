@@ -34,7 +34,10 @@
 #ifndef CORE_TEXT_CTFONTDESCRIPTOR_H
 #define CORE_TEXT_CTFONTDESCRIPTOR_H
 
+#include <CoreFoundation/CFDictionary.h>
+#include <CoreFoundation/CFString.h>
 #include <CoreGraphics/CGBase.h>
+
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -87,28 +90,28 @@ typedef uint32_t CTFontOrientation;
  * `CFDataRef`, a dictionary) and never the strings, and a key is only ever compared with the constants
  * declared beside it.
  * ---------------------------------------------------------------------------------------------- */
-extern NSString *const kCTFontURLAttribute;
-extern NSString *const kCTFontNameAttribute;
-extern NSString *const kCTFontDisplayNameAttribute;
-extern NSString *const kCTFontFamilyNameAttribute;
-extern NSString *const kCTFontStyleNameAttribute;
-extern NSString *const kCTFontTraitsAttribute;
-extern NSString *const kCTFontVariationAttribute;
-extern NSString *const kCTFontSizeAttribute;
-extern NSString *const kCTFontMatrixAttribute;
-extern NSString *const kCTFontCascadeListAttribute;
-extern NSString *const kCTFontCharacterSetAttribute;
-extern NSString *const kCTFontLanguagesAttribute;
-extern NSString *const kCTFontBaselineAdjustAttribute;
-extern NSString *const kCTFontMacintoshEncodingsAttribute;
-extern NSString *const kCTFontFeaturesAttribute;
-extern NSString *const kCTFontFeatureSettingsAttribute;
-extern NSString *const kCTFontFixedAdvanceAttribute;
-extern NSString *const kCTFontOrientationAttribute;
-extern NSString *const kCTFontFormatAttribute;
-extern NSString *const kCTFontRegistrationScopeAttribute;
-extern NSString *const kCTFontPriorityAttribute;
-extern NSString *const kCTFontEnabledAttribute;
+extern const CFStringRef kCTFontURLAttribute;
+extern const CFStringRef kCTFontNameAttribute;
+extern const CFStringRef kCTFontDisplayNameAttribute;
+extern const CFStringRef kCTFontFamilyNameAttribute;
+extern const CFStringRef kCTFontStyleNameAttribute;
+extern const CFStringRef kCTFontTraitsAttribute;
+extern const CFStringRef kCTFontVariationAttribute;
+extern const CFStringRef kCTFontSizeAttribute;
+extern const CFStringRef kCTFontMatrixAttribute;
+extern const CFStringRef kCTFontCascadeListAttribute;
+extern const CFStringRef kCTFontCharacterSetAttribute;
+extern const CFStringRef kCTFontLanguagesAttribute;
+extern const CFStringRef kCTFontBaselineAdjustAttribute;
+extern const CFStringRef kCTFontMacintoshEncodingsAttribute;
+extern const CFStringRef kCTFontFeaturesAttribute;
+extern const CFStringRef kCTFontFeatureSettingsAttribute;
+extern const CFStringRef kCTFontFixedAdvanceAttribute;
+extern const CFStringRef kCTFontOrientationAttribute;
+extern const CFStringRef kCTFontFormatAttribute;
+extern const CFStringRef kCTFontRegistrationScopeAttribute;
+extern const CFStringRef kCTFontPriorityAttribute;
+extern const CFStringRef kCTFontEnabledAttribute;
 
 /* THE REFERENCE COUNT, THIS TIER'S DOOR RATHER THAN APPLE'S (a `CTFontDescriptorRef` is a CFType and
  * there is no CoreFoundation here), exactly as `CTFontRetain`/`CTFontRelease` are. No ledger row. */
@@ -122,13 +125,13 @@ void CTFontDescriptorRelease(CTFontDescriptorRef descriptor);
 /* THE THREE CONSTRUCTORS. `CreateWithNameAndSize` OMITS the size attribute when 0.0 is passed (Apple's
  * own sentence), which is why "absent" is a state this class has; `CreateCopyWithAttributes` augments its
  * original and MERGES the two dictionary-valued keys the documentation excepts from replacement. */
-CTFontDescriptorRef CTFontDescriptorCreateWithAttributes(NSDictionary *attributes);
-CTFontDescriptorRef CTFontDescriptorCreateWithNameAndSize(NSString *name, CGFloat size);
+CTFontDescriptorRef CTFontDescriptorCreateWithAttributes(CFDictionaryRef attributes);
+CTFontDescriptorRef CTFontDescriptorCreateWithNameAndSize(CFStringRef name, CGFloat size);
 CTFontDescriptorRef CTFontDescriptorCreateCopyWithAttributes(CTFontDescriptorRef original,
 							     NSDictionary *attributes);
 
 /* AND THE ACCESSOR THAT NEEDS NO NEW TYPE: the dictionary itself, retained. */
-NSDictionary *CTFontDescriptorCopyAttributes(CTFontDescriptorRef descriptor) CG_RETURNS_RETAINED;
+CFDictionaryRef CTFontDescriptorCopyAttributes(CTFontDescriptorRef descriptor) CG_RETURNS_RETAINED;
 
 #ifdef __cplusplus
 }
@@ -194,9 +197,9 @@ typedef enum {
  * defines its answer as "based on the original descriptor and **system precedence**" — a precedence order this
  * tier does not have, and inventing one would be inventing the surface.
  */
-CFTypeRef CTFontDescriptorCopyAttribute(CTFontDescriptorRef descriptor, NSString *attribute)
+CFTypeRef CTFontDescriptorCopyAttribute(CTFontDescriptorRef descriptor, CFStringRef attribute)
 	CG_RETURNS_RETAINED;
-CFTypeRef CTFontDescriptorCopyLocalizedAttribute(CTFontDescriptorRef descriptor, NSString *attribute,
+CFTypeRef CTFontDescriptorCopyLocalizedAttribute(CTFontDescriptorRef descriptor, CFStringRef attribute,
 						     NSString **language) CG_RETURNS_RETAINED;
 CTFontDescriptorRef CTFontDescriptorCreateCopyWithFeature(CTFontDescriptorRef original,
 							  NSNumber *featureTypeIdentifier,
