@@ -172,6 +172,43 @@ SFNTTypes.h — is in Apple's, and the ledger's own `--check` says the open name
 WHAT IS ACTUALLY MISSING FROM CORE TEXT ITSELF IS SMALL: SIX functions, 38 typealiases, and the singletons —
 and the 8 open functions are the next thing to read out of Apple's headers, door by door.
 
+## THE ORDER THE EIGHT OPEN FUNCTIONS FORCED, WHICH IS NOT THE ORDER THEY WERE LISTED IN
+
+Apple's eight open functions read cleanly out of the downloaded headers — `CTFontCopySupportedLanguages`,
+`CTFontCreateCopyWithSymbolicTraits`, `CTFontCreateForString`, `CTFontGetStringEncoding`,
+`CTFontGetVerticalTranslationsForGlyphs` and `CTTypesetterSuggestClusterBreak` are ordinary doors;
+`CTFontManagerCreateFontRequestRunLoopSource` wants a block and a run-loop source, which this tree HAS; and
+`CTFontCreateWithQuickdrawInstance` wants QUICKDRAW, which it does not — an owed door with its reason, the same
+shape `libagora-drawing` uses.
+
+**AND SIX OF THE EIGHT CANNOT BE WRITTEN AS PLAIN C YET, WHICH REORDERS THE WORK.** `CTFont` is not a struct:
+it is an Objective-C class, declared in `CTFont_internal.h`. A `.c` file cannot preprocess an internal header
+containing `@interface`, so NO new plain-C door can land until the class conversion does — and that is the
+C-ification, arriving as a PRECONDITION rather than as tidying.
+
+**AND `CTFont` IS THE CLASS TO CONVERT FIRST, because it is almost C already.** MEASURED, read straight out of
+`CTFont_internal.h`:
+
+    @interface CTFont : NSObject {
+        @public
+        CGFontRef           graphics;   /* RETAINED by the object's own lifetime; -dealloc releases it */
+        CGFloat             size;
+        CGAffineTransform   matrix;
+    }
+
+THREE IVARS AND EVERY ONE OF THEM IS ALREADY A C TYPE — a Core Graphics type, a `CGFloat` and a struct. THERE
+ARE NO OBJECTIVE-C OBJECTS IN IT AND NO `NS` ANYTHING. Its `-dealloc` releases a CGFontRef, which a CF type's
+FINALIZER does; its allocation becomes `_CFRuntimeCreateInstance`; its identity becomes
+`_CFRuntimeRegisterClass`. That is the pattern `libagora-drawing` already uses for `CGColor`, and it is the
+first class of nine.
+
+WHAT IS NOT MEASURED AND SHOULD NOT BE QUOTED: I tried to count the other eight classes' ivars with a `sed`
+one-liner and it reported ZERO for seven of them, which is a fact about the one-liner rather than about the
+classes. The `@interface` blocks of the other eight are formatted differently and that instrument does not
+read them. Their size is known only from their MESSAGE SEND counts — CTLine 62, CTFontDescriptor 59,
+CTFontCollection 25, CTFramesetter 23, CTTypesetter 13, CTGlyphInfo and CTTextTab 4, CTParagraphStyle 3 —
+which is the honest scale until each one is read.
+
 ## Agora changes
 
 **THE IMPORT IS STILL VERBATIM — no source file has been edited — and this section records what has been added
