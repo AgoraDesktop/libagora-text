@@ -13,6 +13,12 @@
  * ONE CHILD PER CASE, which is this tree's convention (libagora-drawing's suite) and not decoration: a wrong
  * answer is counted, a crash is not, and a crash in a single-process run would lose every case after it.
  */
+/* EVERY HEADER THE SUITE EXERCISES IS INCLUDED, one line each: a case that calls a door must be able to
+ * see it, and forgetting one costs twenty errors in this file rather than one. */
+#include <CoreText/CTFont.h>
+/* AND THE ENGINE'S INTERNAL HEADER, FOR THE DOORS CORE TEXT OWNS BUT DOES NOT IMPLEMENT: the Unicode
+ * glyph step and the face registry. */
+#include <CoreGraphics/CGFont_internal.h>
 #include <CoreText/CTFontDescriptor.h>
 #include <CoreText/CTFontTraits.h>
 
@@ -296,11 +302,121 @@ static int case_descriptor_object(void)
 	return g_fail - before;
 }
 
+/* A REAL FONT, END TO END, WITH THE GLYPH STEP THAT IS THIS LIBRARY'S WHOLE REASON FOR EXISTING. Everything
+ * here is asserted against a face that is actually on this machine, and the door the architecture was built
+ * for is CTFontGetGlyphsForCharacters: Core Graphics no longer offers it, Core Text must, and the answer has
+ * to come from the engine behind CGFont.
+ *
+ * THE API'S THEORY OF ITSELF IS ALSO HELD: a font made from a name must NAME ITSELF back, its metrics must be
+ * in POINTS (so twice the size is twice the ascent), and its identity must be the runtime's. */
+static int case_font_object(void)
+{
+	int before = g_fail;
+	CFStringRef name = CFSTR("DejaVuSansMono-Bold");
+	const char *path = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf";
+	CGDataProviderRef provider = NULL;
+	CGFontRef face = NULL;
+	CTFontRef font, doubled;
+	CFTypeRef got;
+	CGGlyph glyphs[3];
+	UniChar chars[3];
+	CGFloat ascent, twice;
+	bool all;
+
+	/* TWO ROUTES TO A FACE, AND THE PRINTED LINE SAYS WHICH ONE ANSWERED. Apple's CTFontCreateWithName asks
+	 * a font system for a face by name; this tier has no font system, so the name is offered to the face
+	 * registry the engine keeps and, if that finds nothing, the face is loaded from its own file. WHICH
+	 * HAPPENED IS PRINTED RATHER THAN ASSUMED, because it is a fact about this tree that the suite can
+	 * measure every time it runs and a comment cannot. */
+	/* THE FACE ITSELF, REGISTERED, SO THAT THE NAME ROUTE HAS SOMETHING TO FIND. */
+	if (access(path, R_OK) == 0) {
+		provider = CGDataProviderCreateWithFilename(path);
+		if (provider != NULL) {
+			face = CGFontCreateWithDataProvider(provider);
+		}
+		check(cg_font_register(path) != 0 || cg_font_is_registered(path),
+		      "the face at %s could not be registered", path);
+	} else {
+		printf("  (note: %s is not on this machine)\n", path);
+	}
+
+	font = CTFontCreateWithName(name, 12.0, NULL);
+	if (font == NULL && face != NULL) {
+		printf("  (note: the NAME route found no face for \"%s\" even when registered; using the file)\n",
+		       "DejaVuSansMono-Bold");
+		font = CTFontCreateWithGraphicsFont(face, 12.0, NULL, NULL);
+	} else if (font != NULL) {
+		printf("  (note: the NAME route found the face through the engine's registry)\n");
+	}
+	check(font != NULL, "a font could not be made from \"DejaVuSansMono-Bold\", by name or from its file");
+	if (font == NULL) {
+		return g_fail - before;
+	}
+
+	/* THE IDENTITY IS THE RUNTIME'S, exactly as for a descriptor. */
+	check(CFGetTypeID((CFTypeRef)font) == CTFontGetTypeID(),
+	      "CFGetTypeID(font) is %lu and CTFontGetTypeID() is %lu",
+	      (unsigned long)CFGetTypeID((CFTypeRef)font), (unsigned long)CTFontGetTypeID());
+
+	/* IT NAMES ITSELF, THROUGH ONE OF THE TWO KEYS CORE GRAPHICS ANSWERS DIRECTLY. */
+	got = CTFontCopyPostScriptName(font);
+	check(got != NULL, "the font did not answer its own PostScript name");
+	if (got != NULL) {
+		check(CFEqual(got, name), "the font answered a PostScript name that is not the one it was made from");
+		CFRelease(got);
+	}
+
+	/* THE NAME TABLE, THROUGH A KEY WITH NO CORE GRAPHICS DOOR: the family comes from `name` entry 1. */
+	got = CTFontCopyFamilyName(font);
+	check(got != NULL, "the font did not answer its family name from the name table");
+	if (got != NULL) {
+		check(CFGetTypeID(got) == CFStringGetTypeID(), "the family name is not a string");
+		CFRelease(got);
+	}
+	check(CTFontCopyName(font, CFSTR("no such key")) == NULL,
+	      "a key this library does not know answered a name anyway");
+
+	/* THE METRICS ARE IN POINTS: twice the size, twice the ascent. */
+	ascent = CTFontGetAscent(font);
+	check(ascent > 0.0, "the ascent is %g, want a positive number of points", (double)ascent);
+	check(CTFontGetUnitsPerEm(font) > 0, "the font reports %u units per em",
+	      (unsigned)CTFontGetUnitsPerEm(font));
+	check(CTFontGetGlyphCount(font) > 0, "the font reports %ld glyphs",
+	      (long)CTFontGetGlyphCount(font));
+	doubled = CTFontCreateWithName(name, 24.0, NULL);
+	twice = (doubled != NULL) ? CTFontGetAscent(doubled) : 0.0;
+	check(doubled != NULL && twice > ascent * 1.9 && twice < ascent * 2.1,
+	      "the ascent at 24 points is %g and at 12 points %g, want about twice", (double)twice,
+	      (double)ascent);
+
+	/* AND THE DOOR THIS LIBRARY EXISTS FOR. 'A' and 'a' must map to different glyphs, and Apple's contract
+	 * is the BOOLEAN: true only when every character mapped. */
+	chars[0] = (UniChar)'A';
+	chars[1] = (UniChar)'a';
+	chars[2] = (UniChar)0xFFFF;
+	all = CTFontGetGlyphsForCharacters(font, chars, glyphs, 2);
+	check(all, "the font could not encode 'A' and 'a', which it must be able to");
+	check(glyphs[0] != 0 && glyphs[1] != 0, "'A' and 'a' did not both map: %u and %u",
+	      (unsigned)glyphs[0], (unsigned)glyphs[1]);
+	check(glyphs[0] != glyphs[1], "the glyph step mapped 'A' and 'a' to the SAME glyph %u",
+	      (unsigned)glyphs[0]);
+	all = CTFontGetGlyphsForCharacters(font, chars, glyphs, 3);
+	check(!all, "the font claimed to encode an unassigned code point");
+	check(glyphs[2] == 0, "the unassigned code point mapped to glyph %u, want 0", (unsigned)glyphs[2]);
+
+	/* A GLYPH BY NAME, WHICH IS THE OTHER HALF OF THE MAPPING. */
+	check(CTFontGetGlyphWithName(font, CFSTR(".notdef")) != 0 ||
+	      CTFontGetGlyphWithName(font, CFSTR("A")) != 0,
+	      "the font mapped neither '.notdef' nor 'A' from a glyph name");
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
 	{ "The descriptor's twenty-two key strings", case_descriptor_key_strings },
 	{ "The descriptor is an object, and its identity is the runtime's", case_descriptor_object },
+	{ "A font is a face, and the glyph step is the reason for it", case_font_object },
 };
 
 int main(void)
