@@ -68,8 +68,23 @@ rows are the AAT/SFNT structure vocabulary, which is a data port of two headers 
   form answer "based on the original descriptor and system precedence" in Apple's own words, and this tier has
   no registry of installed faces to take a precedence from. They are declared and not defined, so a caller who
   reaches for one gets a link error rather than an invented answer.
-- **The type itself is next**: `__CTFontDescriptor` registered through `<CoreFoundation/CFRuntime.h>`, with
-  the attributes dictionary as its content and the accessors over it. Then `CTFont.h`.
+- **The first object exists.** `struct __CTFontDescriptor` is registered through
+  `<CoreFoundation/CFRuntime.h>` — `CFRuntimeBase` first, a finalizer that releases the attributes, and
+  `equal`/`hash` over the dictionary, because a descriptor's attributes ARE its value. The five creators and
+  accessors are implemented: name-and-size (with a size of 0.0 **omitted** rather than stored, Apple's own
+  sentence), from-attributes, copy-with-attributes (**replacing** what it names and merging the two keys
+  Apple excepts), copy-attributes, copy-attribute, and copy-localized-attribute (answering from the attribute
+  itself, which is what Apple's documentation says when localization is not possible).
+- **AND ITS IDENTITY COMES FROM THE RUNTIME, WHICH IS THE POINT**: `CFGetTypeID(descriptor) ==
+  CTFontDescriptorGetTypeID()` is the contract, and the suite holds it. The deleted library answered every
+  type id from a table of constants kept in a file beside the objects, which cannot satisfy that contract —
+  and the case fails if this one is written that way.
+- **Three doors are OWED WITH THEIR REASONS**, each declared and not defined, so a caller gets a link error
+  rather than an invented answer: the two matching doors need a registry of installed faces for the "system
+  precedence" Apple's own sentence names; and `CTFontDescriptorCreateCopyWithFeature` needs
+  `CTFontFeatureTypeIdentifierKey` and `…SelectorIdentifierKey`, which belong to `CTFont.h`, which INCLUDES
+  this header and so cannot be included back. It lands with `CTFont.h`, which is next along with `CTFont.h`'s
+  own surface.
 - **The one thing Apple's headers do not specify** is the character→glyph step — the half the Core Graphics
   plan called out as missing: Apple deprecated CG's glyph doors, so this tree struck them, and **Core Text
   owns that step** (`CTFontGetGlyphsForCharacters`). How it reaches the font's `cmap` is the first

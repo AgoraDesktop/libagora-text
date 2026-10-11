@@ -221,10 +221,86 @@ static int case_descriptor_key_strings(void)
 	return g_fail - before;
 }
 
+/* THE FIRST OBJECT IN THIS LIBRARY, AND THE ASSERTION THAT MATTERS MOST IS ITS IDENTITY: Apple's contract
+ * is that CFGetTypeID of a descriptor IS CTFontDescriptorGetTypeID(), which is only true when the identity
+ * comes from Core Foundation's runtime. The deleted library answered every type id from a table of constants
+ * kept in a file beside the objects, and this case is what tells the two arrangements apart. */
+static int case_descriptor_object(void)
+{
+	int before = g_fail;
+	CFMutableDictionaryRef attributes = CFDictionaryCreateMutable(
+		kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+	CFMutableDictionaryRef additions = CFDictionaryCreateMutable(
+		kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+	CFStringRef name = CFSTR("Helvetica");
+	const CGFloat twelve = 12.0;
+	CFNumberRef size;
+	CTFontDescriptorRef descriptor, same, copy, zero;
+	CFTypeRef got;
+
+	check(attributes != NULL && additions != NULL, "the test could not make its dictionaries");
+	if (attributes == NULL || additions == NULL) {
+		return g_fail - before;
+	}
+	CFDictionarySetValue(attributes, kCTFontNameAttribute, name);
+	descriptor = CTFontDescriptorCreateWithAttributes(attributes);
+	check(descriptor != NULL, "a descriptor could not be made from an attributes dictionary");
+	if (descriptor == NULL) {
+		return g_fail - before;
+	}
+
+	/* THE RUNTIME OWNS THE IDENTITY. */
+	check(CFGetTypeID((CFTypeRef)descriptor) == CTFontDescriptorGetTypeID(),
+	      "CFGetTypeID(descriptor) is %lu and CTFontDescriptorGetTypeID() is %lu",
+	      (unsigned long)CFGetTypeID((CFTypeRef)descriptor),
+	      (unsigned long)CTFontDescriptorGetTypeID());
+
+	/* THE ACCESSORS, INCLUDING THE ONE THAT MUST ANSWER NOTHING RATHER THAN SOMETHING. */
+	got = CTFontDescriptorCopyAttribute(descriptor, kCTFontNameAttribute);
+	check(got != NULL && CFEqual(got, name), "the name attribute did not come back");
+	check(CTFontDescriptorCopyAttribute(descriptor, kCTFontSizeAttribute) == NULL,
+	      "an attribute that was never set came back with a value");
+
+	/* THE COPY REPLACES WHAT IT NAMES AND KEEPS WHAT IT DOES NOT. */
+	size = CFNumberCreate(kCFAllocatorDefault, kCFNumberCGFloatType, &twelve);
+	check(size != NULL, "the test could not make a CFNumber");
+	if (size != NULL) {
+		CFDictionarySetValue(additions, kCTFontSizeAttribute, size);
+		copy = CTFontDescriptorCreateCopyWithAttributes(descriptor, additions);
+		check(copy != NULL, "the copy door answered nothing");
+		if (copy != NULL) {
+			check(CTFontDescriptorCopyAttribute(copy, kCTFontSizeAttribute) != NULL,
+			      "the copy did not take the size it was given");
+			check(CTFontDescriptorCopyAttribute(copy, kCTFontNameAttribute) != NULL,
+			      "the copy LOST the name the original had");
+			check(!CFEqual(descriptor, copy),
+			      "a copy with a different size compares equal to the original");
+		}
+		CFRelease(size);
+	}
+
+	/* EQUALITY IS BY VALUE: the attributes ARE the descriptor. */
+	same = CTFontDescriptorCreateWithAttributes(attributes);
+	check(same != NULL && CFEqual(descriptor, same),
+	      "two descriptors made from the same attributes are not equal");
+	check(same != NULL && CFHash(descriptor) == CFHash(same),
+	      "two equal descriptors hash differently");
+
+	/* AND A ZERO SIZE IS OMITTED RATHER THAN STORED, which is Apple's own sentence for that door. */
+	zero = CTFontDescriptorCreateWithNameAndSize(name, 0.0);
+	check(zero != NULL, "the name-and-size door answered nothing");
+	check(zero != NULL && CTFontDescriptorCopyAttribute(zero, kCTFontSizeAttribute) == NULL,
+	      "a size of 0.0 was STORED rather than omitted");
+	check(zero != NULL && CTFontDescriptorCopyAttribute(zero, kCTFontNameAttribute) != NULL,
+	      "the name-and-size door did not store the name");
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
 	{ "The descriptor's twenty-two key strings", case_descriptor_key_strings },
+	{ "The descriptor is an object, and its identity is the runtime's", case_descriptor_object },
 };
 
 int main(void)
