@@ -121,30 +121,30 @@ void CTFontRelease(CTFontRef font);
  * enum values: Apple publishes the names and the keys, never the strings. A key is only ever compared
  * with the constants beside it, which is what makes that safe.
  * ---------------------------------------------------------------------------------------------- */
-extern NSString *const kCTFontCopyrightNameKey;
-extern NSString *const kCTFontFamilyNameKey;
-extern NSString *const kCTFontSubFamilyNameKey;
-extern NSString *const kCTFontStyleNameKey;
-extern NSString *const kCTFontUniqueNameKey;
-extern NSString *const kCTFontFullNameKey;
-extern NSString *const kCTFontVersionNameKey;
-extern NSString *const kCTFontPostScriptNameKey;
-extern NSString *const kCTFontTrademarkNameKey;
-extern NSString *const kCTFontManufacturerNameKey;
-extern NSString *const kCTFontDesignerNameKey;
-extern NSString *const kCTFontDescriptionNameKey;
-extern NSString *const kCTFontVendorURLNameKey;
-extern NSString *const kCTFontDesignerURLNameKey;
-extern NSString *const kCTFontLicenseNameKey;
-extern NSString *const kCTFontLicenseURLNameKey;
-extern NSString *const kCTFontSampleTextNameKey;
-extern NSString *const kCTFontPostScriptCIDNameKey;
+extern const CFStringRef kCTFontCopyrightNameKey;
+extern const CFStringRef kCTFontFamilyNameKey;
+extern const CFStringRef kCTFontSubFamilyNameKey;
+extern const CFStringRef kCTFontStyleNameKey;
+extern const CFStringRef kCTFontUniqueNameKey;
+extern const CFStringRef kCTFontFullNameKey;
+extern const CFStringRef kCTFontVersionNameKey;
+extern const CFStringRef kCTFontPostScriptNameKey;
+extern const CFStringRef kCTFontTrademarkNameKey;
+extern const CFStringRef kCTFontManufacturerNameKey;
+extern const CFStringRef kCTFontDesignerNameKey;
+extern const CFStringRef kCTFontDescriptionNameKey;
+extern const CFStringRef kCTFontVendorURLNameKey;
+extern const CFStringRef kCTFontDesignerURLNameKey;
+extern const CFStringRef kCTFontLicenseNameKey;
+extern const CFStringRef kCTFontLicenseURLNameKey;
+extern const CFStringRef kCTFontSampleTextNameKey;
+extern const CFStringRef kCTFontPostScriptCIDNameKey;
 
 /* A FONT BY NAME — and THE ONE PLACE THIS TIER DIVERGES FROM APPLE'S OWN PROMISE, stated here rather
  * than discovered: Apple's block says "a best match font will always be returned", and this tier's
  * registry answers NULL for a name that resolves to no face. A name matches a PostScript name, a full
  * name or `family style`, case-insensitively. */
-CTFontRef CTFontCreateWithName(NSString *name, CGFloat size, const CGAffineTransform *matrix);
+CTFontRef CTFontCreateWithName(CFStringRef name, CGFloat size, const CGAffineTransform *matrix);
 
 /* **`CTFontUIFontType`, ITS ENUMERATORS, AND A CLAIM THIS HEADER HAD BACKWARDS.** It used to say that 10.6's
  * `CTFont.h` declares "exactly `typedef uint32_t CTFontUIFontType;`" and "publishes **no enumerators at all**",
@@ -198,23 +198,23 @@ typedef uint32_t CTFontUIFontType;
  * (the Core Foundation carve-out the name-based half of this header already records), and Apple's own sentence
  * for it — "the language specifier for which to return the font", which may be NULL — survives that spelling
  * unchanged. It selects nothing further in this tier anyway: one UI font, one face. */
-CTFontRef CTFontCreateUIFontForLanguage(CTFontUIFontType uiType, CGFloat size, NSString *language);
+CTFontRef CTFontCreateUIFontForLanguage(CTFontUIFontType uiType, CGFloat size, CFStringRef language);
 
 /* THE FOUR COPY DOORS RETURN +1 (that is what `Copy` means) AND ANSWER nil FOR A FACE WITH NO SUCH
  * NAME, which is a font fact rather than a failure. `-CopyDisplayName` is the full name in this tier:
  * there is no localization, and Apple's own doc says the display name is "usually the full name". */
-NSString *CTFontCopyPostScriptName(CTFontRef font) CG_RETURNS_RETAINED;
-NSString *CTFontCopyFamilyName(CTFontRef font) CG_RETURNS_RETAINED;
-NSString *CTFontCopyFullName(CTFontRef font) CG_RETURNS_RETAINED;
-NSString *CTFontCopyDisplayName(CTFontRef font) CG_RETURNS_RETAINED;
+CFStringRef CTFontCopyPostScriptName(CTFontRef font) CG_RETURNS_RETAINED;
+CFStringRef CTFontCopyFamilyName(CTFontRef font) CG_RETURNS_RETAINED;
+CFStringRef CTFontCopyFullName(CTFontRef font) CG_RETURNS_RETAINED;
+CFStringRef CTFontCopyDisplayName(CTFontRef font) CG_RETURNS_RETAINED;
 
 /* AND THE KEYED PAIR. `CTFontCopyName` takes one of the constants above and answers the `name` table's
  * entry for it — the table's own IDs (0-25), which is why the key→ID table lives in `CTFont.m` beside
  * the keys. THE THREE KEYS THAT ARE NOT HERE (`kCTFontStyleNameKey` resolves to no ID, and the
  * variation-axis and feature keys belong to those collections) answer nil rather than a guess, and
  * `CTFontCopyLocalizedName` sets its language out-parameter to nil because this tier has none. */
-NSString *CTFontCopyName(CTFontRef font, NSString *key) CG_RETURNS_RETAINED;
-NSString *CTFontCopyLocalizedName(CTFontRef font, NSString *key, NSString **actualLanguage)
+CFStringRef CTFontCopyName(CTFontRef font, CFStringRef key) CG_RETURNS_RETAINED;
+CFStringRef CTFontCopyLocalizedName(CTFontRef font, CFStringRef key, CFStringRef *actualLanguage)
 	CG_RETURNS_RETAINED;
 
 /* ------------------------------------------------------------------------------------------------
@@ -280,7 +280,7 @@ CTFontSymbolicTraits CTFontGetSymbolicTraits(CTFontRef font);
 CGFloat CTFontGetUnderlinePosition(CTFontRef font);
 CGFloat CTFontGetUnderlineThickness(CTFontRef font);
 CGFloat CTFontGetSlantAngle(CTFontRef font);
-NSCharacterSet *CTFontCopyCharacterSet(CTFontRef font) CG_RETURNS_RETAINED;
+CFCharacterSetRef CTFontCopyCharacterSet(CTFontRef font) CG_RETURNS_RETAINED;
 
 /* THE CHARACTER-TO-GLYPH STEP AND THE ADVANCES, both documented in the file comment. */
 bool CTFontGetGlyphsForCharacters(CTFontRef font, const unsigned short characters[], CGGlyph glyphs[],
@@ -399,9 +399,9 @@ typedef enum {
  *
  * The ORIENTATION is refused by name for the vertical case: this tier lays text out left-to-right and says so
  * elsewhere. `CTFontGetTypeID` IS declared, at the end of the block below. */
-CFTypeRef CTFontCopyAttribute(CTFontRef font, NSString *attribute) CG_RETURNS_RETAINED;
-NSDictionary *CTFontCopyTraits(CTFontRef font) CG_RETURNS_RETAINED;
-CGGlyph CTFontGetGlyphWithName(CTFontRef font, NSString *glyphName);
+CFTypeRef CTFontCopyAttribute(CTFontRef font, CFStringRef attribute) CG_RETURNS_RETAINED;
+CFDictionaryRef CTFontCopyTraits(CTFontRef font) CG_RETURNS_RETAINED;
+CGGlyph CTFontGetGlyphWithName(CTFontRef font, CFStringRef glyphName);
 /* AND THE SAME ABSENCE FOR THE SAME REASON: a `CGPathRef` is a plain pointer, and the name says `+1`. */
 CGPathRef CTFontCreatePathForGlyph(CTFontRef font, CGGlyph glyph, const CGAffineTransform *matrix);
 CGRect CTFontGetBoundingRectsForGlyphs(CTFontRef font, CTFontOrientation orientation, const CGGlyph *glyphs,
@@ -421,12 +421,12 @@ CGRect CTFontGetBoundingRectsForGlyphs(CTFontRef font, CTFontOrientation orienta
  * `CTFontCreateCopyWithSymbolicTraits` remains owed and is named here rather than left to be found: the era
  * defines it as a copy "with the specified symbolic traits", which means RESOLVING A STYLE within a family —
  * a face-selection rule this tier's registry does not carry, and inventing one would be inventing the surface. */
-CTFontRef CTFontCreateWithNameAndOptions(NSString *name, CGFloat size, const CGAffineTransform *matrix,
+CTFontRef CTFontCreateWithNameAndOptions(CFStringRef name, CGFloat size, const CGAffineTransform *matrix,
 					 CTFontOptions options);
 CTFontRef CTFontCreateWithFontDescriptorAndOptions(CTFontDescriptorRef descriptor, CGFloat size,
 						   const CGAffineTransform *matrix, CTFontOptions options);
 CTFontRef CTFontCreateCopyWithFamily(CTFontRef font, CGFloat size, const CGAffineTransform *matrix,
-				     NSString *family);
+				     CFStringRef family);
 
 /* **M7b: THE FONT'S SFNT TABLES — WHAT THE FILE ITSELF CARRIES.** Two doors, and they are ONE WALK SEEN TWICE:
  *
@@ -501,14 +501,14 @@ ATSFontRef CTFontGetPlatformFont(CTFontRef font, CTFontDescriptorRef *attributes
  *
  * A face with no `feat` answers NULL from both, which is Apple's own "or NULL if the default settings should be
  * used". */
-NSArray *CTFontCopyVariationAxes(CTFontRef font) CG_RETURNS_RETAINED;
-NSDictionary *CTFontCopyVariation(CTFontRef font) CG_RETURNS_RETAINED;
-NSArray *CTFontCopyFeatures(CTFontRef font) CG_RETURNS_RETAINED;
-NSArray *CTFontCopyFeatureSettings(CTFontRef font) CG_RETURNS_RETAINED;
+CFArrayRef CTFontCopyVariationAxes(CTFontRef font) CG_RETURNS_RETAINED;
+CFDictionaryRef CTFontCopyVariation(CTFontRef font) CG_RETURNS_RETAINED;
+CFArrayRef CTFontCopyFeatures(CTFontRef font) CG_RETURNS_RETAINED;
+CFArrayRef CTFontCopyFeatureSettings(CTFontRef font) CG_RETURNS_RETAINED;
 
 CFTypeID CTFontGetTypeID(void);
-NSArray *CTFontCopyAvailableTables(CTFontRef font, CTFontTableOptions options) CG_RETURNS_RETAINED;
-NSData *CTFontCopyTable(CTFontRef font, CTFontTableTag table, CTFontTableOptions options) CG_RETURNS_RETAINED;
+CFArrayRef CTFontCopyAvailableTables(CTFontRef font, CTFontTableOptions options) CG_RETURNS_RETAINED;
+CFDataRef CTFontCopyTable(CTFontRef font, CTFontTableTag table, CTFontTableOptions options) CG_RETURNS_RETAINED;
 
 /* **M7f: THE VARIATION AND FEATURE VOCABULARY — ELEVEN KEYS, IN APPLE'S OWN HOME.** The era declares these in
  * `CTFont.h`, not in the headers of the doors that will read them, and the standing rule is to match Apple in
@@ -528,18 +528,18 @@ NSData *CTFontCopyTable(CTFontRef font, CTFontTableTag table, CTFontTableOptions
  * before anything produced an error.
  *
  * The VALUES are ours, as every unpublished key's are. */
-extern NSString *const kCTFontVariationAxisIdentifierKey;
-extern NSString *const kCTFontVariationAxisMinimumValueKey;
-extern NSString *const kCTFontVariationAxisMaximumValueKey;
-extern NSString *const kCTFontVariationAxisDefaultValueKey;
-extern NSString *const kCTFontVariationAxisNameKey;
+extern const CFStringRef kCTFontVariationAxisIdentifierKey;
+extern const CFStringRef kCTFontVariationAxisMinimumValueKey;
+extern const CFStringRef kCTFontVariationAxisMaximumValueKey;
+extern const CFStringRef kCTFontVariationAxisDefaultValueKey;
+extern const CFStringRef kCTFontVariationAxisNameKey;
 
-extern NSString *const kCTFontFeatureTypeNameKey;
-extern NSString *const kCTFontFeatureTypeExclusiveKey;
-extern NSString *const kCTFontFeatureTypeSelectorsKey;
-extern NSString *const kCTFontFeatureSelectorNameKey;
-extern NSString *const kCTFontFeatureSelectorDefaultKey;
-extern NSString *const kCTFontFeatureSelectorSettingKey;
+extern const CFStringRef kCTFontFeatureTypeNameKey;
+extern const CFStringRef kCTFontFeatureTypeExclusiveKey;
+extern const CFStringRef kCTFontFeatureTypeSelectorsKey;
+extern const CFStringRef kCTFontFeatureSelectorNameKey;
+extern const CFStringRef kCTFontFeatureSelectorDefaultKey;
+extern const CFStringRef kCTFontFeatureSelectorSettingKey;
 
 /* **AND THE TWO IDENTIFIER KEYS ARE DECLARED ELSEWHERE, WHICH IS A PLACEMENT DEVIATION FOUND HERE RATHER THAN
  * CREATED**: `kCTFontFeatureTypeIdentifierKey` and `kCTFontFeatureSelectorIdentifierKey` are Apple's too (10.6
