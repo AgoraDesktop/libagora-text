@@ -20,8 +20,9 @@ licence took a second look.
 
 ## Status
 
-**Imported; not yet built, and its NS types have not been converted back to CF.** Both of those are owed, in
-that order, and `PROVENANCE.md` says why that order.
+**Imported, and the build is written: it configures and stops on exactly one include.** The NS types have
+not been converted back to CF yet, which is the larger half and comes after the build — `PROVENANCE.md` says
+why that order, and records the decisions taken in the same commits as the changes.
 
 ### What the import brings with it, measured rather than assumed
 
@@ -46,12 +47,17 @@ that order, and `PROVENANCE.md` says why that order.
 
 ### What is not done
 
-- **No build.** No `CMakeLists.txt`, no module, nothing that compiles it; the source directory has no build
-  file of its own either, so the dependency list above is read from its includes.
+- **The build does not finish, on one include.** `CTFontManager.m` wants Fiwix's `libconfig` for the set of
+  ENABLED FONTS — a 135 KB FNX-OS configuration library that is not coming, because the preference format is
+  Apple's plist (`dec-750b32baf39ba5cb`). A plist-backed store replaces its two calls, and the thing that store
+  would naturally sit on — Foundation's `NSUserDefaults` — cannot work on this machine: it computes
+  `/Users/<user>/Configuration`, ignores `XDG_CONFIG_HOME`, and throws. Measured, and recorded in
+  `PROVENANCE.md` because it is a finding about `libagora-base` rather than about this library.
 - **No test suite.** `libagora-drawing`'s suite exists because nothing else held that library; the same will
   be true here, and its own history shows a suite finds far more defects in its *instrument* than in the
   library — nineteen cases against twelve instrument errors.
 - **The NS types are still NS types**, and the conversion is the larger half of the work.
-- **No consumers.** There is nothing in this workspace that uses Core Text yet, and nothing that uses Core
-  Graphics either: `libagora-app`, `window-server` and `widget-zoo` are empty repositories with `.gitignore`
-  files.
+- **No consumers.** There is nothing in this workspace that uses Core Text yet — though Core Text is itself a
+  consumer of Core Graphics now, and getting it to configure required exporting `libagora-base`, which had no
+  CMake package either. `libagora-app`, `window-server` and `widget-zoo` are still empty repositories with
+  `.gitignore` files.

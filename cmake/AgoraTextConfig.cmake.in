@@ -1,0 +1,30 @@
+@PACKAGE_INIT@
+
+# Consume Core Text (libagora-text), Agora's Core Text.
+#
+# ALL THREE OF ITS SIBLINGS ARE FOUND, BECAUSE ALL THREE ARE IN ITS INTERFACE. A consumer of Core Text
+# reaches Core Foundation itself (`CFStringRef` for a format, `CFTypeID` for what a bridged object is),
+# Foundation itself (`NSAttributedString`, `NSDictionary` of attributes -- the classes this API is built
+# around), and Core Graphics itself (`CGFontRef`, `CGRect`, `CGPathRef` -- what a line is laid out with).
+# Each is linked PUBLIC for that reason, and each is found here for the same one.
+#
+# AND IT HAS TO BE BUILT BY A COMPILER THAT ACCEPTS -fblocks, which GCC does not: the dependencies bring
+# blocks through their own headers, so this package's interface does too. That is said here rather than left
+# to the linker, because a client that lets CMake choose its compiler otherwise gets "cc: error: unrecognized
+# command-line option '-fblocks'" and no idea which dependency asked for it.
+
+include(CMakeFindDependencyMacro)
+
+find_dependency(CoreFoundation CONFIG)
+find_dependency(Foundation CONFIG)
+find_dependency(AgoraDrawing CONFIG)
+
+if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+  message(FATAL_ERROR
+    "libagora-text's interface requires a compiler that accepts -fblocks. This tree builds with clang; "
+    "configure with -DCMAKE_C_COMPILER=/usr/bin/clang-19.")
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/AgoraTextTargets.cmake")
+
+check_required_components(AgoraText)

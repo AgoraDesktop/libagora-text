@@ -54,7 +54,48 @@ its second gave it a build.
 
 ## Agora changes
 
-**Not yet made — the import is verbatim**, and this section is where the changes land as they land.
+**THE IMPORT IS STILL VERBATIM — no source file has been edited — and this section records what has been added
+around it and what has been DECIDED about it.** It is being written in the same commit as the change, which is
+what the note below asks for.
+
+### 1. A build (`CMakeLists.txt`), and the one thing it stops on
+
+The house shape, copied from `libagora-drawing`: the include shim so these headers are `<CoreText/...>`, every
+`.m` and `.c` compiled as one target, the tree's Objective-C runtime and `-fconstant-cfstrings`, and an EXPORT
+BLOCK FROM THE FIRST COMMIT, which is where the drawing library's should have been. It configures, and then:
+
+    CTFontManager.m:32:10: fatal error: 'libconfig.h' file not found
+
+**ONE, OUT OF SIXTEEN IMPLEMENTATION FILES AND TWENTY-FIVE HEADERS.** That is the measurement this build exists
+to make: the imported source is otherwise ready to compile against what this tree already has.
+
+### 2. `libconfig` is not coming, and the preference format is APPLE'S PLIST (user, `dec-750b32baf39ba5cb`)
+
+The font manager keeps the set of ENABLED FONTS through Fiwix's `libconfig` — "universal configuration access
+for the FNX OS userland", five files, about 135 KB, with a `Configuration/` directory tree and first-party
+domains as its model. `CTFontManager.h` does not expose it: its doors are Apple's own
+(`CTFontManagerCopyAvailableFontFamilyNames`, `…RegisterFontsForURL`, `…GetScopeForURL`,
+`…CompareFontFamilyNames`), and `libconfig` appears there in comments only. The use is two calls in
+`CTFontManager.m` — `config_set_int` and `config_get_int` — behind `CTFontManagerSetAutoActivationSetting` and
+`CTFontManagerGetAutoActivationSetting`. A PLIST-BACKED STORE REPLACES THEM, which is what Apple's Core Text
+does with a per-application preference.
+
+### 3. AND WHAT THAT WOULD BE BUILT ON IS NOT READY EITHER — MEASURED, AND IT IS A FINDING ABOUT `libagora-base`
+
+Foundation HAS `NSUserDefaults`, and it cannot work on this machine:
+
+    *** Terminating due to uncaught exception 'NSInternalInconsistencyException', reason:
+        'NSUserDefaults: cannot create /Users/kyle/Configuration: Read-only file system'
+
+IT COMPUTED ITS STORE AS `/Users/kyle/Configuration` — the macOS home shape — AND IT IGNORED
+`XDG_CONFIG_HOME`, WHICH WAS SET. Core Foundation, by contrast, implements the XDG config directories in
+`CFFileUtilities.c` (`$XDG_CONFIG_HOME`, `$XDG_CONFIG_DIRS`), so **the two halves of this tree disagree about
+where a preference lives**, and the Foundation half is the one that cannot write.
+
+THAT IS NOT THIS LIBRARY'S BUG AND IT IS NOT THIS COMMIT'S TO FIX. It is recorded here because this is where it
+surfaced, and it gives the replacement above two routes: a small plist store local to `CTFontManager.m`, or
+Foundation's `NSUserDefaults` fixed to use the directories Core Foundation already resolves — the second being
+the one that would make this library's code look like Apple's.
 
 A NOTE ON HOW THIS FILE STAYS TRUE, because the same sentence in `libagora-drawing/PROVENANCE.md` said "not
 yet made" for a long stretch after the work was finished, and its README went on claiming the NS types had not
