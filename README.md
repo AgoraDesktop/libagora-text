@@ -185,3 +185,15 @@ ctest --test-dir build
   cannot be applied here: **at 10.6 the AppKit ships no `NSFontCollection.h` at all** — its font headers are
   `NSFont.h`, `NSFontDescriptor.h`, `NSFontManager.h` and `NSFontPanel.h` — so `NSFontCollection` is post-10.6
   and there is no counterpart in the era to pair the name with.
+- **`CTFontManagerErrors` — THE FONT MANAGER'S ERROR VOCABULARY — IS DECLARED AND DEFINED, AND IT CARRIES ONE OF
+  APPLE'S OWN MISTAKES RATHER THAN REPAIRING IT.** Apple ships this as a header of its own and
+  `CTFontManager.h` INCLUDES it, so it is written first, in Apple's own include order. The five registration
+  codes (101–105), the unregistration ones (201–202) and the `CTFontManagerError` typedef are Apple's published
+  values copied exactly — AND `kCTFontManagerErrorInUse` AND `kCTFontManagerErrorSystemRequired` BOTH CARRY `202`
+  IN APPLE'S OWN HEADER, so an in-use refusal and a system-required refusal are indistinguishable to a caller.
+  **THIS LIBRARY KEEPS THE COLLISION** and the suite asserts the two constants are still one value, because a
+  library that renumbered one would answer a question the era's header cannot. THE TWO STRINGS ARE INFERENCES
+  WITH THE REASON MEASURED: Apple publishes no value for `kCTFontManagerErrorDomain` or
+  `kCTFontManagerErrorFontURLsKey`, and the rule that carries the other Core Text keys across to the AppKit's
+  spelling CANNOT APPLY — at 10.6 `NSFontManager.h` declares no `extern const …StringRef` at all, and
+  `FoundationErrors.h` names its domain only in a comment. MEASURED: `text: 9 of 9 cases passed, 0 failed`.

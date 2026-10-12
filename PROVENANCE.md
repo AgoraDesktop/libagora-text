@@ -203,3 +203,24 @@ with `text` itself at `text: 8 of 8 cases passed, 0 failed`.
 at all — its font headers are `NSFont.h`, `NSFontDescriptor.h`, `NSFontManager.h` and `NSFontPanel.h` — so
 `kCTFontCollectionRemoveDuplicatesOption` has no counterpart in the era to pair with, and its value is recorded
 as the same inference the other unprovable keys carry.
+
+**`CTFontManagerErrors` — the font manager's error vocabulary, including a mistake of Apple's own (2026-10-11).**
+Apple ships this as a header of its own and `CTFontManager.h` INCLUDES it, so it is written first — Apple's own
+include order rather than a preference. The codes are Apple's published values copied exactly, AND THAT INCLUDES A
+COLLISION APPLE'S HEADER CARRIES: **`kCTFontManagerErrorInUse` and `kCTFontManagerErrorSystemRequired` are BOTH
+`202`**, so the two refusals are indistinguishable to a caller. THIS LIBRARY REPRODUCES THAT RATHER THAN
+REPAIRING IT: renumbering one would answer a question the era's framework cannot, and a caller comparing against
+the era's constants would be wrong in a way that stays invisible until it matters. The suite asserts both the
+values and the collision.
+
+**AND THE TWO STRINGS ARE INFERENCES, WITH THE REASON MEASURED RATHER THAN ASSUMED.** Apple publishes no value for
+`kCTFontManagerErrorDomain` or `kCTFontManagerErrorFontURLsKey`, and the rule that PROVES the other Core Text
+keys — the AppKit declaring the same name with CT spelled NS — has nothing to pair with here: at 10.6
+`NSFontManager.h` **DECLARES NO `extern const …StringRef` AT ALL**, and `FoundationErrors.h` names its domain
+only in a comment. Both values are therefore the constants' own names with the leading `k` dropped, recorded as
+the first thing to check when something can answer for them.
+
+MEASURED: `cmake --build build` exits 0 with 0 warnings and 0 errors in its log, `nm -D build/libagora-text.so`
+lists `kCTFontManagerErrorDomain` and `kCTFontManagerErrorFontURLsKey` as defined, and the suite is
+`text: 9 of 9 cases passed, 0 failed` — the new case naming every code in both ranges and asserting the
+collision.

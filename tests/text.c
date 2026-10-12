@@ -21,6 +21,7 @@
 #include <CoreGraphics/CGFont_internal.h>
 #include <CoreText/CTFontCollection.h>
 #include <CoreText/CTFontDescriptor.h>
+#include <CoreText/CTFontManagerErrors.h>
 #include <CoreText/CTFontTraits.h>
 
 #include <CoreFoundation/CoreFoundation.h>
@@ -651,6 +652,69 @@ static int case_collection_option_key(void)
 	return g_fail - before;
 }
 
+/* THE ERROR VOCABULARY, AND THE ASSERTION THAT MATTERS MOST HERE IS THE COLLISION. Apple's own header gives
+ * `kCTFontManagerErrorInUse` AND `kCTFontManagerErrorSystemRequired` THE SAME VALUE, 202, so an in-use refusal
+ * and a system-required refusal are indistinguishable to a caller. A library that "repaired" that, or that
+ * renumbered the ranges, would otherwise be indistinguishable from this one until a caller's comparison went
+ * wrong — which is why every code is named here rather than spot-checked.
+ *
+ * THE TWO STRINGS ARE INFERENCES RATHER THAN PUBLISHED VALUES, so they are held exactly as the descriptor's
+ * fourteen unprovable keys are: a change to either should be a deliberate act. AND THE REASON THEY CANNOT BE
+ * PROVED IS ITSELF MEASURED — the AppKit at 10.6 declares no counterpart (`NSFontManager.h` declares no
+ * `extern const …StringRef` at all), so the rule that carries the other Core Text keys across does not apply. */
+static int case_font_manager_errors(void)
+{
+	int before = g_fail;
+	/* AUTOMATIC, NEITHER static NOR const: the error constants are `extern const CFStringRef` VARIABLES, so
+	 * their values are not constant expressions. The same note is in this file twice already. */
+	struct { CFStringRef key; const char *want; } keys[] = {
+		{ kCTFontManagerErrorDomain, "CTFontManagerErrorDomain" },
+		{ kCTFontManagerErrorFontURLsKey, "CTFontManagerErrorFontURLsKey" },
+	};
+	size_t i;
+
+	/* APPLE'S PUBLISHED CODES, one at a time, in both ranges. */
+	check(kCTFontManagerErrorFileNotFound == 101, "kCTFontManagerErrorFileNotFound is %d, want 101",
+	      (int)kCTFontManagerErrorFileNotFound);
+	check(kCTFontManagerErrorInsufficientPermissions == 102,
+	      "kCTFontManagerErrorInsufficientPermissions is %d, want 102",
+	      (int)kCTFontManagerErrorInsufficientPermissions);
+	check(kCTFontManagerErrorUnrecognizedFormat == 103,
+	      "kCTFontManagerErrorUnrecognizedFormat is %d, want 103",
+	      (int)kCTFontManagerErrorUnrecognizedFormat);
+	check(kCTFontManagerErrorInvalidFontData == 104,
+	      "kCTFontManagerErrorInvalidFontData is %d, want 104", (int)kCTFontManagerErrorInvalidFontData);
+	check(kCTFontManagerErrorAlreadyRegistered == 105,
+	      "kCTFontManagerErrorAlreadyRegistered is %d, want 105", (int)kCTFontManagerErrorAlreadyRegistered);
+	check(kCTFontManagerErrorNotRegistered == 201, "kCTFontManagerErrorNotRegistered is %d, want 201",
+	      (int)kCTFontManagerErrorNotRegistered);
+
+	/* AND THE COLLISION IS APPLE'S, SO IT IS KEPT: the two constants are asserted to still be ONE value. A
+	 * library that gave them different ones would be answering a question the era's own header cannot. */
+	check(kCTFontManagerErrorInUse == 202, "kCTFontManagerErrorInUse is %d, want 202",
+	      (int)kCTFontManagerErrorInUse);
+	check(kCTFontManagerErrorSystemRequired == kCTFontManagerErrorInUse,
+	      "kCTFontManagerErrorSystemRequired is %d and kCTFontManagerErrorInUse is %d -- Apple's header gives "
+	      "both 202 and this library keeps that rather than repairing it",
+	      (int)kCTFontManagerErrorSystemRequired, (int)kCTFontManagerErrorInUse);
+
+	for (i = 0; i < sizeof keys / sizeof keys[0]; i++) {
+		char buf[96];
+
+		check(keys[i].key != NULL, "error constant %zu is NULL", i);
+		if (keys[i].key == NULL) {
+			continue;
+		}
+		check(CFGetTypeID(keys[i].key) == CFStringGetTypeID(), "error constant %zu is not a CFString", i);
+		buf[0] = '\0';
+		check(CFStringGetCString(keys[i].key, buf, (CFIndex)sizeof buf, kCFStringEncodingUTF8) &&
+		      strcmp(buf, keys[i].want) == 0,
+		      "an error constant is \"%s\", want \"%s\"", buf, keys[i].want);
+	}
+	check(!CFEqual(keys[0].key, keys[1].key), "the error domain and the user-info key are the same string");
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -660,6 +724,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "A glyph's outline is a path, scaled, matrixed and transformed", case_font_outline },
 	{ "The collection is a question, and its value is that question", case_collection_object },
 	{ "The collection's one option key is the inference it is recorded as", case_collection_option_key },
+	{ "The error vocabulary, including Apple's duplicate 202", case_font_manager_errors },
 };
 
 int main(void)
