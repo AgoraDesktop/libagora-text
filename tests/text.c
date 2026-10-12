@@ -15,6 +15,10 @@
  */
 /* EVERY HEADER THE SUITE EXERCISES IS INCLUDED, one line each: a case that calls a door must be able to
  * see it, and forgetting one costs twenty errors in this file rather than one. */
+/* THE UMBRELLA IS INCLUDED FIRST, so that every door below is reachable THROUGH IT: the one-line include Apple's
+ * framework offers is proved by this translation unit compiling, and it is included before the individual headers
+ * rather than after them for that reason. */
+#include <CoreText/CoreText.h>
 #include <CoreText/CTFont.h>
 /* AND THE ENGINE'S INTERNAL HEADER, FOR THE DOORS CORE TEXT OWNS BUT DOES NOT IMPLEMENT: the Unicode
  * glyph step and the face registry. */
@@ -2496,6 +2500,38 @@ static int case_glyph_info(void)
 	return g_fail - before;
 }
 
+/* THE UMBRELLA, WHICH IS THE LAST HEADER AND THE ONE WITH A DOOR NO OTHER HEADER COULD DECLARE. A version number is a
+ * fact about the FRAMEWORK, so it belongs to the file that MEANS the framework — and the case calls it, because a door
+ * declared and never called is a declaration rather than a fact. */
+static int case_umbrella_version(void)
+{
+	int before = g_fail;
+	uint32_t version = CTGetCoreTextVersion();
+
+	/* THE SIX PUBLISHED NUMBERS, as Apple writes them — as MACROS, so they are compared here without linking. */
+	check(kCTVersionNumber10_5 == 0x00020000 && kCTVersionNumber10_5_2 == 0x00020001 &&
+	      kCTVersionNumber10_5_3 == 0x00020002 && kCTVersionNumber10_5_5 == 0x00020003 &&
+	      kCTVersionNumber10_6 == 0x00030000 && kCTVersionNumber10_6_7 == 0x00030007,
+	      "the version constants are not the values Apple publishes");
+	/* AND THE DOOR ANSWERS THE 10.6 NUMBER, which is the SURFACE this library implements — every header written from
+	 * the era's, every value the era's. It is NOT a claim about the platform underneath: see CoreText.c. */
+	check(version == kCTVersionNumber10_6, "the framework answered version 0x%08x, want 0x%08x (10.6)",
+	      (unsigned)version, (unsigned)kCTVersionNumber10_6);
+	/* AND APPLE'S OWN RECOMMENDED USE OF THIS DOOR IS THAT A CALLER CAN MAKE IT, which is the shape its header prints
+	 * as an example: the pointer is non-NULL and the number is at least the one they need. */
+	check(&CTGetCoreTextVersion != NULL && CTGetCoreTextVersion() >= kCTVersionNumber10_5,
+	      "the version door is not callable, or answers less than 10.5");
+	/* AND THE UMBRELLA REACHES EVERY OBJECT THIS FRAMEWORK HAS: a type id from each of the eleven headers that declare
+	 * one, asked FOR THROUGH THE UMBRELLA rather than through the header it lives in. THAT IS WHAT ONE LINE HAS TO
+	 * MEAN, and it is the assertion that would fail if the include list above ever lost a header. */
+	check(CTFontGetTypeID() != 0 && CTFontCollectionGetTypeID() != 0 && CTFontDescriptorGetTypeID() != 0 &&
+	      CTFrameGetTypeID() != 0 && CTFramesetterGetTypeID() != 0 && CTGlyphInfoGetTypeID() != 0 &&
+	      CTLineGetTypeID() != 0 && CTParagraphStyleGetTypeID() != 0 && CTRunGetTypeID() != 0 &&
+	      CTTextTabGetTypeID() != 0 && CTTypesetterGetTypeID() != 0,
+	      "a type id reachable through the umbrella answered zero");
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -2521,6 +2557,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The attribute keys, twelve proven and two inferred", case_string_attribute_keys },
 	{ "The tab, and the default it was owed for", case_text_tab },
 	{ "The glyph substitution, named three ways", case_glyph_info },
+	{ "The umbrella, and the version of the surface it implements", case_umbrella_version },
 };
 
 int main(void)

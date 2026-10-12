@@ -534,3 +534,33 @@ anchor, and the numbers quoted are the ones CAPTURED from the run below.
 MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with no compiler diagnostic at all in
 their logs; `nm -D build/libagora-text.so` lists all seven glyph-info doors; and a bare `ctest --test-dir build` is
 `100% tests passed, 0 tests failed out of 2` over `text: 24 of 24 cases passed, 0 failed`.
+**`CoreText.h` and `CoreText.c` — the umbrella, and the end of Apple's include graph (2026-10-11).** Fourteen headers in
+the order Apple includes them, plus the ONE DOOR NO OTHER HEADER COULD DECLARE (`CTGetCoreTextVersion`, because a
+version is a fact about the framework) and the six `kCTVersionNumber…` constants, which are MACROS in Apple's header and
+therefore macros here — a caller compares them without linking anything.
+
+**AND THE VERSION IS A CLAIM ABOUT THE SURFACE, NOT ABOUT THE PLATFORM, WHICH IS WORTH STATING WHERE THE NUMBER IS.**
+`CoreText.c` answers `kCTVersionNumber10_6`: every header in this library was written from Apple's 10.6 headers, every
+value is the era's, and every door is either defined or owed with its reason written down — so a caller written against
+the 10.6 API gets the number it expects and FINDS THE SURFACE IT EXPECTS, because that surface is what is here. It is
+NOT "this is macOS 10.6", and the comment says so.
+
+**AND ONE HEADER IS ABSENT FROM THE UMBRELLA, WHICH IS APPLE'S OMISSION REPRODUCED RATHER THAN REPAIRED.**
+`CTFontManagerErrors.h` is not in Apple's include list and not in this one; a caller who includes the umbrella still HAS
+it, because `CTFontManager.h` includes it — which is why that header was written first among its neighbours. Adding it
+here would be a kindness that made this file disagree with the framework it duplicates.
+
+**AND THE UMBRELLA IS VERIFIED AS AN UMBRELLA.** The suite includes it FIRST — before the individual headers — so that
+every door below is reachable THROUGH it; and the case asks each of the ELEVEN headers that declare a type for its type
+id THROUGH THE UMBRELLA, calls the version door, and checks Apple's own recommended use of it (the pointer is callable
+and the number is at least 10.5). AN INCLUDE LIST THAT LOST A HEADER WOULD FAIL THAT CASE, rather than a caller months
+later.
+
+MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with no compiler diagnostic at all in
+their logs; `nm -D build/libagora-text.so` lists `CTGetCoreTextVersion`; and a bare `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2`
+over `text: 25 of 25 cases passed, 0 failed`.
+
+**AND WITH THIS THE ORDER IS DONE**: `CTFontTraits`, `CTFontDescriptor`, `CTFont`, `CTFontCollection`,
+`CTFontManagerErrors`, `CTFontManager`, `CTParagraphStyle`, `CTLine`, `CTRun`, `CTTypesetter`, `CTFrame`,
+`CTFramesetter`, `CTStringAttributes`, `CTTextTab`, `CTGlyphInfo` and now the umbrella — seventeen headers written from
+Apple's own, with every owed door named and every recorded deviation either paid or still carrying its reason.

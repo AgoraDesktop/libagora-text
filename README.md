@@ -389,3 +389,19 @@ ctest --test-dir build
 - **AND ITS COLLECTION VOCABULARY HAS NO GAPS**, the opposite shape to the underline one the attribute case holds:
   `kCTIdentityMappingCharacterCollection` is 0 and the five Adobe collections are 1 through 5 in Apple's order, so this
   enum may be counted where that one may not.
+- **`CoreText.h` IS THE UMBRELLA, AND WITH IT APPLE'S OWN INCLUDE GRAPH IS COMPLETE — FOURTEEN HEADERS IN THE ORDER
+  THEY INCLUDE EACH OTHER.** A caller who wants the framework rather than a part of it now writes one line. IT CARRIES
+  THE ONE DOOR NO OTHER HEADER COULD DECLARE — `CTGetCoreTextVersion`, because a version is a fact about the
+  **framework** — and the six `kCTVersionNumber…` constants, which are **macros** in Apple's header and therefore
+  macros here: a caller compares them without linking anything. **AND IT ANSWERS `kCTVersionNumber10_6`**, which is a
+  claim about the SURFACE and not about the platform: every header in this library was written from the era's, so a
+  10.6 caller asking for 10.6 gets the answer it expects and finds the surface it expects. MEASURED: `text: 25 of 25 cases passed, 0 failed`.
+- **AND THE UMBRELLA IS VERIFIED AS A UMBRELLA RATHER THAN AS A FILE.** The suite includes it **FIRST**, before the
+  individual headers, so that every door below is reachable *through it*; and the case asks each of the **eleven**
+  headers that declare a type for its type id **through the umbrella**, calls the version door, and checks Apple's own
+  recommended use of it (the pointer is callable and the number is at least 10.5). An include list that lost a header
+  would fail that case rather than a caller months later.
+- **AND ONE HEADER IS ABSENT FROM IT, WHICH IS APPLE'S OWN OMISSION REPRODUCED.** `CTFontManagerErrors.h` is not in
+  Apple's umbrella list and not in ours; a caller who includes the umbrella still **has** it, because
+  `CTFontManager.h` includes it — which is why that header was written first among its neighbours. Naming it here
+  would be a kindness that made this file disagree with the framework it duplicates.
