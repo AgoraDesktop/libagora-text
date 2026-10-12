@@ -2963,6 +2963,96 @@ static int case_font_matching(void)
 	return g_fail - before;
 }
 
+/* THE VISIBILITY DOOR: ENABLING AND DISABLING FONTS, WHICH IS THIS LIBRARY'S ONE PIECE OF GLOBAL STATE. Three things
+ * about it are checkable and all three are held here: a DISABLED face LEAVES EVERY MATCHING ANSWER, RE-ENABLING BRINGS
+ * IT BACK, and the state is keyed on the descriptor's ATTRIBUTES rather than on an object — a caller may rebuild its
+ * query from scratch and still re-enable the font it named, which is the only reading that makes the door usable at all.
+ *
+ * AND IT PUTS THE STATE BACK THE WAY IT FOUND IT, at the end of the case: the disabled set is process-global, so a case
+ * that left a face disabled would be a case that changed the ones after it. */
+static int case_font_visibility(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(12.0);	/* registers the face, so it is matchable before anything is disabled */
+	CFMutableDictionaryRef attrs;
+	CFMutableArrayRef handed;
+	CTFontDescriptorRef query, rebuilt;
+	CFArrayRef matches, after, back, every;
+	CTFontCollectionRef everything;
+	CFIndex i, enabled = -1, disabled = -1, named = 0;
+
+	check(font != NULL, "no font, so there is nothing to disable");
+	if (font == NULL) {
+		return g_fail - before;
+	}
+	attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					  &kCFTypeDictionaryValueCallBacks);
+	handed = CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks);
+	check(attrs != NULL && handed != NULL, "the test could not make its dictionary or array");
+	if (attrs == NULL || handed == NULL) {
+		return g_fail - before;
+	}
+	CFDictionarySetValue(attrs, kCTFontNameAttribute, CFSTR("DejaVuSansMono-Bold"));
+	query = CTFontDescriptorCreateWithAttributes(attrs);
+	CFArrayAppendValue(handed, query);
+	matches = CTFontDescriptorCreateMatchingFontDescriptors(query, NULL);
+	enabled = (matches != NULL) ? CFArrayGetCount(matches) : -1;
+	check(enabled >= 1, "the face does not match before it is disabled (%ld), so nothing can be shown to change",
+	      (long)enabled);
+
+	/* DISABLE IT: the face leaves the answer, and the COLLECTION sees the same thing — both go through the one walk. */
+	CTFontManagerEnableFontDescriptors(handed, false);
+	after = CTFontDescriptorCreateMatchingFontDescriptors(query, NULL);
+	disabled = (after != NULL) ? CFArrayGetCount(after) : -1;
+	check(after != NULL && disabled == 0, "a DISABLED face still matched (%ld descriptors)", (long)disabled);
+	everything = CTFontCollectionCreateFromAvailableFonts(NULL);
+	every = (everything != NULL) ? CTFontCollectionCreateMatchingFontDescriptors(everything) : NULL;
+	check(every != NULL, "the collection answered nothing at all after a face was disabled");
+	if (every != NULL) {
+		for (i = 0; i < CFArrayGetCount(every); i++) {
+			CFStringRef name = (CFStringRef)CTFontDescriptorCopyAttribute(
+				(CTFontDescriptorRef)CFArrayGetValueAtIndex(every, i), kCTFontNameAttribute);
+
+			if (name != NULL) {
+				if (CFEqual(name, CFSTR("DejaVuSansMono-Bold"))) {
+					named++;
+				}
+				CFRelease(name);
+			}
+		}
+		check(named == 0, "the collection still offers a disabled face (%ld times)", (long)named);
+		CFRelease(every);
+	}
+
+	/* RE-ENABLE FROM A REBUILT DESCRIPTOR: the state is keyed on ATTRIBUTES, not on the object the caller passed. */
+	rebuilt = CTFontDescriptorCreateWithAttributes(attrs);
+	check(rebuilt != NULL, "the test could not rebuild its query");
+	if (rebuilt != NULL) {
+		CFArrayRef single = CFArrayCreate(kCFAllocatorDefault, (const void **)&rebuilt, 1, &kCFTypeArrayCallBacks);
+
+		check(single != NULL, "the test could not make its one-element array");
+		if (single != NULL) {
+			CTFontManagerEnableFontDescriptors(single, true);
+			back = CTFontDescriptorCreateMatchingFontDescriptors(query, NULL);
+			check(back != NULL && CFArrayGetCount(back) == enabled,
+			      "re-enabling from a REBUILT descriptor did not bring the face back (%ld, was %ld)",
+			      (long)((back != NULL) ? CFArrayGetCount(back) : -1), (long)enabled);
+			if (back != NULL) {
+				CFRelease(back);
+			}
+			CFRelease(single);
+		}
+	}
+
+	/* NULL AND EMPTY: a door whose argument is a list must survive a list it cannot use. */
+	CTFontManagerEnableFontDescriptors(NULL, false);
+	check(1, "the door survived a NULL array -- this line can only be reached");
+	CTFontManagerEnableFontDescriptors(handed, true);	/* AND THE STATE IS PUT BACK as the case found it. */
+	CFRelease(handed);
+	CFRelease(attrs);
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -2992,6 +3082,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "A line truncates the way Apple prints it, and refuses another font", case_line_truncation },
 	{ "A line justifies at the spaces, by the fraction it is given", case_line_justification },
 	{ "Matching finds the faces a query describes, in a stable order", case_font_matching },
+	{ "A disabled face leaves every matching answer, and comes back", case_font_visibility },
 };
 
 int main(void)

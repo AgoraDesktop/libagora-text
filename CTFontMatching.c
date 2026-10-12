@@ -27,11 +27,84 @@
 
 #include <CoreFoundation/CFArray.h>
 
+#include <pthread.h>
+
 #include <string.h>
 
 /* =================================================================================================
  * ONE FACE, AS A DESCRIPTOR.
  * =============================================================================================== */
+/* =================================================================================================
+ * THE VISIBILITY STATE, WHICH IS THIS LIBRARY'S FIRST MUTABLE GLOBAL, AND ITS LOCK.
+ *
+ * CTFontManagerEnableFontDescriptors enables and disables fonts "based on the provided array of font descriptors", and a
+ * DISABLED face is one the application may not use — so what it changes is PROCESS-GLOBAL AND MUTABLE, which nothing
+ * else in this library is: every object here is immutable by construction, which is why the registration doors, the
+ * collections and the lines all answer without a lock. APPLE'S HEADER PROMISES THAT ALL OF ITS FUNCTIONS "are thread
+ * safe unless otherwise specified", SO THIS ONE IS LOCKED RATHER THAN CAVEATED — a statically initialised mutex guards
+ * every read and every write, and THE LIST IS NEVER HANDED OUT (a caller gets a boolean), so the lock is held for a few
+ * instructions and no caller can hold it at all.
+ *
+ * THE LIST HOLDS RETAINED DESCRIPTORS, AND THE QUESTION ASKED OF IT IS THE MATCHER'S OWN RULE RATHER THAN CFEqual —
+ * WHICH IS A CORRECTION THE CASE FOUND RATHER THAN A CHOICE. The first draft compared the two descriptors with CFEqual,
+ * and the case failed at once: the descriptors THIS TIER BUILDS for a face carry THREE attributes (its URL, its name and
+ * its family) while the descriptor a CALLER hands the door carries only what the caller wrote down, so the two are
+ * never equal and a disabled face stayed matchable. THE DISABLED LIST IS THEREFORE A LIST OF QUERIES, exactly as a font
+ * collection is: a face is disabled when some descriptor IN THE LIST DESCRIBES IT — the same test
+ * `ct_match_satisfies` makes for a matching query — so a caller disables a font by NAMING it and re-enables it by
+ * naming it again.
+ * =============================================================================================== */
+static pthread_mutex_t ct_match_visibility_lock = PTHREAD_MUTEX_INITIALIZER;
+static CFMutableArrayRef ct_match_disabled = NULL;
+
+static CFDictionaryRef ct_match_query_attributes(CTFontDescriptorRef descriptor);	/* THE TWO HELPERS THIS ONE NEEDS
+										 * ARE DEFINED BELOW THE WALK THAT CALLS IT, so
+										 * they are named here. */
+static bool ct_match_satisfies(CFDictionaryRef query, CFDictionaryRef candidate);
+
+static CFIndex ct_match_locked_match(CFDictionaryRef what)	/* THE LOCK MUST BE HELD BY THE CALLER. */
+{
+	CFIndex i, count;
+
+	if (ct_match_disabled == NULL || what == NULL) {
+		return -1;
+	}
+	count = CFArrayGetCount(ct_match_disabled);
+	for (i = 0; i < count; i++) {
+		CFDictionaryRef held = ct_match_query_attributes(
+			(CTFontDescriptorRef)CFArrayGetValueAtIndex(ct_match_disabled, i));
+
+		if (held != NULL) {
+			bool describes = ct_match_satisfies(held, what);
+
+			CFRelease(held);
+			if (describes) {
+				return i;
+			}
+		}
+	}
+	return -1;
+}
+
+static bool ct_match_is_disabled(CTFontDescriptorRef descriptor)
+{
+	CFDictionaryRef what;
+	bool found;
+
+	if (descriptor == NULL) {
+		return false;
+	}
+	what = ct_match_query_attributes(descriptor);
+	if (what == NULL) {
+		return false;
+	}
+	pthread_mutex_lock(&ct_match_visibility_lock);
+	found = (ct_match_locked_match(what) >= 0);
+	pthread_mutex_unlock(&ct_match_visibility_lock);
+	CFRelease(what);
+	return found;
+}
+
 static CTFontDescriptorRef ct_match_descriptor_for_path(const char *path)
 {
 	CGDataProviderRef provider;
@@ -108,8 +181,12 @@ static void ct_match_visit(void *info, const char *path)
 {
 	CTFontDescriptorRef descriptor = ct_match_descriptor_for_path(path);
 
-	if (descriptor != NULL) {
+	/* A DISABLED FACE IS NOT ONE THE APPLICATION MAY USE, so it is not one the application is told about: the ONE walk
+	 * that answers every matching question SKIPS it here, rather than each door remembering to. */
+	if (descriptor != NULL && !ct_match_is_disabled(descriptor)) {
 		ct_match_add((CFMutableArrayRef)info, descriptor);
+	}
+	if (descriptor != NULL) {
 		CFRelease(descriptor);
 	}
 }
@@ -348,4 +425,49 @@ CTFontDescriptorRef CTFontDescriptorCreateMatchingFontDescriptor(CTFontDescripto
 		CFRelease(matches);
 	}
 	return first;
+}
+
+/* =================================================================================================
+ * THE VISIBILITY DOOR, DEFINED HERE BECAUSE THIS IS WHERE ITS STATE IS. It is a `CTFontManager` door in a file about
+ * matching, which is the arrangement the four matching doors already have with the descriptor and the collection: THE
+ * TIER THAT OWNS THE STATE OWNS THE DOORS THAT REACH IT. AND `enable` IS THE SENSE OF APPLE'S VERB: true ENABLES a
+ * font, which REMOVES it from the disabled list; false DISABLES it, which adds it. The door returns VOID, as Apple's
+ * signature does, so a descriptor that was never disabled and one that was are indistinguishable to the caller — the
+ * state is readable only through the matching doors, which is what Apple's own sentence describes ("Disabled fonts are
+ * not available for use by the application").
+ * =============================================================================================== */
+void CTFontManagerEnableFontDescriptors(CFArrayRef descriptors, bool enable)
+{
+	CFIndex i, count;
+
+	if (descriptors == NULL) {
+		return;
+	}
+	pthread_mutex_lock(&ct_match_visibility_lock);
+	if (ct_match_disabled == NULL) {
+		ct_match_disabled = CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks);
+	}
+	if (ct_match_disabled != NULL) {
+		count = CFArrayGetCount(descriptors);
+		for (i = 0; i < count; i++) {
+			CFTypeRef descriptor = CFArrayGetValueAtIndex(descriptors, i);
+			CFDictionaryRef what = ct_match_query_attributes((CTFontDescriptorRef)descriptor);
+			CFIndex found = ct_match_locked_match(what);
+
+			/* ADD AND REMOVE ASK THE SAME QUESTION, so a caller who disables a font by naming it can re-enable it by
+			 * naming it again — even though neither descriptor is the other, and neither is the one this tier builds
+			 * for the face. */
+			if (enable) {
+				if (found >= 0) {
+					CFArrayRemoveValueAtIndex(ct_match_disabled, found);
+				}
+			} else if (found < 0) {
+				CFArrayAppendValue(ct_match_disabled, descriptor);
+			}
+			if (what != NULL) {
+				CFRelease(what);
+			}
+		}
+	}
+	pthread_mutex_unlock(&ct_match_visibility_lock);
 }

@@ -154,8 +154,19 @@ CTFontManagerAutoActivationSetting CTFontManagerGetAutoActivationSetting(CFStrin
 extern const CFStringRef kCTFontManagerRegisteredFontsChangedNotification;
 
 /* ---------------------------------------------------------------------------------------
- * OWED DOORS, EACH DECLARED HERE AND NOT DEFINED, so a caller who reaches for one gets a link error rather than
- * an invented answer. CTFontManager.c carries the reason for each.
+ * AND OF THESE TWO, ONE IS DEFINED AND ONE IS NOT — WHICH THIS COMMENT HAS TO SAY, because "declared here and not
+ * defined" was true of both and is now true of one, and a comment that stops being true is a document that lies.
+ *
+ * `CTFontManagerEnableFontDescriptors` IS DEFINED, IN `CTFontMatching.c`, BECAUSE THAT IS WHERE ITS STATE LIVES. It
+ * enables and disables fonts from a descriptor array, which is PROCESS-GLOBAL MUTABLE STATE — THE FIRST THIS LIBRARY
+ * HAS, since every object in it is immutable by construction — and it is guarded by a LOCK rather than caveated, because
+ * APPLE'S OWN HEADER PROMISES THAT ALL OF ITS FUNCTIONS "are thread safe unless otherwise specified". A disabled face
+ * is not one the application is told about, so the matching tier's ONE walk skips it and every matching door inherits
+ * the answer.
+ *
+ * AND THE ONE STILL OWED IS THE ONE THAT NEEDS SOMETHING THIS PROJECT DOES NOT HAVE: a FONT SERVER on the other end of
+ * the port, with no process, no port and no request to answer. It stays DECLARED AND NOT DEFINED, so reaching for it is
+ * a link error rather than a source that can never fire. `CTFontManager.c` carries that reason in full.
  * ------------------------------------------------------------------------------------- */
 void CTFontManagerEnableFontDescriptors(CFArrayRef descriptors, bool enable);
 

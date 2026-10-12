@@ -698,3 +698,33 @@ and a condition that becomes true is a door that has to move.
 
 MEASURED, from the run in the same command: a bare `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over `text: 28 of 28 cases passed, 0 failed`, with the `owed` test at
 2 names.
+**The visibility door, the library's first mutable global, and the bug its case found (2026-10-11).** The owed reason for
+`CTFontManagerEnableFontDescriptors` was a CONDITION — "It lands with the tier that owns matching, beside them" — AND THE
+TIER LANDED, so the door did. It is DEFINED IN `CTFontMatching.c` RATHER THAN IN `CTFontManager.c`, because that is where
+its state lives, and that is the same arrangement its four sibling doors already have with the descriptor and the
+collection: the tier that owns something owns the doors that reach it.
+
+**AND THE DECISION THE PREVIOUS COMMIT SURFACED WAS MADE, IN FAVOUR OF HONOURING APPLE'S OWN SENTENCE.** The door
+enables and disables fonts "based on the provided array of font descriptors", which is PROCESS-GLOBAL MUTABLE STATE —
+THE FIRST THIS LIBRARY HAS, since every object in it is immutable by construction and that is why its registration
+doors, its collections, its lines and its matcher all answer without a lock. Apple's header promises that all of its
+functions "are thread safe unless otherwise specified", SO THE STATE IS GUARDED BY A STATICALLY INITIALISED MUTEX RATHER
+THAN CAVEATED: a caveat would have been a silent deviation from a documented contract, where the lock is a few lines and
+keeps it. THE LIST IS NEVER HANDED OUT — a caller gets a boolean — so the lock is held for a handful of instructions and
+no caller can hold it at all. A caller's descriptors are RETAINED by the list, so they cannot be freed underneath it.
+
+**AND THE CASE FOUND A REAL BUG, WHICH IS WHAT IT WAS WRITTEN FOR: CFEqual WAS THE WRONG QUESTION.** The first draft
+asked whether the disabled descriptor and a candidate were EQUAL, and the case failed at once — THE DESCRIPTORS THIS TIER
+BUILDS FOR A FACE CARRY THREE ATTRIBUTES (its URL, its name and its family, each read from the face itself) WHILE THE
+DESCRIPTOR A CALLER HANDS THE DOOR CARRIES ONLY WHAT THE CALLER WROTE DOWN, so the two are never equal, the disable had
+no effect, and a "disabled" face stayed matchable. THE DISABLED LIST IS THEREFORE A LIST OF QUERIES, EXACTLY AS A FONT
+COLLECTION IS: a face is disabled when some descriptor in the list DESCRIBES it, which is the same `ct_match_satisfies`
+test a matching query gets, and ADD AND REMOVE ASK THE SAME QUESTION — so a caller disables a font by NAMING it and
+re-enables it by naming it again. The bug was caught because the case held the STATE-CHANGE and not the door's return
+value, which is void and could not have shown anything.
+
+MEASURED, from a DELETED `build/` in the same command: configure and `cmake --build build` exit 0 with NO compiler
+diagnostic at all in their logs; `nm -D build/libagora-text.so` lists the door; and a bare `ctest --test-dir build` is
+`100% tests passed, 0 tests failed out of 2` over `text: 29 of 29 cases passed, 0 failed` — with **1** names in the `owed` test, which is now ONE DOOR: `CTFontManagerCreateFontRequestRunLoopSource`,
+which needs a FONT SERVER on the other end of the port rather than anything this library can build. THAT IS THE WHOLE OWED
+LIST.

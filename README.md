@@ -455,4 +455,17 @@ ctest --test-dir build
   functions *"are thread safe unless otherwise specified"*. **A lock, or a recorded caveat, is the decision**; choosing
   one on the way past is what this tree refuses. `CTFontManager.c` now says exactly that in place of the reason the
   matching tier made false. MEASURED: `text: 28 of 28 cases passed, 0 failed`, `owed` at **2** — one needing that decision, one needing the font server
-  itself.
+  itself.- **AND THE VISIBILITY DOOR LANDED, WITH THE DECISION MADE RATHER THAN DEFERRED: THE LOCK.** The long-standing
+  reason *"It lands with the tier that owns matching, beside them"* was met, so `CTFontManagerEnableFontDescriptors` is
+  **defined** — in `CTFontMatching.c`, because that is where its state lives — and the state it changes is **the first
+  mutable global this library has**. It is guarded by a **statically initialised mutex** rather than caveated, because
+  Apple's own header promises that all of its functions *"are thread safe unless otherwise specified"*; and **the list is
+  never handed out** (a caller gets a boolean), so no caller can hold the lock at all.
+- **AND THE CASE IT CAME WITH FOUND A REAL BUG, WHICH IS WHAT WRITING IT WAS FOR: `CFEqual` WAS THE WRONG QUESTION.** The
+  first draft compared the disabled descriptor against each candidate with `CFEqual`, and the case **failed at once** —
+  the descriptors this tier **builds** for a face carry **three** attributes (its URL, its name and its family), while
+  the descriptor a **caller** hands the door carries only what the caller wrote down, so the two are never equal and a
+  disabled face stayed matchable. **THE DISABLED LIST IS THEREFORE A LIST OF QUERIES, EXACTLY AS A FONT COLLECTION IS**:
+  a face is disabled when some descriptor in the list **describes** it — the same `ct_match_satisfies` test a matching
+  query gets — so a caller disables a font by **naming** it and re-enables it by naming it again. MEASURED: `100% tests passed, 0 tests failed out of 2` over
+  `text: 29 of 29 cases passed, 0 failed`, **135 public doors**, and `owed` down to **1**.
