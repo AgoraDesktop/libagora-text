@@ -338,3 +338,37 @@ MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 wi
 their logs; `nm -D build/libagora-text.so` lists the eleven defined `CTLine` doors and NONE of the three owed ones; and
 a bare `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over
 `text: 17 of 17 cases passed, 0 failed`.
+
+**`CTRun` — the type a line is made of, and the one `CTLineGetGlyphRuns` was owed against (2026-10-11).** Declared and
+implemented: the four arrays (glyphs, positions, advances, string indices) with a **pointer** door and a **copying**
+door each, the attributes, the string range, the status, the text matrix, the typographic and image bounds, and a draw
+over a RANGE. **AND `CTLineGetGlyphRuns` IS DEFINED IN THE SAME COMMIT** — it was owed for exactly as long as this type
+did not exist, which is what Apple's own include order records by putting `CTRun.h` AFTER `CTLine.h`. THE `owed` TEST
+LOST THAT NAME AT THE SAME MOMENT, and that is not tidiness: it fails when an owed door ACQUIRES a definition, so a
+line that answered runs while the test still named it would have failed the suite. The two moved together because
+neither could move alone.
+
+**THREE DECISIONS IN THIS FILE ARE WORTH THE SPACE THEY TAKE, AND ALL THREE ARE THINGS A CALLER CAN OBSERVE.** ONE:
+**A RUN OWNS ITS ARRAYS.** It is independently retainable, so it cannot be a view over its line's storage — the four
+arrays are copied at creation, which costs a second copy of the glyph data per line and is paid rather than answering a
+retained run with a dangling pointer. TWO: **THE POINTER DOORS NEVER ANSWER NULL**, because the run always keeps its
+data contiguous — Apple's contract for each of them is "the caller should be prepared for this function to return NULL
+… [and] allocate their own buffer", and this implementation's answer is stronger, so the case asserts that the pointer
+door and the copying door AGREE rather than checking one of them. THREE: **THE RANGE RULE IS APPLIED IN ONE PLACE.**
+Apple's own sentence — "If the length of the range is set to 0, then the copy operation will continue from the range's
+start index to the end of the run" — lives in `ct_run_clamp`, which the eight array doors and the two range-taking
+measurement doors all share, because eight copies of a rule would be eight chances to disagree.
+
+**AND TWO ANSWERS ARE THIS TIER'S RATHER THAN DERIVED, ASSERTED SO THAT CHANGING THEM IS DELIBERATE.
+`CTRunGetStatus` IS `NoStatus` AND `CTRunGetTextMatrix` IS THE IDENTITY**, because this library does no bidirectional
+reordering and sets no run matrix; the three status flags (`RightToLeft`, `NonMonotonic`, `HasNonIdentityMatrix`) exist
+for the tier that does. AND THE SEAM IS A HEADER OF ITS OWN: `CTRun_internal.h` is NOT part of Core Text's surface —
+Apple has no public creator for a run, because a line is what produces one — and it exists so that the run and the line
+agree about how one is built instead of one file `extern`ing what the other defines.
+
+MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with no compiler diagnostic at all in
+their logs; `nm -D build/libagora-text.so` lists the seventeen `CTRun` doors and, of the two CTLine doors still owed,
+neither; and a bare `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over
+`text: 18 of 18 cases passed, 0 failed`. The new case checks the run's glyphs against the FONT'S OWN MAPPING of the
+same string, its positions against its own advances, its width against the LINE's, its attributes against the string's,
+its range against the line's, and its draw against PIXELS — half the run marking ink strictly inside the whole.

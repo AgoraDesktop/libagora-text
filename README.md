@@ -268,13 +268,37 @@ ctest --test-dir build
   the pen" — unlike the three advance doors, whose pen "starts at the TEXT POSITION" — so the line's origin is
   applied by `CTLineDraw` itself. The case **draws the same line at two text positions into a real bitmap and
   checks the ink moved by 30 pixels**, because a comment cannot tell those two readings apart and a picture can.
-- **THREE DOORS ARE OWED, AND THE `owed` TEST NOW NAMES SEVEN.** `GetGlyphRuns` — a line's runs are `CTRunRef`s
-  and `CTRun` does not exist yet, since Apple's own include order puts its header *after* `CTLine.h`, which is why
-  this header never mentions the type — and `CreateTruncatedLine` / `CreateJustifiedLine`, which need the
-  truncation and justification engines: where an ellipsis may fall, which clusters may not be split, and where
-  justification slack goes are rules Apple states **nowhere** in the header, and spreading the slack evenly would
-  look plausible and be wrong.
+- **THREE DOORS **WERE** OWED AT THAT COMMIT, AND THE `owed` TEST NAMED SEVEN THEN — SIX ONCE `CTRun` LANDED, which
+  is the next bullet down.** `GetGlyphRuns` — a line's runs are `CTRunRef`s and `CTRun` did not exist yet, since
+  Apple's own include order puts its header *after* `CTLine.h`, which is why this header never mentions the type —
+  and `CreateTruncatedLine` / `CreateJustifiedLine`, which need the truncation and justification engines: where an
+  ellipsis may fall, which clusters may not be split, and where justification slack goes are rules Apple states
+  **nowhere** in the header, and spreading the slack evenly would look plausible and be wrong.
 - **AND THE FONT-ATTRIBUTE KEY IS THE ONE PLACE `CTLine` REACHES OUTSIDE ITSELF.** A line must read
   `kCTFontAttributeName`, whose header (`CTStringAttributes.h`) is much later in the documented include order, so
   **the value is written once in `CTLine.c`** — with the reason and its removal point — rather than the constant
   invented. Nothing else in the library names the key, and the suite names the same string.
+- **`CTRun` IS DECLARED AND IMPLEMENTED, AND IT IS THE TYPE `GetGlyphRuns` WAS WAITING FOR.** A run is what a line
+  is made of: its four arrays (glyphs, positions, advances, string indices), the attributes it was laid out with,
+  its string range, and a draw over a **range** of it. **`CTLineGetGlyphRuns` IS DEFINED AS OF THIS COMMIT** — it
+  was owed for exactly as long as `CTRun` did not exist, which is why Apple's own include order puts `CTRun.h`
+  *after* `CTLine.h` — and **the `owed` test lost that name in the same commit**, because that test fails if an owed
+  door acquires a definition: the two could only move together. MEASURED: `text: 18 of 18 cases passed, 0 failed`.
+- **IT OWNS ITS ARRAYS, WHICH DECIDES TWO THINGS A CALLER CAN SEE.** A run is independently retainable, so it cannot
+  be a view over its line's storage: it **copies** the four arrays at creation — a second copy of the glyph data per
+  line, paid deliberately rather than answering a retained run with a dangling pointer. And because it always keeps
+  them contiguous, **the four `Ptr` doors never answer NULL** where Apple's contract allows it ("the caller should
+  be prepared for this function to return NULL even if there are glyphs in the stream"); the case asserts that the
+  pointer door and the copying door **agree**, which is a stronger check than either alone.
+- **THE RANGE RULE IS APPLE'S OWN SENTENCE AND LIVES IN ONE PLACE.** *"If the length of the range is set to 0, then
+  the copy operation will continue from the range's start index to the end of the run."* It is applied by
+  `ct_run_clamp`, which all eight array doors and both range-taking measurement doors share — eight copies of the
+  rule would be eight chances to disagree. The case holds it, and holds that a **part** of the run measures narrower
+  than the whole, which is what the line's own doors cannot do.
+- **TWO ANSWERS ARE THIS TIER'S RATHER THAN DERIVED, AND BOTH ARE ASSERTED SO A CHANGE IS DELIBERATE**:
+  `CTRunGetStatus` is `NoStatus` and `CTRunGetTextMatrix` is the identity, because this library does no
+  bidirectional reordering and sets no run matrix. The three status flags exist for the tier that does.
+- **AND ONE NEW HEADER IS DELIBERATELY NOT PART OF THE SURFACE**: `CTRun_internal.h` carries the constructor seam
+  between a run and the line that makes one — Apple has no public creator for a run, since a line is what produces
+  one — so that the two files agree about how a run is built instead of one of them `extern`ing what the other
+  defines.

@@ -119,11 +119,19 @@ CFIndex CTLineGetStringIndexForPosition(CTLineRef line, CGPoint position);
  * because a single run has one caret per boundary. Apple's failure answer is 0.0. */
 CGFloat CTLineGetOffsetForStringIndex(CTLineRef line, CFIndex charIndex, CGFloat *secondaryOffset);
 
-/* ---------------------------------------------------------------------------------------
- * OWED DOORS, EACH DECLARED HERE AND NOT DEFINED. `CTLine.c` carries the reasons.
- * ------------------------------------------------------------------------------------- */
+/* THE RUNS THAT MAKE THE LINE UP, which is where this header meets `CTRun` — a type whose OWN header comes AFTER
+ * this one in Apple's include order, and which is therefore not named here at all: what comes back is a
+ * `CFArrayRef` of them. THE REFERENCE IS BORROWED, owned by the line — Apple's name for this door is `Get` and not
+ * `Copy`, and its documentation says nothing about releasing. THIS TIER'S LINES HAVE ONE RUN EACH (see this file's
+ * head), and `CTLine.c` records what changes the day a line can hold two fonts. */
 CFArrayRef CTLineGetGlyphRuns(CTLineRef line);
 
+/* ---------------------------------------------------------------------------------------
+ * OWED DOORS, EACH DECLARED HERE AND NOT DEFINED. `CTLine.c` carries the reasons. — AND `CTLineGetGlyphRuns` LEFT
+ * THIS LIST IN THE COMMIT THAT BROUGHT `CTRun` INTO THE TREE, which is why the `owed` test lost that name at the
+ * same time: it fails if an owed door IS defined, so the two had to move together, and neither could have moved
+ * alone.
+ * ------------------------------------------------------------------------------------- */
 CTLineRef CTLineCreateTruncatedLine(CTLineRef line, double width, CTLineTruncationType truncationType,
 				    CTLineRef truncationToken);
 

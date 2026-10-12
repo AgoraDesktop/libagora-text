@@ -22,6 +22,11 @@
  * and this is where it answers it. */
 #include <CoreText/CTFont.h>
 
+/* AND THE RUN, WHICH A LINE IS MADE OF. `CTRun_internal.h` is NOT part of Core Text's surface — Apple has no public
+ * creator for a run, because a line is what makes one — and it is included here so that the two files agree about
+ * how a run is built instead of one of them `extern`ing what the other defines. */
+#include <CoreText/CTRun_internal.h>
+
 #include <CoreFoundation/CFCharacterSet.h>
 #include <CoreFoundation/CFRuntime.h>
 
@@ -56,6 +61,11 @@ struct __CTLine {
 	double width;			/* the sum of the advances */
 	CGFloat ascent, descent, leading;
 	double trailingWhitespace;
+	/* AND ITS ONE RUN, BUILT ON FIRST ASK RATHER THAN AT CREATION: a line that is only measured never pays for a
+	 * run, and a line whose runs are asked for pays for exactly one. `runs` is the ARRAY the door hands out, kept
+	 * so that two calls give a caller the same object rather than two arrays holding the same run. */
+	CTRunRef run;			/* RETAINED once built */
+	CFArrayRef runs;		/* RETAINED once built: one array holding that one run */
 };
 
 static void ct_line_finalize(CFTypeRef cf)
@@ -67,6 +77,12 @@ static void ct_line_finalize(CFTypeRef cf)
 	}
 	if (line->font != NULL) {
 		CFRelease(line->font);
+	}
+	if (line->run != NULL) {
+		CFRelease(line->run);
+	}
+	if (line->runs != NULL) {
+		CFRelease(line->runs);
 	}
 	free(line->glyphs);
 	free(line->positions);
@@ -453,15 +469,73 @@ CGFloat CTLineGetOffsetForStringIndex(CTLineRef line, CFIndex charIndex, CGFloat
 }
 
 /* =================================================================================================
+ * THE RUNS, WHICH IS WHERE THIS TYPE MEETS `CTRun`.
+ * =============================================================================================== */
+/* ONE ARRAY, ONE RUN, BUILT ON FIRST ASK AND KEPT. APPLE'S NAME FOR THIS DOOR IS `Get` AND NOT `Copy`, and its
+ * documentation says nothing about releasing — so what comes back is BORROWED, owned by the line, which is the
+ * reading the name and the silence agree on. The array is built once and cached for exactly that reason: two calls
+ * hand a caller the SAME object rather than two arrays holding the same run.
+ *
+ * AND THERE IS ONE RUN BECAUSE THERE IS ONE FONT. A run is, in CTRun.h's own words, "the piece of a line that shares
+ * one set of attributes", and this tier lays a line out in one pass with one face — so the single run covers every
+ * character the line does and its string range IS the line's. What a caller must NOT conclude from that is that a
+ * line's runs are always one: the day a line can hold two fonts, THIS function is where that changes and nothing
+ * else in the library has to.
+ *
+ * THE ADVANCES ARE RECOVERED FROM THE POSITIONS, because the line does not store them — it stores where each glyph
+ * goes and how wide the whole thing is. For this tier's one-pass layout an advance IS the distance to the next
+ * glyph's origin, which is the same rule the caret doors already use, so it is taken from that one place rather
+ * than written a second time. */
+CFArrayRef CTLineGetGlyphRuns(CTLineRef line)
+{
+	struct __CTLine *l = (struct __CTLine *)line;
+	CFDictionaryRef attributes;
+	CFIndex *indices;
+	CGSize *advances;
+	CFIndex i;
+
+	if (l == NULL) {
+		return NULL;
+	}
+	if (l->runs != NULL) {
+		return l->runs;
+	}
+	/* THE STRING INDICES ARE THE RUN'S FACT AND ARE BUILT HERE: one glyph per character, in order, so the index
+	 * array is 0..glyphCount-1. A line that shaped its text would read them from the shaper instead, and this is
+	 * the place that would change. */
+	indices = (CFIndex *)malloc((size_t)((l->glyphCount > 0) ? l->glyphCount : 1) * sizeof(CFIndex));
+	advances = (CGSize *)malloc((size_t)((l->glyphCount > 0) ? l->glyphCount : 1) * sizeof(CGSize));
+	if (indices == NULL || advances == NULL) {
+		free(indices);
+		free(advances);
+		return NULL;
+	}
+	for (i = 0; i < l->glyphCount; i++) {
+		indices[i] = i;
+		advances[i] = CGSizeMake(ct_line_advance_at(l, i), 0.0);
+	}
+	/* THE ATTRIBUTES ARE THE STRING'S OWN FOR THE RUN'S RANGE — Apple's sentence allows either that or a dictionary
+	 * "manufactured by the layout engine" for font substitution or missing keys, and THIS TIER HAS NOTHING TO
+	 * MANUFACTURE: the font came from these very attributes. */
+	attributes = (l->string == NULL) ? NULL
+					 : CFAttributedStringGetAttributes(l->string, l->range.location, NULL);
+	l->run = CTRunCreateWithAttributesAndGlyphs(attributes, l->font, l->range, indices, l->glyphs,
+						    l->positions, advances, l->glyphCount);
+	free(indices);
+	free(advances);
+	if (l->run == NULL) {
+		return NULL;
+	}
+	l->runs = CFArrayCreate(kCFAllocatorDefault, (const void **)&l->run, 1, &kCFTypeArrayCallBacks);
+	if (l->runs == NULL) {
+		return NULL;
+	}
+	return l->runs;
+}
+
+/* =================================================================================================
  * OWED DOORS, EACH WITH THE REASON IT CANNOT BE ANSWERED HERE. They are DECLARED in CTLine.h and NOT DEFINED, so a
  * caller who reaches for one gets a link error rather than an invented answer.
- *
- *   CTLineGetGlyphRuns                            A LINE'S RUNS ARE `CTRunRef`s AND `CTRun` DOES NOT EXIST YET.
- *                                                 Apple's own include order puts CTRun.h AFTER CTLine.h — which is
- *                                                 why CTLine.h never mentions the type — so this tier has nothing
- *                                                 to hand back. It lands with `CTRun`, and with it comes the honest
- *                                                 answer to a harder question: what a RUN is when this library lays
- *                                                 a line out in one pass.
  *
  *   CTLineCreateTruncatedLine                     NEEDS THE TRUNCATION ENGINE, AND THE ENGINE IS THE DOOR. The token
  *                                                 is measurable here — it is a line, and this file makes lines — and
@@ -477,4 +551,9 @@ CGFloat CTLineGetOffsetForStringIndex(CTLineRef line, CFIndex charIndex, CGFloat
  *                                                 glyphs — is a set of rules Apple states nowhere in the header.
  *                                                 Spreading the slack evenly between glyphs would look plausible
  *                                                 and be wrong, which is the failure this tree refuses to ship.
+ *
+ * AND `CTLineGetGlyphRuns` WAS THE THIRD, DECLARED HERE AND NOT DEFINED FOR AS LONG AS `CTRun` DID NOT EXIST — which
+ * is why Apple's own include order puts CTRun.h AFTER CTLine.h. IT IS DEFINED ABOVE AS OF THIS COMMIT, and the
+ * `owed` test lost a name at the same time: that test fails if an owed door IS defined, so the two moved together
+ * and neither could have moved alone.
  * =============================================================================================== */

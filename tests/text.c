@@ -26,6 +26,7 @@
 #include <CoreText/CTFontTraits.h>
 #include <CoreText/CTLine.h>
 #include <CoreText/CTParagraphStyle.h>
+#include <CoreText/CTRun.h>
 
 #include <CoreFoundation/CoreFoundation.h>
 
@@ -1543,6 +1544,229 @@ static int case_line_drawing(void)
 	return g_fail - before;
 }
 
+/* THE RUN, WHICH IS WHAT A LINE IS MADE OF — AND THE DOOR THAT HAS BEEN OWED SINCE CTLine LANDED. Apple's own
+ * include order puts CTRun.h AFTER CTLine.h, which is exactly why `CTLineGetGlyphRuns` could not be answered before
+ * this type existed, and why both moved in ONE commit: the `owed` test fails if an owed door acquires a definition,
+ * so a line that answered runs while the test still named it would have failed the suite.
+ *
+ * EVERY ASSERTION HERE IS AGAINST SOMETHING ELSE THE LIBRARY SAYS. The run's glyphs are checked against the FONT'S
+ * OWN MAPPING of the same string, its positions against its own advances, its width against the LINE's, and its
+ * string range against the line's — and the "Ptr" doors against the COPYING doors, which is the pair Apple
+ * documents as possibly disagreeing (a run may keep its glyphs somewhere other than one contiguous block; this
+ * implementation always keeps them contiguous, so the two MUST agree, and that is asserted rather than assumed). */
+static int case_run_object(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(12.0);
+	CFMutableDictionaryRef attrs;
+	CFAttributedStringRef astr;
+	CTLineRef line;
+	CFArrayRef runs, runs_again;
+	CTRunRef run;
+	CFDictionaryRef run_attrs;
+	CFStringRef text = CFSTR("WAVE");
+	UniChar chars[4];
+	CGGlyph expected[4];
+	CGGlyph copied_glyphs[4];
+	CGPoint copied_positions[4];
+	CFIndex copied_indices[4];
+	const CGGlyph *glyphs_ptr;
+	const CGPoint *positions_ptr;
+	const CGSize *advances_ptr;
+	const CFIndex *indices_ptr;
+	CGAffineTransform matrix;
+	double width, line_width, part;
+	CGFloat ascent = 0.0, descent = 0.0, leading = 0.0;
+	CFRange run_range;
+	CFIndex i;
+
+	check(font != NULL, "no font, so there is no run to ask about");
+	if (font == NULL) {
+		return g_fail - before;
+	}
+	attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					  &kCFTypeDictionaryValueCallBacks);
+	check(attrs != NULL, "the test could not make its dictionary");
+	if (attrs == NULL) {
+		return g_fail - before;
+	}
+	CFDictionarySetValue(attrs, CFSTR("NSFontAttributeName"), font);
+	astr = CFAttributedStringCreate(kCFAllocatorDefault, text, attrs);
+	line = (astr != NULL) ? CTLineCreateWithAttributedString(astr) : NULL;
+	check(line != NULL, "the line whose run is under test could not be made");
+	if (line == NULL) {
+		return g_fail - before;
+	}
+
+	/* ONE RUN, BECAUSE ONE FONT — and the door is a `Get`, so the reference belongs to the line. */
+	runs = CTLineGetGlyphRuns(line);
+	check(runs != NULL, "the line answered no runs at all");
+	if (runs == NULL) {
+		return g_fail - before;
+	}
+	check(CFArrayGetCount(runs) == 1, "the line holds %ld runs, want 1", (long)CFArrayGetCount(runs));
+	check(CFArrayGetValueAtIndex(runs, 0) != NULL, "the single run is NULL");
+	/* AND THE SAME ARRAY COMES BACK TWICE, which is what a cached BORROWED reference means. */
+	runs_again = CTLineGetGlyphRuns(line);
+	check(runs_again == runs, "two calls answered different run arrays");
+
+	run = (CTRunRef)CFArrayGetValueAtIndex(runs, 0);
+	check(run != NULL && CFGetTypeID((CFTypeRef)run) == CTRunGetTypeID(),
+	      "the run's identity is not the runtime's: %lu against %lu",
+	      (unsigned long)((run != NULL) ? CFGetTypeID((CFTypeRef)run) : 0),
+	      (unsigned long)CTRunGetTypeID());
+	check(CTRunGetGlyphCount(run) == 4, "the run holds %ld glyphs, want 4",
+	      (long)CTRunGetGlyphCount(run));
+
+	/* ITS GLYPHS ARE THE FONT'S OWN MAPPING OF THE SAME CHARACTERS. */
+	CFStringGetCharacters(text, CFRangeMake(0, 4), chars);
+	(void)CTFontGetGlyphsForCharacters(font, chars, expected, 4);
+	glyphs_ptr = CTRunGetGlyphsPtr(run);
+	check(glyphs_ptr != NULL, "the run's glyph pointer is NULL, and this implementation always has one");
+	if (glyphs_ptr != NULL) {
+		for (i = 0; i < 4; i++) {
+			if (glyphs_ptr[i] != expected[i]) {
+				check(0, "the run's glyph %ld is %u and the font maps it to %u", (long)i,
+				      (unsigned)glyphs_ptr[i], (unsigned)expected[i]);
+			}
+		}
+	}
+
+	/* AND THE COPYING DOOR AGREES WITH THE POINTER DOOR — Apple's own documentation allows a run to answer NULL
+	 * from the pointer door and obliges the caller to fall back; this implementation's never do, so the two MUST
+	 * agree, and a case that only read one of them would not know. */
+	memset(copied_glyphs, 0, sizeof copied_glyphs);
+	CTRunGetGlyphs(run, CFRangeMake(0, 0), copied_glyphs);
+	check(glyphs_ptr != NULL && memcmp(copied_glyphs, glyphs_ptr, sizeof copied_glyphs) == 0,
+	      "the copying door and the pointer door disagree about the glyphs");
+
+	/* THE STRING INDICES MAP EACH GLYPH BACK TO ITS CHARACTER: one glyph per character here, so 0..3. */
+	indices_ptr = CTRunGetStringIndicesPtr(run);
+	check(indices_ptr != NULL, "the run's string-index pointer is NULL");
+	if (indices_ptr != NULL) {
+		for (i = 0; i < 4; i++) {
+			if (indices_ptr[i] != i) {
+				check(0, "the run's string index %ld is %ld, want %ld", (long)i,
+				      (long)indices_ptr[i], (long)i);
+			}
+		}
+	}
+	/* AND THE RANGE RULE, WHICH IS APPLE'S OWN SENTENCE: "If the length of the range is set to 0, then the copy
+	 * operation will continue from the range's start index to the end of the run." */
+	memset(copied_indices, 0, sizeof copied_indices);
+	CTRunGetStringIndices(run, CFRangeMake(2, 0), copied_indices);
+	check(copied_indices[0] == 2 && copied_indices[1] == 3,
+	      "a range starting at 2 did not continue to the end of the run: %ld, %ld", (long)copied_indices[0],
+	      (long)copied_indices[1]);
+
+	/* THE POSITIONS ARE THE RUNNING SUM OF THE ADVANCES, which is what makes them positions rather than guesses —
+	 * and the last advance is what is left of the run's width. */
+	positions_ptr = CTRunGetPositionsPtr(run);
+	advances_ptr = CTRunGetAdvancesPtr(run);
+	check(positions_ptr != NULL && advances_ptr != NULL, "a position or advance pointer is NULL");
+	if (positions_ptr != NULL && advances_ptr != NULL) {
+		CGFloat x = 0.0;
+
+		for (i = 0; i < 4; i++) {
+			if (positions_ptr[i].x - x > 0.001 || x - positions_ptr[i].x > 0.001) {
+				check(0, "position %ld is %g and the advances add up to %g", (long)i,
+				      (double)positions_ptr[i].x, (double)x);
+			}
+			x += advances_ptr[i].width;
+		}
+	}
+	memset(copied_positions, 0, sizeof copied_positions);
+	CTRunGetPositions(run, CFRangeMake(1, 0), copied_positions);
+	check(positions_ptr != NULL && copied_positions[0].x == positions_ptr[1].x,
+	      "a range starting at 1 did not begin at the second glyph");
+
+	/* ITS WIDTH IS THE LINE'S AND ITS HEIGHTS ARE THE FONT'S, then a PART of it measures narrower than the whole —
+	 * which is what a range-taking measurement door is for, and what the line's own doors cannot do. */
+	width = CTRunGetTypographicBounds(run, CFRangeMake(0, 0), &ascent, &descent, &leading);
+	line_width = CTLineGetTypographicBounds(line, NULL, NULL, NULL);
+	check(width > 0.0, "the run has no width at all");
+	check(width - line_width < 0.001 && line_width - width < 0.001,
+	      "the run is %g wide and its line is %g, and a one-run line is as wide as its run", width, line_width);
+	check(ascent - CTFontGetAscent(font) < 0.001 && CTFontGetAscent(font) - ascent < 0.001,
+	      "the run's ascent %g is not the font's %g", (double)ascent, (double)CTFontGetAscent(font));
+	part = CTRunGetTypographicBounds(run, CFRangeMake(0, 2), NULL, NULL, NULL);
+	check(part > 0.0 && part < width, "the first half of the run is %g wide and the whole is %g", part, width);
+
+	/* ITS ATTRIBUTES ARE THE STRING'S OWN, which is the half of Apple's sentence that applies when a layout engine
+	 * has nothing to manufacture. */
+	run_attrs = CTRunGetAttributes(run);
+	check(run_attrs != NULL, "the run answered no attributes");
+	if (run_attrs != NULL) {
+		check(CFGetTypeID((CFTypeRef)run_attrs) == CFDictionaryGetTypeID(),
+		      "the run's attributes are not a dictionary");
+		check(CFDictionaryGetValue(run_attrs, CFSTR("NSFontAttributeName")) != NULL,
+		      "the run's attributes do not carry the font they were laid out with");
+	}
+
+	run_range = CTRunGetStringRange(run);
+	check(run_range.location == 0 && run_range.length == 4,
+	      "the run's string range is (%ld, %ld) and its line's is (0, 4)", (long)run_range.location,
+	      (long)run_range.length);
+
+	/* THE TWO DOORS THIS TIER ANSWERS RATHER THAN DERIVES, ASSERTED SO THAT CHANGING THEM IS DELIBERATE:
+	 * `NoStatus`, because this library does no bidirectional reordering and sets no run matrix; and the identity
+	 * matrix, for the same reason. */
+	check(CTRunGetStatus(run) == kCTRunStatusNoStatus, "a run of this tier reports status %u",
+	      (unsigned)CTRunGetStatus(run));
+	matrix = CTRunGetTextMatrix(run);
+	check(matrix.a == 1.0 && matrix.b == 0.0 && matrix.c == 0.0 && matrix.d == 1.0 && matrix.tx == 0.0 &&
+	      matrix.ty == 0.0, "a run of this tier does not report the identity text matrix");
+
+	/* AND IT DRAWS, OVER A RANGE — the same pixel check the line's case makes, because a draw door that marked
+	 * nothing would pass a case that only called it. */
+	{
+		enum { W = 160, H = 40 };
+		static unsigned char pixels[W * H * 4];
+		CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
+
+		check(space != NULL, "the test could not make a colour space");
+		if (space != NULL) {
+			CGContextRef ctx = CGBitmapContextCreate(pixels, W, H, 8, W * 4, space,
+				kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
+
+			check(ctx != NULL, "the test could not make a bitmap context for the run");
+			if (ctx != NULL) {
+				int whole, half, left_whole, left_half;
+
+				CGContextSetRGBFillColor(ctx, 0.0, 0.0, 0.0, 1.0);
+				memset(pixels, 0, sizeof pixels);
+				CTRunDraw(run, ctx, CFRangeMake(0, 0));
+				whole = line_ink_count(pixels, W, H);
+				left_whole = line_ink_left(pixels, W, H);
+				check(whole > 0, "CTRunDraw marked NO pixels at all");
+				memset(pixels, 0, sizeof pixels);
+				CTRunDraw(run, ctx, CFRangeMake(0, 2));
+				half = line_ink_count(pixels, W, H);
+				left_half = line_ink_left(pixels, W, H);
+				check(half > 0, "drawing HALF the run marked no pixels");
+				check(half < whole, "half the run marked %d pixels and all of it marked %d", half, whole);
+				check(left_half == left_whole,
+				      "the first half of the run starts at %d and the whole run at %d", left_half,
+				      left_whole);
+			}
+		}
+	}
+
+	/* NULL SAFETY: EVERY DOOR ANSWERS ITS DOCUMENTED FAILURE VALUE rather than crashing, which is what Apple's
+	 * "@result ... or NULL" sentences require of an implementation. */
+	check(CTRunGetGlyphCount(NULL) == 0, "a NULL run reports glyphs");
+	check(CTRunGetAttributes(NULL) == NULL, "a NULL run answered attributes");
+	check(CTRunGetGlyphsPtr(NULL) == NULL, "a NULL run answered a glyph pointer");
+	check(CTRunGetPositionsPtr(NULL) == NULL, "a NULL run answered a position pointer");
+	check(CTRunGetAdvancesPtr(NULL) == NULL, "a NULL run answered an advance pointer");
+	check(CTRunGetStringIndicesPtr(NULL) == NULL, "a NULL run answered a string-index pointer");
+	check(CTRunGetStringRange(NULL).length == 0, "a NULL run answered a string range");
+	check(CTRunGetTypographicBounds(NULL, CFRangeMake(0, 0), NULL, NULL, NULL) == 0.0,
+	      "a NULL run answered a typographic width");
+	check(CTRunGetStringIndicesPtr(run) != NULL, "the run's own pointer went missing after the NULL checks");
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -1561,6 +1785,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "A paragraph style answers defaults, copies and retains", case_paragraph_style_object },
 	{ "A line is one run, and every measuring door agrees with the font", case_line_object },
 	{ "A line draws, and the ink follows the text position", case_line_drawing },
+	{ "The run agrees with its line, and draws over a range", case_run_object },
 };
 
 int main(void)
