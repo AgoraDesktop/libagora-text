@@ -404,4 +404,19 @@ ctest --test-dir build
 - **AND ONE HEADER IS ABSENT FROM IT, WHICH IS APPLE'S OWN OMISSION REPRODUCED.** `CTFontManagerErrors.h` is not in
   Apple's umbrella list and not in ours; a caller who includes the umbrella still **has** it, because
   `CTFontManager.h` includes it — which is why that header was written first among its neighbours. Naming it here
-  would be a kindness that made this file disagree with the framework it duplicates.
+  would be a kindness that made this file disagree with the framework it duplicates.- **`CTLineCreateTruncatedLine` IS IMPLEMENTED, AND IT IS THE FIRST OWED DOOR TO BE BUILT FROM ANOTHER DOOR'S
+  ARRIVAL.** Its recorded reason was *"it waits for the typesetter, whose job the breaking is"* — **and the typesetter
+  landed, so the door did.** `CTLine.c` implements Apple's printed contract and nothing more: a line that **fits** comes
+  back whole, the token goes where the cutting happened, a **NULL** token cuts the line off, and a token **wider than the
+  width** answers NULL — with the three types as Apple's own descriptions of which end stays visible, which the case
+  MEASURES (an END truncation keeps the line's first characters, a START keeps its last, a MIDDLE spans both).
+  **AND ONE REFUSAL IS HELD**: a token drawn in **another face** answers NULL, because a line here holds one font and the
+  token's glyph indices mean nothing in the other — Apple's answer is a multi-run line, and this tier refuses rather than
+  putting garbage where an ellipsis belongs. The result needed one thing the library did not have — **a line over GLYPHS
+  rather than over a string range** (`CTLineCreateWithGlyphs`), because a MIDDLE truncation keeps a prefix **and** a
+  suffix and so cannot be made from any one range. MEASURED: `text: 26 of 26 cases passed, 0 failed`, with `owed` down to **5** names.
+- **AND ITS CASE'S FIRST RUN WAS WRONG IN THE INSTRUCTIVE DIRECTION.** It asserted that a token in another font was
+  refused **even when the line fit** — which would have made a door that refuses lines it never had to touch. Apple's
+  condition is about the **line's** width, and the token is only reached when there is cutting to do; the case now
+  asserts that round the other way as well (a line that fits comes back whole even with a token this tier would
+  refuse).

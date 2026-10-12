@@ -22,6 +22,11 @@
 #include <CoreText/CTLine.h>
 #include <CoreText/CTStringAttributes.h>
 
+/* AND THE FONT, WHICH ONE OF THE DECLARATIONS BELOW TAKES AS AN ARGUMENT AND WHICH `CTLine.h` DOES NOT NAME — Apple's
+ * own CTLine.h includes no font header either, so a caller of the seam has to bring the type with it. An INTERNAL
+ * header may do that; a public one must not. */
+#include <CoreText/CTFont.h>
+
 /* A LINE OVER A RANGE OF AN ATTRIBUTED STRING, which is what a typesetter makes. `range` is IN THE STRING'S OWN
  * COORDINATES and is what the line reports as its string range; the glyphs are that range's, positioned from the
  * line's OWN origin, exactly as the whole-string door does it. A range that does not lie inside the string answers
@@ -32,5 +37,12 @@ CTLineRef CTLineCreateWithAttributedStringAndRange(CFAttributedStringRef string,
  * `CTStringAttributes.h` exists (the AppKit declares `NSFontAttributeName`, and a dictionary crosses). A constant,
  * borrowed, never released. */
 CFStringRef CTLineFontAttributeName(void);
+
+/* A LINE OVER GLYPHS THAT ARE NOT A STRING RANGE, which is what a TRUNCATED line is: `CTLineCreateTruncatedLine` keeps
+ * some of a line's glyphs and adds a token's, and for a MIDDLE truncation that is a prefix AND a suffix — so the result
+ * cannot be made from any one range of the string. The glyphs are placed from the line's own origin by their advances
+ * in the given font, and `range` is whatever the caller says the result covers. */
+CTLineRef CTLineCreateWithGlyphs(CFAttributedStringRef string, CFRange range, CTFontRef font, const CGGlyph *glyphs,
+				 CFIndex count);
 
 #endif /* CORE_TEXT_CTLINE_INTERNAL_H */

@@ -569,16 +569,195 @@ CFArrayRef CTLineGetGlyphRuns(CTLineRef line)
 }
 
 /* =================================================================================================
+ * THE TRUNCATION ENGINE, AND IT IS APPLE'S PRINTED CONTRACT AND NOTHING MORE THAN IT.
+ *
+ * Its header states four things, and those four are what this file implements: the line "will be truncated if its
+ * width is greater than the width passed" — so a line that FITS is returned whole; the token "will be added to the
+ * point where truncation took place"; "if this parameter is set to NULL, then no truncation token is used, and the
+ * line is simply cut off"; and "if the width of the line specified in truncationToken is greater, this function will
+ * return NULL if truncation is needed". The three types are Apple's own descriptions of which end stays visible, and
+ * they are the three branches below.
+ *
+ * ONE BOUNDARY IS RECORDED RATHER THAN GUESSED, AND IT IS THE FONT. A LINE HERE HOLDS ONE FONT, so a TOKEN DRAWN IN
+ * ANOTHER FACE cannot be added to it: the token's glyph INDICES are indices IN ITS OWN FONT, and inserting them into a
+ * line drawn with the other one would put garbage where an ellipsis belongs — a wrong answer that LOOKS like a
+ * truncation, which is the kind this tree refuses. Apple's answer is a line with several runs, and this tier's is to
+ * REFUSE; the case holds the refusal. A token in the SAME face — the ellipsis it usually is — works, and that is the
+ * case the door was written for.
+ *
+ * AND ONE NUMBER APPLE DOES NOT PRINT, WHICH IS NAMED WHERE IT IS CHOSEN: for a MIDDLE truncation the available room is
+ * SPLIT BETWEEN THE TWO ENDS, and how it splits is this tier's (half for the head, then whatever is left for the
+ * tail). Apple's own sentence describes the result — "leaving both the start and the end portions visible" — and says
+ * nothing about the division.
+ * =============================================================================================== */
+/* A LINE OVER GLYPHS THAT ARE NOT A STRING RANGE, which is what a truncated line is. */
+CTLineRef CTLineCreateWithGlyphs(CFAttributedStringRef string, CFRange range, CTFontRef font, const CGGlyph *glyphs,
+				 CFIndex count)
+{
+	struct __CTLine *line;
+	CGSize *advances;
+	CFIndex i;
+	double x = 0.0;
+
+	if (font == NULL || count < 0 || (count > 0 && glyphs == NULL)) {
+		return NULL;
+	}
+	line = ct_line_alloc();
+	if (line == NULL) {
+		return NULL;
+	}
+	line->string = (string == NULL) ? NULL : (CFAttributedStringRef)CFRetain(string);
+	line->font = (CTFontRef)CFRetain(font);
+	line->range = range;
+	line->ascent = CTFontGetAscent(font);
+	line->descent = CTFontGetDescent(font);
+	line->leading = CTFontGetLeading(font);
+	if (count == 0) {
+		return (CTLineRef)line;
+	}
+	line->glyphs = (CGGlyph *)malloc((size_t)count * sizeof(CGGlyph));
+	line->positions = (CGPoint *)malloc((size_t)count * sizeof(CGPoint));
+	advances = (CGSize *)malloc((size_t)count * sizeof(CGSize));
+	if (line->glyphs == NULL || line->positions == NULL || advances == NULL) {
+		free(advances);
+		CFRelease((CFTypeRef)line);
+		return NULL;
+	}
+	memcpy(line->glyphs, glyphs, (size_t)count * sizeof(CGGlyph));
+	memset(advances, 0, (size_t)count * sizeof(CGSize));
+	(void)CTFontGetAdvancesForGlyphs(font, kCTFontHorizontalOrientation, line->glyphs, advances, count);
+	for (i = 0; i < count; i++) {
+		line->positions[i] = CGPointMake((CGFloat)x, 0.0);
+		x += advances[i].width;
+	}
+	line->glyphCount = count;
+	line->width = x;
+	free(advances);
+	return (CTLineRef)line;
+}
+
+/* THE WIDTH OF A LINE'S FIRST `count` GLYPHS, from the positions the line already holds: they are cumulative, so the
+ * n-th one IS that width. One function, because two of the branches below need it and a second copy of the rule is a
+ * second chance to get it wrong. */
+static CGFloat ct_line_prefix_width(const struct __CTLine *line, CFIndex count)
+{
+	if (count <= 0) {
+		return 0.0;
+	}
+	if (count >= line->glyphCount) {
+		return (CGFloat)line->width;
+	}
+	return line->positions[count].x;
+}
+
+/* AS MANY GLYPHS AS FIT IN A WIDTH, FROM THE FRONT OR FROM THE BACK — the one measurement all three types share, so
+ * that they cannot disagree about what "as many as fit" means. */
+static CFIndex ct_line_fit(const struct __CTLine *line, double width, bool from_end)
+{
+	double used = 0.0;
+	CFIndex i, taken = 0;
+
+	if (width <= 0.0) {
+		return 0;
+	}
+	for (i = 0; i < line->glyphCount; i++) {
+		CFIndex at = from_end ? (line->glyphCount - 1 - i) : i;
+		CGFloat advance = ct_line_advance_at(line, at);
+
+		if (used + advance > width) {
+			break;
+		}
+		used += advance;
+		taken++;
+	}
+	return taken;
+}
+
+CTLineRef CTLineCreateTruncatedLine(CTLineRef line, double width, CTLineTruncationType truncationType,
+				    CTLineRef truncationToken)
+{
+	const struct __CTLine *l = (const struct __CTLine *)line;
+	const struct __CTLine *token = (const struct __CTLine *)truncationToken;
+	CGGlyph *glyphs;
+	CTLineRef result;
+	CFRange range;
+	CFIndex head = 0, tail = 0, count, i, at;
+	double available;
+
+	if (l == NULL) {
+		return NULL;
+	}
+	/* THE LINE FITS, AND APPLE'S OWN CONDITION SAYS SO: it "will be truncated if its width is GREATER than the width
+	 * passed", so nothing is cut and the result is a line of its own over the same range. */
+	if (l->width <= width) {
+		return CTLineCreateWithAttributedStringAndRange(l->string, l->range);
+	}
+	if (token != NULL) {
+		if (token->font == NULL || !CFEqual(token->font, l->font)) {
+			return NULL;	/* the recorded refusal: one font per line (see above) */
+		}
+		if (token->width >= width) {
+			return NULL;	/* Apple's sentence for a token too wide to fit */
+		}
+	}
+	available = (token != NULL) ? (width - token->width) : width;
+	if (available < 0.0) {
+		available = 0.0;
+	}
+	/* WHICH GLYPHS STAY. Apple's three descriptions are the three branches, and the middle one's division is named
+	 * above as this tier's. */
+	switch (truncationType) {
+	case kCTLineTruncationStart:
+		tail = ct_line_fit(l, available, true);
+		break;
+	case kCTLineTruncationMiddle:
+		head = ct_line_fit(l, available / 2.0, false);
+		tail = ct_line_fit(l, available - (double)ct_line_prefix_width(l, head), true);
+		break;
+	default:
+		head = ct_line_fit(l, available, false);
+		break;
+	}
+
+	/* THE RESULT IS THE KEPT GLYPHS WITH THE TOKEN'S BETWEEN THEM, in the order each type leaves them. */
+	count = head + ((token != NULL) ? token->glyphCount : 0) + tail;
+	glyphs = (CGGlyph *)malloc((size_t)((count > 0) ? count : 1) * sizeof(CGGlyph));
+	if (glyphs == NULL) {
+		return NULL;
+	}
+	at = 0;
+	for (i = 0; i < head; i++) {
+		glyphs[at++] = l->glyphs[i];
+	}
+	if (token != NULL) {
+		for (i = 0; i < token->glyphCount; i++) {
+			glyphs[at++] = token->glyphs[i];
+		}
+	}
+	for (i = l->glyphCount - tail; i < l->glyphCount; i++) {
+		glyphs[at++] = l->glyphs[i];
+	}
+
+	/* AND ITS STRING RANGE IS THE SPAN IT SHOWS OF THE ORIGINAL — which for a MIDDLE truncation covers the characters
+	 * it DROPPED, and that is the honest description of a line whose glyphs no longer correspond one to one with a
+	 * range of the string. APPLE PRINTS NOTHING ABOUT THIS DOOR'S RANGE, and a span is what a caret needs: it says
+	 * where in the string this line begins and ends. The token contributes no characters, because its own are not in
+	 * this string. */
+	if (truncationType == kCTLineTruncationStart) {
+		range = CFRangeMake(l->range.location + (l->glyphCount - tail), tail);
+	} else if (truncationType == kCTLineTruncationMiddle) {
+		range = CFRangeMake(l->range.location, head + tail);
+	} else {
+		range = CFRangeMake(l->range.location, head);
+	}
+	result = CTLineCreateWithGlyphs(l->string, range, l->font, glyphs, count);
+	free(glyphs);
+	return result;
+}
+
+/* =================================================================================================
  * OWED DOORS, EACH WITH THE REASON IT CANNOT BE ANSWERED HERE. They are DECLARED in CTLine.h and NOT DEFINED, so a
  * caller who reaches for one gets a link error rather than an invented answer.
- *
- *   CTLineCreateTruncatedLine                     NEEDS THE TRUNCATION ENGINE, AND THE ENGINE IS THE DOOR. The token
- *                                                 is measurable here — it is a line, and this file makes lines — and
- *                                                 cutting is a choice of glyphs; but WHICH glyphs is documented
- *                                                 against rules Apple does not print: where an ellipsis may fall,
- *                                                 what happens when the token is wider than the width, and which
- *                                                 clusters may not be split. It waits for the typesetter, whose job
- *                                                 the breaking is.
  *
  *   CTLineCreateJustifiedLine                      NEEDS THE JUSTIFICATION ENGINE. `justificationFactor` scales how
  *                                                 the slack is distributed, and WHERE it goes — between words, at
@@ -587,8 +766,9 @@ CFArrayRef CTLineGetGlyphRuns(CTLineRef line)
  *                                                 Spreading the slack evenly between glyphs would look plausible
  *                                                 and be wrong, which is the failure this tree refuses to ship.
  *
- * AND `CTLineGetGlyphRuns` WAS THE THIRD, DECLARED HERE AND NOT DEFINED FOR AS LONG AS `CTRun` DID NOT EXIST — which
- * is why Apple's own include order puts CTRun.h AFTER CTLine.h. IT IS DEFINED ABOVE AS OF THIS COMMIT, and the
- * `owed` test lost a name at the same time: that test fails if an owed door IS defined, so the two moved together
- * and neither could have moved alone.
+ * `CTLineGetGlyphRuns` WAS THE FIRST OF THESE TO LEAVE — it was owed for as long as `CTRun` did not exist, which is
+ * why Apple's own include order puts CTRun.h AFTER CTLine.h, and the `owed` test lost its name at the same time.
+ * `CTLineCreateTruncatedLine` WAS THE SECOND, and ITS REASON IS THE ONE WORTH READING: it waited for "the typesetter,
+ * whose job the breaking is" — and THE TYPESETTER LANDED, so the door did. That is what an owed door's reason is FOR:
+ * a condition that can be checked, not a sentence that reads like one.
  * =============================================================================================== */

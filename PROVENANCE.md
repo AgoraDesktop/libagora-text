@@ -564,3 +564,42 @@ over `text: 25 of 25 cases passed, 0 failed`.
 `CTFontManagerErrors`, `CTFontManager`, `CTParagraphStyle`, `CTLine`, `CTRun`, `CTTypesetter`, `CTFrame`,
 `CTFramesetter`, `CTStringAttributes`, `CTTextTab`, `CTGlyphInfo` and now the umbrella — seventeen headers written from
 Apple's own, with every owed door named and every recorded deviation either paid or still carrying its reason.
+**`CTLineCreateTruncatedLine` — the truncation engine, and the first owed door built from another door's arrival
+(2026-10-11).** Its recorded reason for waiting was "it waits for the typesetter, whose job the breaking is" — A
+CONDITION RATHER THAN A SENTENCE, which is what an owed reason is FOR — and THE TYPESETTER LANDED, so the door did. The
+`owed` test lost its name in the same commit, because that test fails when an owed door ACQUIRES a definition.
+
+**WHAT IS IMPLEMENTED IS APPLE'S PRINTED CONTRACT AND NOTHING MORE THAN IT.** Four sentences from its header are the
+whole of it: the line "will be truncated if its width is greater than the width passed" (so a line that FITS comes back
+whole); the token "will be added to the point where truncation took place"; "if this parameter is set to NULL, then no
+truncation token is used, and the line is simply cut off"; and "if the width of the line specified in truncationToken
+is greater, this function will return NULL if truncation is needed". The three types are Apple's own descriptions of
+which end stays visible, and THE CASE MEASURES EACH ONE rather than restating it.
+
+**AND ONE BOUNDARY IS HELD RATHER THAN GUESSED, AND IT IS THE FONT.** A LINE HERE HOLDS ONE FONT, so a TOKEN DRAWN IN
+ANOTHER FACE cannot be added to it — the token's glyph INDICES are indices in ITS font, and inserting them into a line
+drawn with the other would put garbage where an ellipsis belongs, which is a wrong answer that LOOKS like a truncation.
+Apple's answer is a line with several runs; this tier's is to REFUSE, and the case holds the refusal (reached the
+cheapest way there is: the same face at a different SIZE, which this library's font equality calls a different font).
+
+**AND THE RESULT NEEDED ONE THING THE LIBRARY DID NOT HAVE: A LINE OVER GLYPHS RATHER THAN OVER A STRING RANGE.**
+`CTLineCreateWithGlyphs` is a third declaration in `CTLine_internal.h`, and it exists because a MIDDLE truncation keeps
+a prefix AND a suffix — so the result cannot be made from any one range of the string. It took one fix to land: the
+seam's header had to include `CTFont.h`, because `CTLine.h` names no font (Apple's does not either), and an INTERNAL
+header may bring a type a public one must not.
+
+**AND ONE NUMBER APPLE DOES NOT PRINT IS NAMED WHERE IT IS CHOSEN**: for a MIDDLE truncation the available room is split
+between the two ends, and the division is this tier's (half for the head, then what is left for the tail). Apple's
+sentence describes the RESULT and says nothing about the division, so the division is recorded in `CTLine.c` rather than
+presented as Apple's. THE RANGE OF A TRUNCATED LINE IS RECORDED FOR THE SAME REASON: it is the SPAN of the original the
+result shows, which for a MIDDLE truncation covers characters the line does not draw — Apple prints nothing about that
+door's range, and a span is what a caret needs.
+
+**AND THE CASE'S FIRST RUN FAILED, WHICH IS WORTH KEEPING.** It asserted that a token in another font was refused EVEN
+WHEN THE LINE FIT — which would have made a door that refuses lines it never had to touch. Apple's condition is about
+the LINE's width, and the token is only reached when there is cutting to do; the case now asserts that round the other
+way as well.
+
+MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with no compiler diagnostic at all in
+their logs; `nm -D build/libagora-text.so` lists `CTLineCreateTruncatedLine` and `CTLineCreateWithGlyphs`; and a bare
+`ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over `text: 26 of 26 cases passed, 0 failed`, with the `owed` test down to 5 names.

@@ -127,14 +127,18 @@ CGFloat CTLineGetOffsetForStringIndex(CTLineRef line, CFIndex charIndex, CGFloat
 CFArrayRef CTLineGetGlyphRuns(CTLineRef line);
 
 /* ---------------------------------------------------------------------------------------
- * OWED DOORS, EACH DECLARED HERE AND NOT DEFINED. `CTLine.c` carries the reasons. — AND `CTLineGetGlyphRuns` LEFT
- * THIS LIST IN THE COMMIT THAT BROUGHT `CTRun` INTO THE TREE, which is why the `owed` test lost that name at the
- * same time: it fails if an owed door IS defined, so the two had to move together, and neither could have moved
- * alone.
+ * THE TWO DOORS THAT TRUNCATE A LINE, ONE OF THEM ANSWERED NOW. THE TRUNCATION ENGINE IS THE FIRST DOOR OF THIS
+ * HEADER TO HAVE BEEN BUILT FROM THE TYPESETTER'S ARRIVAL — its reason for waiting was "it waits for the typesetter,
+ * whose job the breaking is" — AND `CTLineCreateTruncatedLine` LEFT THE OWED LIST IN THE SAME COMMIT, which the
+ * `owed` test requires: it fails when an owed door acquires a definition. The three types are Apple's own descriptions
+ * of which end stays visible; see `CTLine.c` for the two things its header does not print, one of which is refused.
  * ------------------------------------------------------------------------------------- */
 CTLineRef CTLineCreateTruncatedLine(CTLineRef line, double width, CTLineTruncationType truncationType,
 				    CTLineRef truncationToken);
 
+/* ---------------------------------------------------------------------------------------
+ * AND THE OWED DOOR THAT IS LEFT, DECLARED HERE AND NOT DEFINED. `CTLine.c` carries its reason.
+ * ------------------------------------------------------------------------------------- */
 CTLineRef CTLineCreateJustifiedLine(CTLineRef line, CGFloat justificationFactor, double justificationWidth);
 
 #ifdef __cplusplus

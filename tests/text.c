@@ -2532,6 +2532,153 @@ static int case_umbrella_version(void)
 	return g_fail - before;
 }
 
+/* THE TRUNCATION ENGINE, AND APPLE'S PRINTED CONTRACT IS THE WHOLE OF IT. Four sentences from its header are asserted
+ * here: a line that FITS comes back whole; the token is added where the truncation took place; a NULL token "simply
+ * cut[s] the line off"; and a token wider than the width answers NULL. THE THREE TYPES ARE APPLE'S OWN DESCRIPTIONS OF
+ * WHICH END STAYS VISIBLE, and the case MEASURES that rather than trusting it — an END truncation keeps the line's
+ * FIRST characters, a START truncation keeps its LAST, and a MIDDLE one spans both ends.
+ *
+ * AND ONE REFUSAL IS HELD, because it is the one thing this tier cannot do: a token drawn in ANOTHER FACE. A line here
+ * holds one font and the token's glyph INDICES mean nothing in the other, so the door answers NULL rather than putting
+ * garbage where an ellipsis belongs. The case reaches that refusal the cheapest way there is — a token at the same
+ * face and a DIFFERENT SIZE, which is a different font by this library's own equality. */
+static int case_line_truncation(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(12.0);
+	CFMutableDictionaryRef attrs, attrs_big;
+	CFAttributedStringRef astr, token_astr, big_astr;
+	CTLineRef line, token, big_token, cut;
+	double line_width;
+	CFRange full;
+
+	check(font != NULL, "no font, so there is no line to truncate");
+	if (font == NULL) {
+		return g_fail - before;
+	}
+	attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					  &kCFTypeDictionaryValueCallBacks);
+	attrs_big = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					      &kCFTypeDictionaryValueCallBacks);
+	check(attrs != NULL && attrs_big != NULL, "the test could not make its dictionaries");
+	if (attrs == NULL || attrs_big == NULL) {
+		return g_fail - before;
+	}
+	CFDictionarySetValue(attrs, kCTFontAttributeName, font);
+	astr = CFAttributedStringCreate(kCFAllocatorDefault, CFSTR("ABCDEFGHIJ"), attrs);
+	token_astr = CFAttributedStringCreate(kCFAllocatorDefault, CFSTR("..."), attrs);
+	line = (astr != NULL) ? CTLineCreateWithAttributedString(astr) : NULL;
+	token = (token_astr != NULL) ? CTLineCreateWithAttributedString(token_astr) : NULL;
+	check(line != NULL && token != NULL, "the line or its token could not be made");
+	if (line == NULL || token == NULL) {
+		return g_fail - before;
+	}
+	line_width = CTLineGetTypographicBounds(line, NULL, NULL, NULL);
+	full = CTLineGetStringRange(line);
+	check(line_width > 0.0 && full.length == 10, "the line to truncate is %g wide and %ld characters",
+	      line_width, (long)full.length);
+
+	/* A LINE THAT FITS IS RETURNED WHOLE — Apple's own condition, "will be truncated if its width is GREATER than the
+	 * width passed" — so nothing is cut and the range is the same one. */
+	cut = CTLineCreateTruncatedLine(line, line_width * 2.0, kCTLineTruncationEnd, token);
+	check(cut != NULL, "a line that fits was not returned at all");
+	if (cut != NULL) {
+		check(CTLineGetGlyphCount(cut) == CTLineGetGlyphCount(line),
+		      "a line that fits came back with %ld of %ld glyphs", (long)CTLineGetGlyphCount(cut),
+		      (long)CTLineGetGlyphCount(line));
+		check(CTLineGetStringRange(cut).location == full.location &&
+		      CTLineGetStringRange(cut).length == full.length,
+		      "a line that fits came back over a different range");
+	}
+
+	/* AN END TRUNCATION KEEPS THE START: fewer glyphs, a range that begins where the line's does, and a width no
+	 * greater than the one it was cut for. */
+	cut = CTLineCreateTruncatedLine(line, line_width / 2.0, kCTLineTruncationEnd, token);
+	check(cut != NULL, "an END truncation answered nothing");
+	if (cut != NULL) {
+		check(CTLineGetGlyphCount(cut) < CTLineGetGlyphCount(line),
+		      "an END truncation kept every glyph");
+		check(CTLineGetGlyphCount(cut) > 0, "an END truncation kept NO glyphs");
+		check(CTLineGetStringRange(cut).location == full.location,
+		      "an END truncation starts at %ld and the line at %ld",
+		      (long)CTLineGetStringRange(cut).location, (long)full.location);
+		check(CTLineGetTypographicBounds(cut, NULL, NULL, NULL) <= line_width / 2.0 + 0.001,
+		      "the truncated line is %g wide, wider than the %g it was cut for",
+		      CTLineGetTypographicBounds(cut, NULL, NULL, NULL), line_width / 2.0);
+	}
+
+	/* A START TRUNCATION KEEPS THE END, so its range begins LATER and still ENDS where the line does. */
+	cut = CTLineCreateTruncatedLine(line, line_width / 2.0, kCTLineTruncationStart, token);
+	check(cut != NULL, "a START truncation answered nothing");
+	if (cut != NULL) {
+		CFRange r = CTLineGetStringRange(cut);
+
+		check(r.location > full.location, "a START truncation starts at %ld and kept the front",
+		      (long)r.location);
+		check(r.location + r.length == full.location + full.length,
+		      "a START truncation ends at %ld and the line at %ld", (long)(r.location + r.length),
+		      (long)(full.location + full.length));
+	}
+
+	/* AND A MIDDLE TRUNCATION SPANS BOTH ENDS, which is why its range starts where the line's does and is SHORTER —
+	 * it covers characters the line does not draw, and that is recorded rather than hidden. */
+	cut = CTLineCreateTruncatedLine(line, line_width / 2.0, kCTLineTruncationMiddle, token);
+	check(cut != NULL, "a MIDDLE truncation answered nothing");
+	if (cut != NULL) {
+		CFRange r = CTLineGetStringRange(cut);
+
+		check(r.location == full.location, "a MIDDLE truncation does not start where the line starts");
+		check(r.length < full.length, "a MIDDLE truncation covers the whole line: %ld", (long)r.length);
+		check(r.length > 0, "a MIDDLE truncation covers nothing");
+	}
+
+	/* A NULL TOKEN CUTS THE LINE OFF, in Apple's own words, and there is no ellipsis to see. */
+	cut = CTLineCreateTruncatedLine(line, line_width / 2.0, kCTLineTruncationEnd, NULL);
+	check(cut != NULL, "a NULL token answered nothing, and Apple says the line is simply cut off");
+	if (cut != NULL) {
+		check(CTLineGetGlyphCount(cut) < CTLineGetGlyphCount(line),
+		      "a NULL-token truncation kept every glyph");
+	}
+
+	/* AND A TOKEN TOO WIDE ANSWERS NULL — Apple's sentence, held. */
+	check(CTLineCreateTruncatedLine(line, line_width / 4.0, kCTLineTruncationEnd, token) == NULL,
+	      "a token wider than the width was accepted, and Apple says this function returns NULL");
+
+	/* AND THE REFUSAL: a token in ANOTHER FONT. Same face, DIFFERENT SIZE — which this library's font equality calls a
+	 * different font — and the door refuses rather than drawing its glyph indices in the line's face. */
+	{
+		CTFontRef big = CTFontCreateWithName(CFSTR("DejaVuSansMono-Bold"), 24.0, NULL);
+
+		check(big != NULL, "the test could not make its larger font");
+		if (big != NULL) {
+			CFDictionarySetValue(attrs_big, kCTFontAttributeName, big);
+			big_astr = CFAttributedStringCreate(kCFAllocatorDefault, CFSTR("..."), attrs_big);
+			big_token = (big_astr != NULL) ? CTLineCreateWithAttributedString(big_astr) : NULL;
+			check(big_token != NULL, "the larger token line could not be made");
+			if (big_token != NULL) {
+				/* AND THE TOKEN IS NOT CONSULTED WHEN NOTHING IS TRUNCATED: a line that
+				 * FITS comes back whole EVEN WITH a token this tier would refuse, because
+				 * Apple's condition is about the LINE's width and the token is only reached
+				 * when there is cutting to do. THE FIRST RUN OF THIS CASE asserted the
+				 * opposite — that the refusal happened anyway — which would have made a door
+				 * that refuses lines it never had to touch. */
+				check(CTLineCreateTruncatedLine(line, line_width * 2.0, kCTLineTruncationEnd,
+								big_token) != NULL,
+				      "a line that fits was refused because of a token it never used");
+				check(CTLineCreateTruncatedLine(line, line_width * 0.8, kCTLineTruncationEnd,
+								big_token) == NULL,
+				      "a token drawn in ANOTHER FONT was accepted, and its glyph indices mean "
+				      "nothing in the line's font");
+			}
+		}
+	}
+
+	/* NULL SAFETY. */
+	check(CTLineCreateTruncatedLine(NULL, 100.0, kCTLineTruncationEnd, NULL) == NULL,
+	      "a NULL line made a truncated line");
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -2558,6 +2705,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The tab, and the default it was owed for", case_text_tab },
 	{ "The glyph substitution, named three ways", case_glyph_info },
 	{ "The umbrella, and the version of the surface it implements", case_umbrella_version },
+	{ "A line truncates the way Apple prints it, and refuses another font", case_line_truncation },
 };
 
 int main(void)
