@@ -25,3 +25,16 @@ set(_agora_runtime_dirs
 list(REMOVE_DUPLICATES _agora_runtime_dirs)
 string(REPLACE ";" ":" _agora_ld_path "${_agora_runtime_dirs}")
 set_tests_properties(text PROPERTIES ENVIRONMENT "LD_LIBRARY_PATH=${_agora_ld_path}")
+
+# AND THE OWED DOORS ARE HELD BY MEASUREMENT RATHER THAN BY THE COMMENT THAT SAYS SO. CTFontCollection.c states
+# that its two matching doors are declared and NOT defined; a comment asserting that is worth little, because a
+# door that quietly acquired a definition elsewhere would keep the comment and lose the property. `nm` is the
+# instrument and tests/owed_symbols.cmake reads it — and the list below is the one place a newly-owed door has
+# to be named, beside the reason its own file carries.
+find_program(AGORA_NM NAMES nm llvm-nm REQUIRED)
+add_test(NAME owed
+    COMMAND "${CMAKE_COMMAND}"
+            "-DNM=${AGORA_NM}"
+            "-DLIB=$<TARGET_FILE:Text>"
+            "-DSYMBOLS=CTFontCollectionCreateMatchingFontDescriptors;CTFontCollectionCreateMatchingFontDescriptorsSortedWithCallback"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/owed_symbols.cmake")

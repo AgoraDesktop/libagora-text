@@ -3,7 +3,7 @@
 `libagora-text` is Core Text for Agora.
 
 **THE REPOSITORY WAS STARTED OVER ON 2026-10-11.** Its first content was the whole CoreText tree from Fiwix
-(`../Fiwix/userland/CoreText`, revision `6f5d90d97763e042c3653cce376e4c1b00ef4e93`), imported verbatim as 41
+(`../../Fiwix/userland/CoreText`, revision `6f5d90d97763e042c3653cce376e4c1b00ef4e93`), imported verbatim as 41
 files. That import is **deleted**, and it was the wrong shape twice over: it was Objective-C over Foundation,
 and it declared eight classes that Apple's framework does not have. It remains in this repository's history at
 `d14dc67` — nothing is lost, and anything wanted as a reference can be read there — but it is not what this
@@ -24,7 +24,7 @@ API is Core-Foundation-typed and Foundation bridges *to* it. This library has no
 and will not have one.
 
 **PLAIN C, NO OBJECTIVE-C**, which is not a style preference but a fact about the framework that the tree's own
-tooling measures. `../Fiwix/tools/coretext-sweep.py` says it outright:
+tooling measures. `../../Fiwix/tools/coretext-sweep.py` says it outright:
 
 > NO CLASS-CHAIN OR BLOCK-SCOPED CREDIT … CORE TEXT HAS NO CLASSES AT ALL — `CTFontRef` is a typealias, its
 > doors are C functions, and the one `protocol` in the whole framework owns one method — so there is no chain
@@ -57,10 +57,15 @@ Two more instruments live in the Fiwix tree and both were used before the restar
 
 | | |
 |---|---|
-| `../Fiwix/docs/reference/coretext-apple-surface.txt` | Apple's documented surface as **2032 rows** with a status each, generated from Apple's documentation index. Read at the restart: 1038 shipped, 534 open, 460 struck — and 515 of the open rows are the AAT/SFNT structure vocabulary |
-| `../Fiwix/tools/coretext-sweep.py --check` | verifies that ledger **offline** ("the only mode that touches the network" is `--refresh`) and is therefore the progress metric for all of this work |
-| `../Fiwix/docs/reference/coretext-sdk106.txt` | a presence oracle for the era: 1836 names, each with the header it was found in |
-| `../Fiwix/docs/design/coretext-plan.md` | the plan this work is a milestone of |
+| `../../Fiwix/docs/reference/coretext-apple-surface.txt` | Apple's documented surface as **2032 rows** with a type and a status each, generated from Apple's documentation index. **THE ROW LIST THIS LIBRARY WORKS FROM.** Its per-kind rows sum to 1038 shipped, 534 open, 460 struck — the same numbers read at the restart, which is the point of saying so — and 515 of the open rows are the AAT/SFNT structure vocabulary |
+| `../../Fiwix/tools/coretext-sweep.py --check` | verifies that ledger **offline** ("the only mode that touches the network" is `--refresh`). IT IS **NOT** THE PROGRESS METRIC FOR THIS WORK, AND THAT CLAIM IS CORRECTED HERE: it computes its verdict over `HEADERS = <Fiwix>/userland/CoreText/*.h` — the Objective-C import THIS repository deleted, and which that tree still holds — so every row for a type this library has not written yet still reads `shipped` there |
+| `../../Fiwix/docs/reference/coretext-sdk106.txt` | a presence oracle for the era: 1836 names, each with the header it was found in |
+| `../../Fiwix/docs/design/coretext-plan.md` | the plan this work is a milestone of |
+
+**AND WHAT MEASURES THIS LIBRARY IS ITS OWN SUITE** — `ctest --test-dir build`, plus `nm -D` on its own
+library — because both live in this repository and neither can be satisfied by another tree's declarations.
+**EVERY PATH ABOVE WAS ALSO WRITTEN `../Fiwix/…` AND RESOLVED TO NOTHING**, since the Fiwix tree is a sibling of
+`Agora` rather than of this repository: the commands could not have run at all.
 
 ## What Apple's headers settled that no local file could
 
@@ -163,3 +168,38 @@ MEASURED, and this is the recipe the `## Build` section prints: configure with
 `cmake --build build` exits 0 with no warnings and no errors in its log, and `ctest --test-dir build` with no
 `LD_LIBRARY_PATH` in the environment is `100% tests passed, 0 tests failed out of 1` over
 `text: 6 of 6 cases passed, 0 failed`.
+
+**`CTFontCollection` — the first object here that is a QUESTION rather than a value (2026-10-11).** The type
+after `CTFont` in Apple's own include order is declared and implemented. `CTFontCollection.h` carries Apple's
+whole surface for it — the opaque `CTFontCollectionRef`, `GetTypeID`, `CTFontCollectionSortDescriptorsCallback`,
+the one option key and Apple's five further doors — and `CTFontCollection.c` defines the object and the four
+creators. WHAT A COLLECTION HOLDS IS ITS QUESTION: the descriptors it was asked about, the options it was handed,
+and which of Apple's two questions it is, and its `equal`/`hash` are over exactly those. The copy door therefore
+keeps the original's question and APPENDS the new descriptors rather than guessing what "merged with the existing
+descriptors" means against an available-fonts collection, which holds none to merge with; nothing the caller
+passed is dropped and nothing is invented.
+
+**ITS TWO MATCHING DOORS ARE OWED, WITH THE BOUNDARY STATED RATHER THAN THE MACHINERY BLAMED.** Apple's result is
+"an array of NORMALIZED font descriptors matching the collection definition": the SET is reachable —
+`cg_font_enumerate` walks the configured directories and the process's registrations — and the NORMALIZATION and
+the ORDER are Apple's, so this tier answers neither. **AND "DECLARED AND NOT DEFINED" IS NOW HELD BY MEASUREMENT
+RATHER THAN BY THE COMMENT THAT SAYS SO**: `tests/owed_symbols.cmake` reads `nm -D --defined-only`, and the
+second test, `owed`, fails if either door acquires a definition. FALSIFIED by pointing it at a symbol that IS
+defined, which it names and rejects.
+
+MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with 0 warnings and 0 errors in
+their logs, and a bare `ctest --test-dir build` prints
+
+    Start 1: text
+    1/2 Test #1: text .............................   Passed    0.02 sec
+    Start 2: owed
+    2/2 Test #2: owed .............................   Passed    0.05 sec
+
+    100% tests passed, 0 tests failed out of 2
+
+with `text` itself at `text: 8 of 8 cases passed, 0 failed`.
+
+**AND THE ONE OPTION KEY'S REASON IS A NEGATIVE MEASUREMENT.** At 10.6 the AppKit ships no `NSFontCollection.h`
+at all — its font headers are `NSFont.h`, `NSFontDescriptor.h`, `NSFontManager.h` and `NSFontPanel.h` — so
+`kCTFontCollectionRemoveDuplicatesOption` has no counterpart in the era to pair with, and its value is recorded
+as the same inference the other unprovable keys carry.

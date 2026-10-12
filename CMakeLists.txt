@@ -9,13 +9,17 @@
 # TWO DEPENDENCIES, WHICH ARE APPLE'S OWN TWO: Core Foundation (libagora-core) and Core Graphics
 # (libagora-drawing). NOT FOUNDATION, AND NOT OBJECTIVE-C. Apple's Core Text has no classes at all --
 # `CTFontRef` is a typealias and its doors are C functions, measured from Apple's own index by
-# ../Fiwix/tools/coretext-sweep.py -- so this target is `LANGUAGES C` and every implementation file is a
+# ../../Fiwix/tools/coretext-sweep.py -- so this target is `LANGUAGES C` and every implementation file is a
 # `.c`. The import was `LANGUAGES C OBJC` with fourteen `.m` files; there will be none.
 #
 # THE GUIDE: Apple's 10.6 headers are downloaded to /tmp/apple-sdk106/ (16 CoreText, 8 ATS) by the recipe
 # in PROVENANCE.md, and Apple's documented surface is the ledger at
-# ../Fiwix/docs/reference/coretext-apple-surface.txt -- 2032 rows with a status each, and
-# `../Fiwix/tools/coretext-sweep.py --check` verifies it offline. THE HEADERS ARE NOT IN THIS REPOSITORY
+# ../../Fiwix/docs/reference/coretext-apple-surface.txt -- 2032 rows with a type and a status each.
+# THE LEDGER IS THE ROW LIST AND NOT A MEASUREMENT OF THIS LIBRARY, which is a correction: the sweep it came
+# with computes its verdict over the FIWIX TREE's own userland/CoreText -- the Objective-C import THIS
+# repository deleted -- so every row for a type this library has not written yet still reads `shipped` there.
+# What measures this library is its own suite and `nm -D` on its own library (see README.md). THE HEADERS ARE
+# NOT IN THIS REPOSITORY
 # AND MUST NOT BE: the tree's own ledger says the SDK "is not redistributable", so what is committed is
 # the recipe and the declarations written from it.
 #

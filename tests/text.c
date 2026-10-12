@@ -19,6 +19,7 @@
 /* AND THE ENGINE'S INTERNAL HEADER, FOR THE DOORS CORE TEXT OWNS BUT DOES NOT IMPLEMENT: the Unicode
  * glyph step and the face registry. */
 #include <CoreGraphics/CGFont_internal.h>
+#include <CoreText/CTFontCollection.h>
 #include <CoreText/CTFontDescriptor.h>
 #include <CoreText/CTFontTraits.h>
 
@@ -537,6 +538,119 @@ static int case_font_outline(void)
 	return g_fail - before;
 }
 
+/* THE COLLECTION IS THE THIRD OBJECT THIS LIBRARY MAKES AND THE FIRST ONE THAT IS A QUESTION rather than a
+ * value: it holds what it was ASKED, and the door that would answer is owed. So what a case can hold is its
+ * identity, its four creators and its EQUALITY -- and equality is the interesting one, because two collections
+ * that compare equal are the same QUESTION, which is only true if a collection's value is the question and not
+ * the answer.
+ *
+ * THE TWO QUESTIONS APPLE HAS ARE KEPT APART HERE, and the assertions say so: "every face there is" and "a
+ * question with no conditions" are different collections even though neither names a descriptor. */
+static int case_collection_object(void)
+{
+	int before = g_fail;
+	CFStringRef name = CFSTR("DejaVuSansMono-Bold");
+	const CGFloat twelve = 12.0;
+	CFNumberRef value;
+	CFMutableArrayRef query, more, empty;
+	CFMutableDictionaryRef options;
+	CTFontDescriptorRef descriptor;
+	CTFontCollectionRef all, asked, same, bare, added, untouched, with_options, with_options_again;
+
+	empty = CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks);
+	query = CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks);
+	more = CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks);
+	options = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					    &kCFTypeDictionaryValueCallBacks);
+	value = CFNumberCreate(kCFAllocatorDefault, kCFNumberCGFloatType, &twelve);
+	check(empty != NULL && query != NULL && more != NULL && options != NULL && value != NULL,
+	      "the test could not make its inputs");
+	if (empty == NULL || query == NULL || more == NULL || options == NULL || value == NULL) {
+		return g_fail - before;
+	}
+	descriptor = CTFontDescriptorCreateWithNameAndSize(name, 12.0);
+	check(descriptor != NULL, "the test could not make a descriptor to ask about");
+	if (descriptor == NULL) {
+		return g_fail - before;
+	}
+	CFArrayAppendValue(query, descriptor);
+	CFArrayAppendValue(more, descriptor);
+	CFDictionarySetValue(options, kCTFontCollectionRemoveDuplicatesOption, value);
+
+	/* THE IDENTITY IS THE RUNTIME'S, as it is for the descriptor and the font. */
+	all = CTFontCollectionCreateFromAvailableFonts(NULL);
+	check(all != NULL, "the from-available-fonts door answered nothing");
+	check(all != NULL && CFGetTypeID((CFTypeRef)all) == CTFontCollectionGetTypeID(),
+	      "CFGetTypeID(collection) is %lu and CTFontCollectionGetTypeID() is %lu",
+	      (unsigned long)((all != NULL) ? CFGetTypeID((CFTypeRef)all) : 0),
+	      (unsigned long)CTFontCollectionGetTypeID());
+
+	asked = CTFontCollectionCreateWithFontDescriptors(query, NULL);
+	check(asked != NULL, "the descriptors door answered nothing");
+
+	/* EQUALITY IS BY VALUE: the same question asked twice IS the same collection. */
+	same = CTFontCollectionCreateWithFontDescriptors(query, NULL);
+	check(same != NULL && CFEqual(asked, same), "the same question asked twice gave unequal collections");
+	check(same != NULL && CFHash(asked) == CFHash(same), "two equal collections hash differently");
+
+	/* AND THE TWO QUESTIONS ARE NOT ONE QUESTION, even when neither names a descriptor. */
+	bare = CTFontCollectionCreateWithFontDescriptors(empty, NULL);
+	check(bare != NULL, "the empty-query door answered nothing");
+	check(bare != NULL && !CFEqual(all, bare),
+	      "\"every face there is\" compares EQUAL to a question with no conditions");
+
+	/* THE COPY MERGES: one more descriptor is a different question, and nothing to merge is the same one. */
+	added = CTFontCollectionCreateCopyWithFontDescriptors(asked, more, NULL);
+	check(added != NULL, "the copy door answered nothing");
+	check(added != NULL && !CFEqual(asked, added),
+	      "a copy that added a descriptor compares equal to the original");
+	untouched = CTFontCollectionCreateCopyWithFontDescriptors(asked, NULL, NULL);
+	check(untouched != NULL, "a copy with no descriptors answered nothing");
+	check(untouched != NULL && CFEqual(asked, untouched),
+	      "a copy with nothing to merge is not equal to the original");
+
+	/* AND THE OPTIONS ARE PART OF THE VALUE, which is what "recorded rather than obeyed" costs: two collections
+	 * that differ only in their options are different questions. */
+	with_options = CTFontCollectionCreateWithFontDescriptors(query, options);
+	with_options_again = CTFontCollectionCreateWithFontDescriptors(query, options);
+	check(with_options != NULL && with_options_again != NULL, "the options-taking door answered nothing");
+	check(with_options != NULL && with_options_again != NULL && CFEqual(with_options, with_options_again),
+	      "two collections with the same options are not equal");
+	check(with_options != NULL && !CFEqual(asked, with_options),
+	      "a collection with options compares equal to one without");
+
+	CFRelease(empty);
+	CFRelease(query);
+	CFRelease(more);
+	CFRelease(options);
+	CFRelease(value);
+	CFRelease(descriptor);
+	return g_fail - before;
+}
+
+/* THE ONE OPTION KEY, WHOSE VALUE IS A RECORDED INFERENCE AND NOT A MEASURED FACT -- which is exactly why it is
+ * named here: a change to it should be a deliberate act, as for the descriptor's fourteen unprovable keys. AND
+ * THE REASON IT CANNOT BE PROVED IS ITSELF MEASURED: at 10.6 the AppKit declares no `NSFontCollection` at all,
+ * so there is no counterpart in the era to pair the name with. */
+static int case_collection_option_key(void)
+{
+	int before = g_fail;
+	char buf[96];
+
+	check(kCTFontCollectionRemoveDuplicatesOption != NULL, "the option key is NULL");
+	if (kCTFontCollectionRemoveDuplicatesOption == NULL) {
+		return g_fail - before;
+	}
+	check(CFGetTypeID(kCTFontCollectionRemoveDuplicatesOption) == CFStringGetTypeID(),
+	      "the option key is not a CFString");
+	buf[0] = '\0';
+	check(CFStringGetCString(kCTFontCollectionRemoveDuplicatesOption, buf, (CFIndex)sizeof buf,
+				 kCFStringEncodingUTF8) &&
+	      strcmp(buf, "NSFontCollectionRemoveDuplicatesOption") == 0,
+	      "the option key is \"%s\", want \"NSFontCollectionRemoveDuplicatesOption\"", buf);
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -544,6 +658,8 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The descriptor is an object, and its identity is the runtime's", case_descriptor_object },
 	{ "A font is a face, and the glyph step is the reason for it", case_font_object },
 	{ "A glyph's outline is a path, scaled, matrixed and transformed", case_font_outline },
+	{ "The collection is a question, and its value is that question", case_collection_object },
+	{ "The collection's one option key is the inference it is recorded as", case_collection_option_key },
 };
 
 int main(void)
