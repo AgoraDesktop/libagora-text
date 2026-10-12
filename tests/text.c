@@ -21,6 +21,7 @@
 #include <CoreGraphics/CGFont_internal.h>
 #include <CoreText/CTFontCollection.h>
 #include <CoreText/CTFontDescriptor.h>
+#include <CoreText/CTFontManager.h>
 #include <CoreText/CTFontManagerErrors.h>
 #include <CoreText/CTFontTraits.h>
 
@@ -715,6 +716,278 @@ static int case_font_manager_errors(void)
 	return g_fail - before;
 }
 
+/* THE MANAGER'S READ-ONLY HALF, AND THE ASSERTION THAT MATTERS MOST IS THAT A REGISTRATION IS VISIBLE TO IT.
+ * The three `Copy` doors are ONE walk of the engine's configured directories AND its registrations, seen three
+ * ways — so a face that has been registered has to come back through ALL THREE: its PostScript name, its
+ * family, and its URL. A library that kept a second list for the manager would show it in one and not the
+ * others, and that is what this case is for. */
+static int case_manager_listing(void)
+{
+	int before = g_fail;
+	const char *path = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf";
+	CTFontRef font = test_font(12.0);	/* this REGISTERS the face, which is what makes it visible below */
+	CFArrayRef names, families, urls;
+	CFURLRef expected;
+	CFRange whole;
+	CFStringRef wanted = CFSTR("DejaVuSansMono-Bold");
+	CFIndex i, count;
+
+	check(font != NULL, "no face, so there is nothing to look for in the manager's list");
+
+	names = CTFontManagerCopyAvailablePostScriptNames();
+	families = CTFontManagerCopyAvailableFontFamilyNames();
+	urls = CTFontManagerCopyAvailableFontURLs();
+	check(names != NULL, "the PostScript-name door answered nothing");
+	check(families != NULL, "the family-name door answered nothing");
+	check(urls != NULL, "the URL door answered nothing");
+	if (names == NULL || families == NULL || urls == NULL) {
+		return g_fail - before;
+	}
+	check(CFGetTypeID(names) == CFArrayGetTypeID() && CFGetTypeID(families) == CFArrayGetTypeID() &&
+	      CFGetTypeID(urls) == CFArrayGetTypeID(),
+	      "one of the three listing doors answered something that is not an array");
+	check(CFArrayGetCount(urls) > 0, "the URL list is EMPTY, so nothing is enumerable at all");
+	check(CFArrayGetCount(families) > 0, "the family list is EMPTY, so no face's family could be read");
+
+	/* THE REGISTERED FACE IS IN THE NAME LIST, under the name it answers for itself. */
+	whole = CFRangeMake(0, CFArrayGetCount(names));
+	check(CFArrayContainsValue(names, whole, wanted),
+	      "the face at %s was registered and is NOT in the PostScript-name list", path);
+
+	/* AND ITS URL IS THERE, which is the same fact seen the other way. */
+	expected = CFURLCreateFromFileSystemRepresentation(kCFAllocatorDefault, (const UInt8 *)path,
+							  (CFIndex)strlen(path), false);
+	check(expected != NULL, "the test could not build the URL it is looking for");
+	if (expected != NULL) {
+		whole = CFRangeMake(0, CFArrayGetCount(urls));
+		check(CFArrayContainsValue(urls, whole, expected),
+		      "the registered face's URL is not in the URL list");
+		CFRelease(expected);
+	}
+
+	/* AND THE NAME LIST IS UNIQUE AND ALL STRINGS, which is Apple's own word for it: a name appearing twice
+	 * means the walk added one face twice, and a non-string means the projection went wrong. */
+	count = CFArrayGetCount(names);
+	for (i = 0; i < count; i++) {
+		CFTypeRef value = CFArrayGetValueAtIndex(names, i);
+		CFIndex j;
+
+		check(CFGetTypeID(value) == CFStringGetTypeID(), "PostScript name %ld is not a string", (long)i);
+		for (j = i + 1; j < count; j++) {
+			if (CFEqual(value, CFArrayGetValueAtIndex(names, j))) {
+				check(0, "PostScript names %ld and %ld are the same, and the list is meant to be "
+					 "unique", (long)i, (long)j);
+			}
+		}
+	}
+	CFRelease(names);
+	CFRelease(families);
+	CFRelease(urls);
+	return g_fail - before;
+}
+
+/* THE COMPARATOR, WHICH IS WHERE THIS TIER'S RECORDED DEVIATION LIVES. Two things are promised and both are
+ * held: the contract of a `CFComparatorFunction` (consistent, so a sort terminates) and the deviation itself,
+ * ASSERTED SO THAT IT IS A FACT RATHER THAN A COMMENT — the day the deviation is removed, this case fails and
+ * says which line changed. */
+static int case_manager_comparator(void)
+{
+	int before = g_fail;
+	CFStringRef garamond = CFSTR("Garamond");
+	CFStringRef adobe = CFSTR("Adobe Garamond");
+	CFStringRef lower = CFSTR("arial");
+	CFStringRef upper = CFSTR("ARIAL");
+	CFStringRef foo2 = CFSTR("Foo2"), foo7 = CFSTR("Foo7"), foo25 = CFSTR("Foo25");
+	CFComparisonResult ab, ba;
+
+	/* A NAME IS EQUAL TO ITSELF, AND THE RELATION IS ANTISYMMETRIC. Without both, a sort may not terminate. */
+	check(CTFontManagerCompareFontFamilyNames(garamond, garamond, NULL) == kCFCompareEqualTo,
+	      "a family name does not compare equal to itself");
+	ab = CTFontManagerCompareFontFamilyNames(garamond, adobe, NULL);
+	ba = CTFontManagerCompareFontFamilyNames(adobe, garamond, NULL);
+	check((ab == kCFCompareLessThan && ba == kCFCompareGreaterThan) ||
+	      (ab == kCFCompareGreaterThan && ba == kCFCompareLessThan),
+	      "the comparator is not antisymmetric: %ld and %ld", (long)ab, (long)ba);
+
+	/* CASE-INSENSITIVE, WHICH IS WHAT A UI SORT WANTS: "arial" and "ARIAL" are one family name to a reader. */
+	check(CTFontManagerCompareFontFamilyNames(lower, upper, NULL) == kCFCompareEqualTo,
+	      "\"arial\" and \"ARIAL\" did not compare equal");
+
+	/* AND NUMERIC-AWARE, so a family with a number in its name reads in the order a person expects. */
+	check(CTFontManagerCompareFontFamilyNames(foo2, foo7, NULL) == kCFCompareLessThan,
+	      "\"Foo2\" did not come before \"Foo7\"");
+	check(CTFontManagerCompareFontFamilyNames(foo7, foo25, NULL) == kCFCompareLessThan,
+	      "\"Foo7\" did not come before \"Foo25\"");
+
+	/* THE DEVIATION: Apple's documented order puts the UN-PREFIXED name first, and this comparator puts
+	 * "Adobe Garamond" first because 'A' < 'G'. */
+	check(CTFontManagerCompareFontFamilyNames(adobe, garamond, NULL) == kCFCompareLessThan,
+	      "the recorded deviation has changed: Apple's order puts \"Garamond\" before \"Adobe Garamond\" and "
+	      "this comparator was recorded as putting the prefixed name first");
+
+	/* AND SOMETHING THAT IS NOT A STRING GETS AN ANSWER RATHER THAN A CRASH, which is what a comparator may
+	 * legally be handed. */
+	check(CTFontManagerCompareFontFamilyNames(NULL, garamond, NULL) == kCFCompareEqualTo,
+	      "a NULL family name did not answer kCFCompareEqualTo");
+	return g_fail - before;
+}
+
+/* REGISTRATION, END TO END, INCLUDING THE TWO THINGS THAT ARE ONLY TRUE HERE: THE CODES ARE APPLE'S AND ARE
+ * CARRIED APPLE'S WAY, and THE SCOPE THIS TIER DOES NOT HAVE IS REFUSED WITH NO ERROR SET. That second one is
+ * the decision this file records, so it is asserted rather than described: a caller tells "the file was bad"
+ * from "the scope cannot be honoured here" by whether the error came back set. */
+static int case_manager_registration(void)
+{
+	int before = g_fail;
+	const char *path = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf";
+	const char *missing_path = "/tmp/agora-text-no-such-font.ttf";
+	const char *not_a_font_path = "/etc/hostname";
+	CFURLRef url, missing, not_a_font;
+	CFErrorRef error;
+	CFArrayRef errors;
+	CFMutableArrayRef pair;
+
+	check(access(path, R_OK) == 0, "the face at %s is not readable, so this case cannot run", path);
+	url = CFURLCreateFromFileSystemRepresentation(kCFAllocatorDefault, (const UInt8 *)path,
+						      (CFIndex)strlen(path), false);
+	missing = CFURLCreateFromFileSystemRepresentation(kCFAllocatorDefault, (const UInt8 *)missing_path,
+							  (CFIndex)strlen(missing_path), false);
+	not_a_font = CFURLCreateFromFileSystemRepresentation(kCFAllocatorDefault,
+							     (const UInt8 *)not_a_font_path,
+							     (CFIndex)strlen(not_a_font_path), false);
+	check(url != NULL && missing != NULL && not_a_font != NULL, "the test could not build its URLs");
+	if (url == NULL || missing == NULL || not_a_font == NULL) {
+		return g_fail - before;
+	}
+
+	/* NOTHING IS REGISTERED TO BEGIN WITH: every case runs in its own child, so the registry is this
+	 * process's and it is empty. */
+	check(CTFontManagerGetScopeForURL(url) == kCTFontManagerScopeNone,
+	      "a file nobody registered already reports a scope");
+
+	/* THE ROUND TRIP, AND THE SCOPE IT REPORTS. */
+	check(CTFontManagerRegisterFontsForURL(url, kCTFontManagerScopeProcess, NULL),
+	      "registering a real face failed");
+	check(CTFontManagerGetScopeForURL(url) == kCTFontManagerScopeProcess,
+	      "a registered face does not report the process scope");
+
+	/* AND REGISTERING IT AGAIN IS APPLE'S `AlreadyRegistered`, CARRIED THE WAY APPLE CARRIES IT: one CFError in
+	 * kCTFontManagerErrorDomain whose user-info dictionary names the URL under kCTFontManagerErrorFontURLsKey. */
+	error = NULL;
+	check(!CTFontManagerRegisterFontsForURL(url, kCTFontManagerScopeProcess, &error),
+	      "registering the same file twice SUCCEEDED");
+	check(error != NULL, "the second registration failed with NO error at all");
+	if (error != NULL) {
+		CFTypeRef info = CFErrorCopyUserInfo(error);
+
+		check(CFErrorGetCode(error) == kCTFontManagerErrorAlreadyRegistered,
+		      "the error code is %ld, want %d", (long)CFErrorGetCode(error),
+		      (int)kCTFontManagerErrorAlreadyRegistered);
+		check(CFEqual(CFErrorGetDomain(error), kCTFontManagerErrorDomain),
+		      "the error is not in the font manager's domain");
+		check(info != NULL &&
+		      CFDictionaryGetValue((CFDictionaryRef)info, kCTFontManagerErrorFontURLsKey) != NULL,
+		      "the error does not carry the URLs that failed");
+		if (info != NULL) {
+			CFRelease(info);
+		}
+		CFRelease(error);
+	}
+
+	/* A MISSING FILE AND A FILE THAT IS NOT A FONT: two more of Apple's codes, reached. */
+	error = NULL;
+	check(!CTFontManagerRegisterFontsForURL(missing, kCTFontManagerScopeProcess, &error),
+	      "a file that does not exist was REGISTERED");
+	check(error != NULL && CFErrorGetCode(error) == kCTFontManagerErrorFileNotFound,
+	      "a missing file did not answer %d", (int)kCTFontManagerErrorFileNotFound);
+	if (error != NULL) {
+		CFRelease(error);
+	}
+	error = NULL;
+	check(!CTFontManagerRegisterFontsForURL(not_a_font, kCTFontManagerScopeProcess, &error),
+	      "a file that is not a font was REGISTERED");
+	check(error != NULL && CFErrorGetCode(error) == kCTFontManagerErrorUnrecognizedFormat,
+	      "a file that is not a font did not answer %d", (int)kCTFontManagerErrorUnrecognizedFormat);
+	if (error != NULL) {
+		CFRelease(error);
+	}
+
+	/* THE SCOPE REFUSAL, WHICH IS THE DECISION THIS FILE RECORDS. A scope this tier cannot honour answers false
+	 * WITH THE ERROR LEFT UNSET, because Apple's era has no code meaning "unsupported scope" and inventing one is
+	 * the one thing this library will not do. */
+	error = NULL;
+	check(!CTFontManagerRegisterFontsForURL(url, kCTFontManagerScopeUser, &error),
+	      "a scope this tier does not have was HONOURED");
+	check(error == NULL, "the scope refusal SET AN ERROR, and Apple's era has no code for it");
+	check(CTFontManagerGetScopeForURL(url) == kCTFontManagerScopeProcess,
+	      "the refused registration changed the registry anyway");
+
+	/* THE PLURAL DOOR: TWO BAD URLS ARE A FALSE ANSWER WITH ONE ERROR EACH, which is how Apple's plural doors
+	 * report — the array names which of them failed rather than only that something did. */
+	pair = CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks);
+	check(pair != NULL, "the test could not make its array of URLs");
+	if (pair != NULL) {
+		CFArrayAppendValue(pair, not_a_font);
+		CFArrayAppendValue(pair, missing);
+		errors = NULL;
+		check(!CTFontManagerRegisterFontsForURLs(pair, kCTFontManagerScopeProcess, &errors),
+		      "an array of two bad URLs reported SUCCESS");
+		check(errors != NULL && CFArrayGetCount(errors) == 2,
+		      "an array of two bad URLs gave %ld errors, want 2",
+		      (long)((errors != NULL) ? CFArrayGetCount(errors) : -1));
+		if (errors != NULL) {
+			CFRelease(errors);
+		}
+		CFRelease(pair);
+	}
+
+	/* UNREGISTRATION, AND THE CODE FOR ASKING TWICE. */
+	check(CTFontManagerUnregisterFontsForURL(url, kCTFontManagerScopeProcess, NULL),
+	      "unregistering a registered face failed");
+	check(CTFontManagerGetScopeForURL(url) == kCTFontManagerScopeNone,
+	      "an unregistered face still reports a scope");
+	error = NULL;
+	check(!CTFontManagerUnregisterFontsForURL(url, kCTFontManagerScopeProcess, &error),
+	      "unregistering the same face twice SUCCEEDED");
+	check(error != NULL && CFErrorGetCode(error) == kCTFontManagerErrorNotRegistered,
+	      "the second unregistration did not answer %d", (int)kCTFontManagerErrorNotRegistered);
+	if (error != NULL) {
+		CFRelease(error);
+	}
+
+	CFRelease(url);
+	CFRelease(missing);
+	CFRelease(not_a_font);
+	return g_fail - before;
+}
+
+/* THE AUTO-ACTIVATION SETTING IS A PREFERENCE, AND APPLE'S OWN SENTENCE SAYS WHAT TO DO WITH IT: "apply the
+ * setting to the appropriate preferences location". This tier HAS such a location — Core Foundation's — so the
+ * round trip is the case. IT WRITES A PREFERENCE FILE, under a pair of identifiers of its own so that no real
+ * one is touched, and the case says so because a reader who finds the file deserves to know who made it. */
+static int case_manager_settings(void)
+{
+	int before = g_fail;
+	CFStringRef mine = CFSTR("com.example.agora-text-suite");
+	CFStringRef other = CFSTR("com.example.agora-text-suite-never-set");
+
+	check(CTFontManagerGetAutoActivationSetting(other) == kCTFontManagerAutoActivationDefault,
+	      "a setting nobody ever wrote did not answer the default");
+	CTFontManagerSetAutoActivationSetting(mine, kCTFontManagerAutoActivationEnabled);
+	check(CTFontManagerGetAutoActivationSetting(mine) == kCTFontManagerAutoActivationEnabled,
+	      "the setting that was just written did not come back");
+	check(CTFontManagerGetAutoActivationSetting(other) == kCTFontManagerAutoActivationDefault,
+	      "one domain's setting leaked into another's");
+	CTFontManagerSetAutoActivationSetting(mine, kCTFontManagerAutoActivationDisabled);
+	check(CTFontManagerGetAutoActivationSetting(mine) == kCTFontManagerAutoActivationDisabled,
+	      "the setting was not replaced by the next one written");
+	/* AND BACK TO THE DEFAULT, which is the closest this tier has to removing a preference. */
+	CTFontManagerSetAutoActivationSetting(mine, kCTFontManagerAutoActivationDefault);
+	check(CTFontManagerGetAutoActivationSetting(mine) == kCTFontManagerAutoActivationDefault,
+	      "the setting did not go back to the default");
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -725,6 +998,10 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The collection is a question, and its value is that question", case_collection_object },
 	{ "The collection's one option key is the inference it is recorded as", case_collection_option_key },
 	{ "The error vocabulary, including Apple's duplicate 202", case_font_manager_errors },
+	{ "The manager lists a registered face three ways", case_manager_listing },
+	{ "The family-name comparator, including the recorded deviation", case_manager_comparator },
+	{ "Registration round-trips, and a scope this tier refuses", case_manager_registration },
+	{ "The auto-activation setting round-trips as a preference", case_manager_settings },
 };
 
 int main(void)

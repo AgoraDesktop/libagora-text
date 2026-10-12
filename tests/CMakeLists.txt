@@ -36,5 +36,5 @@ add_test(NAME owed
     COMMAND "${CMAKE_COMMAND}"
             "-DNM=${AGORA_NM}"
             "-DLIB=$<TARGET_FILE:Text>"
-            "-DSYMBOLS=CTFontCollectionCreateMatchingFontDescriptors;CTFontCollectionCreateMatchingFontDescriptorsSortedWithCallback"
+            "-DSYMBOLS=CTFontCollectionCreateMatchingFontDescriptors;CTFontCollectionCreateMatchingFontDescriptorsSortedWithCallback;CTFontManagerEnableFontDescriptors;CTFontManagerCreateFontRequestRunLoopSource"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/owed_symbols.cmake")

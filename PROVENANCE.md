@@ -224,3 +224,41 @@ MEASURED: `cmake --build build` exits 0 with 0 warnings and 0 errors in its log,
 lists `kCTFontManagerErrorDomain` and `kCTFontManagerErrorFontURLsKey` as defined, and the suite is
 `text: 9 of 9 cases passed, 0 failed` — the new case naming every code in both ranges and asserting the
 collision.
+
+**`CTFontManager` — the system-facing half: what exists, and making one available (2026-10-11).** The type after
+`CTFontManagerErrors` in Apple's include order, declared and implemented: the three `Copy` doors, the family-name
+comparator, `CreateFontDescriptorsFromURL`, `IsSupportedFont`, `GetScopeForURL`, the four registration doors and the
+auto-activation setting pair, plus both constants. **ITS READ-ONLY HALF IS ONE WALK SEEN THREE WAYS** — the same
+observation the seam records one framework over: `cg_font_enumerate` covers the configured font directories AND the
+process's registrations, so the PostScript names, the family names and the URLs are ONE list projected three ways,
+and a registration is visible to all three because there is no second list to fall out of step.
+
+**THE CODE CARRIES TWO BOUNDARIES, BOTH DECIDED RATHER THAN DISCOVERED.** ONE: **THERE IS ONE SCOPE, AND IT IS THE
+PROCESS'S.** `kCTFontManagerScopeUser` promises availability "to ALL processes … and in subsequent sessions" and
+`kCTFontManagerScopeSession` covers the session; both need a PERSISTENT, CROSS-PROCESS font store this tier does not
+have, and its registry is `cg_font_register`, which is the process's. So `GetScopeForURL` answers `Process` or
+`None` — Apple's own two answers — and a request for another scope is **REFUSED: `false`, with the error
+out-parameter LEFT UNSET**, because Apple's era has no code meaning "unsupported scope" and inventing one is the one
+thing this library will not do. A caller tells the two failures apart by the error: set means the file (one of
+Apple's own codes), unset means the scope. TWO: **THE FAMILY-NAME ORDER IS A RECORDED DEVIATION, IN BOTH DOORS THAT
+HAVE ONE.** Apple's order — "accounting for foundry prefix … recognized prefixes are sorted after the un-prefixed
+names" — turns on a list Apple does not publish, so it cannot be reproduced from the era's headers.
+`CompareFontFamilyNames` is therefore an ordinary localized, case-insensitive, numeric-aware comparison, and
+`CopyAvailableFontFamilyNames` returns the families in the order that comparator gives them; the two doors AGREE,
+which is what a caller re-sorting the array relies on. The deviation is ASSERTED in the suite — `"Adobe Garamond"`
+before `"Garamond"`, where Apple's rule puts the un-prefixed name first — so that removing it fails the suite
+instead of passing it silently.
+
+**AND TWO DOORS ARE OWED WITH THEIR REASONS, WHICH THE `owed` TEST NOW NAMES BESIDE THE COLLECTION'S TWO.**
+`CTFontManagerEnableFontDescriptors` toggles descriptors "for font descriptor matching" and so waits for the tier
+that owns matching, exactly as `CTFontDescriptorCreateMatchingFontDescriptors` does;
+`CTFontManagerCreateFontRequestRunLoopSource` needs a font server on the other end of a port.
+`kCTFontManagerErrorInvalidFontData` (104) is recorded as **UNREACHABLE HERE** rather than guessed at: separating
+"not a font file" from "a font file whose data is invalid" needs a parse the engine's refusal does not expose.
+
+MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with 0 warnings and 0 errors in their
+logs, and a bare `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over
+`text: 13 of 13 cases passed, 0 failed` — the four new cases holding the three-way listing, the comparator and its
+asserted deviation, the registration round trip INCLUDING the scope refusal, and the preference round trip.
+**AND ONE THING THE SUITE DOES THAT A READER DESERVES TO BE TOLD**: the preference case WRITES a preferences file,
+under an identifier of its own (`com.example.agora-text-suite`) so that no real one is touched.

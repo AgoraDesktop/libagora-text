@@ -197,3 +197,34 @@ ctest --test-dir build
   `kCTFontManagerErrorFontURLsKey`, and the rule that carries the other Core Text keys across to the AppKit's
   spelling CANNOT APPLY — at 10.6 `NSFontManager.h` declares no `extern const …StringRef` at all, and
   `FoundationErrors.h` names its domain only in a comment. MEASURED: `text: 9 of 9 cases passed, 0 failed`.
+- **`CTFontManager` IS DECLARED AND IMPLEMENTED, AND IT ANSWERS THE TWO QUESTIONS A FONT AND A COLLECTION CANNOT:
+  WHICH FACES THIS SYSTEM HAS, AND MAKE THIS ONE AVAILABLE TO ME.** The three `Copy` doors, the family-name
+  comparator, `CreateFontDescriptorsFromURL`, `IsSupportedFont`, `GetScopeForURL`, the four registration doors and
+  the auto-activation setting pair are defined; both constants are defined. **THE READ-ONLY HALF IS ONE WALK SEEN
+  THREE WAYS** — `cg_font_enumerate` walks the configured directories AND the process's registrations — so a
+  registered face comes back through ALL of the name, family and URL doors, which is what the case holds.
+  Registration carries **APPLE'S OWN CODES THE WAY APPLE CARRIES THEM**: `AlreadyRegistered` and `NotRegistered`
+  arrive as a `CFError` in `kCTFontManagerErrorDomain` whose user-info dictionary names the failing URL under
+  `kCTFontManagerErrorFontURLsKey`, and the plural doors answer one error per failed URL. MEASURED:
+  `text: 13 of 13 cases passed, 0 failed`.
+- **AND ITS ONE SCOPE IS THE PROCESS'S, WITH THE OTHERS REFUSED RATHER THAN FAKED.** Apple's `User` scope is
+  "available to ALL processes … and in subsequent sessions" and `Session` covers the session; both need a
+  PERSISTENT, CROSS-PROCESS font store this tier does not have — its registry is `cg_font_register`, which is the
+  process's. So `GetScopeForURL` answers `Process` or `None` (Apple's own two answers), and a registration asking
+  for another scope returns **false with the error out-parameter LEFT UNSET**, because Apple's era has no code
+  meaning "unsupported scope" and inventing one is the one thing this library will not do. **A CALLER TELLS THE TWO
+  FAILURES APART BY THE ERROR**: set means the file, unset means the scope. The case asserts exactly that,
+  including that a refused registration changed nothing.
+- **AND THE FAMILY-NAME ORDER IS A RECORDED DEVIATION — IN BOTH DOORS THAT HAVE ONE.** Apple documents the order
+  as "the Apple preferred order, accounting for foundry prefix … recognized prefixes are sorted after the
+  un-prefixed names", and it turns on **a list Apple does not publish**, so the order cannot be reproduced from the
+  era's headers. `CompareFontFamilyNames` therefore does an ordinary localized, case-insensitive, numeric-aware
+  comparison, and `CopyAvailableFontFamilyNames` returns the families **in the same order the comparator gives
+  them** — so a caller that re-sorts the array gets the order it would have sorted to anyway. The case ASSERTS the
+  deviation (`"Adobe Garamond"` before `"Garamond"`, where Apple's rule puts the un-prefixed name first) so that
+  removing it fails the suite instead of silently passing.
+- **TWO DOORS ARE OWED, AND THE `owed` TEST NAMES THEM ALONGSIDE THE COLLECTION'S TWO**: `EnableFontDescriptors`,
+  which toggles descriptors "for font descriptor matching" and therefore waits for the tier that owns matching;
+  and `CreateFontRequestRunLoopSource`, which needs a font server on the other end of a port. `InvalidFontData`
+  (104) is recorded as **unreachable here** rather than guessed at: telling "not a font file" from "a font file
+  whose data is invalid" needs a parse the engine's refusal does not expose.
