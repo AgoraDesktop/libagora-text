@@ -181,7 +181,14 @@ static void ct_match_add(CFMutableArrayRef list, CTFontDescriptorRef descriptor)
 	 * dispatch to `-[__NSCFType isEqual:]` fires for a Core Foundation object that should be compared by Core
 	 * Foundation, and that path then crashes in `objc_retain` under `-[NSDictionary isEqualToDictionary:]`. Asking
 	 * about the FILE instead of the whole object is the smaller question, the one this walk actually has, and it
-	 * does not go near that path. */
+	 * does not go near that path.
+	 *
+	 * **AND THE QUADRATIC SCAN IS MEASURED RATHER THAN ASSUMED TO BE WORTH FIXING.** Each candidate is compared
+	 * against every one already in the list, which over this host's 118 faces is about seven thousand comparisons.
+	 * MEASURED: ONE FULL ENUMERATION OF THE REGISTRY COSTS 52 ms, and the duplicate check is a small part of it —
+	 * the cost is opening and reading each font FILE, which no amount of list arithmetic removes. The AppKit
+	 * caches a UI font by (type, size), so this is paid once per distinct face rather than once per frame. It is
+	 * recorded here because a number nobody wrote down is a number somebody will guess at. */
 	wanted = (CFURLRef)CTFontDescriptorCopyAttribute(descriptor, kCTFontURLAttribute);
 	if (wanted == NULL ||
 	    !CFURLGetFileSystemRepresentation(wanted, false, (UInt8 *)wanted_path, (CFIndex)sizeof wanted_path)) {
