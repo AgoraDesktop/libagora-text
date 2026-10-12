@@ -262,3 +262,35 @@ logs, and a bare `ctest --test-dir build` is `100% tests passed, 0 tests failed 
 asserted deviation, the registration round trip INCLUDING the scope refusal, and the preference round trip.
 **AND ONE THING THE SUITE DOES THAT A READER DESERVES TO BE TOLD**: the preference case WRITES a preferences file,
 under an identifier of its own (`com.example.agora-text-suite`) so that no real one is touched.
+
+**`CTParagraphStyle` — the first type here that is purely a table (2026-10-11).** Apple's header prints a TYPE and a
+DEFAULT VALUE for each of the fourteen specifiers, and those two facts are the object: `Create` copies what it is
+given BY SIZE, the accessor writes the stored copy or the default when nothing was stored, and nothing in the
+library has to know what a setting MEANS to carry it across. That last part is why the file is short: NOTHING HERE
+LAYS ANYTHING OUT — the framesetter and the typesetter do, and both are later in Apple's include order.
+
+**AND THE SUITE CAUGHT A REAL BUG IN IT, WHICH IS WHAT THE CASES ARE FOR.** The store holds a SCALAR as the ADDRESS
+of its bytes and a CFTYPE as THE OBJECT ITSELF, and the accessor treated both as the first: it read *from* the array
+instead of handing the array back, so a style's `TabStops` came out as the array's own first eight bytes — ZERO, so
+the caller got NULL where its tab stops were. It is invisible for every one of the thirteen scalar specifiers and
+wrong for the one that is not, which is exactly the shape of bug a case written against the DOCUMENTED contract
+finds and a case written against the implementation does not. The failure was
+
+    FAIL: the TabStops value did not come back
+    FAIL: the style answered a DIFFERENT array than the one it was given
+    FAIL: the TabStops value came back changed
+    text: 14 of 15 cases passed, 1 failed
+
+and the case that found it is the one that holds a style's tab stops THROUGH A RELEASE OF THE CALLER'S OWN
+REFERENCE — so it also proves the retain, which a weaker case would not. Fixed, `15 of 15`.
+
+**AND ONE ROW IS A RECORDED DEVIATION WITH ITS LANDING POINT NAMED.** Apple's default for
+`kCTParagraphStyleSpecifierTabStops` is "12 left-aligned tabs, spaced by 28.0 points", and a tab is a
+`CTTextTabRef` — whose header is LATER in Apple's include order, so neither it nor the door that makes one exists
+yet. The default is answered as an EMPTY ARRAY of the right type; the case asserts both halves of that (the type
+AND the emptiness) so that the day the tabs arrive the case fails and says so, and `ct_para_tab_fallback` is where
+they will be built.
+
+MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with 0 warnings and 0 errors in their
+logs, and a bare `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over
+`text: 15 of 15 cases passed, 0 failed`.

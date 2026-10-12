@@ -228,3 +228,26 @@ ctest --test-dir build
   and `CreateFontRequestRunLoopSource`, which needs a font server on the other end of a port. `InvalidFontData`
   (104) is recorded as **unreachable here** rather than guessed at: telling "not a font file" from "a font file
   whose data is invalid" needs a parse the engine's refusal does not expose.
+- **`CTParagraphStyle` IS DECLARED AND IMPLEMENTED, AND IT IS THE FIRST TYPE HERE THAT IS PURELY A TABLE.** Apple's
+  header prints a **type and a default value for each of its fourteen specifiers**, and those two facts are the
+  whole object: `Create` copies what it is given **by SIZE**, the accessor writes the stored copy **or the default
+  when nothing was stored** (Apple's own sentence for the door), and nothing has to know what a setting *means* to
+  carry it across. MEASURED: `text: 15 of 15 cases passed, 0 failed`.
+- **AND ITS THREE INVALID-INPUT CASES ARE ANSWERED THE WAY APPLE SPELLS THEM OUT, WHICH IS NOT THE SAME WAY
+  TWICE.** An unknown specifier **zeroes** the buffer and answers false ("the buffer value will simply be zeroed
+  out"); a buffer **too small** for the specifier's type is **not written to at all**, asserted by looking at the
+  bytes rather than at the return value, because a partial write of a number is the failure that guards; and a
+  setting whose size does not match its specifier is **skipped rather than misread**, which is the
+  forward-compatible behaviour Apple asks for.
+- **THE SUITE CAUGHT A REAL BUG HERE, WHICH IS THE POINT OF WRITING IT FIRST.** The paragraph style stores a
+  scalar as the **address of its bytes** and a CFType as **the object itself**, and the accessor treated both as
+  the first: it memcpy'd *from* the array instead of handing the array back, so a style's `TabStops` came out as
+  the array object's first eight bytes — **zero — i.e. NULL**. The failure was `text: 14 of 15 cases passed,
+  1 failed` with three `FAIL: the TabStops …` lines, and it is invisible for every scalar, which is why the case
+  that holds a style's tab stops **through a release of the caller's own reference** is the one that found it.
+  Fixed, `15 of 15`.
+- **AND ONE ROW IS A RECORDED DEVIATION, WITH ITS LANDING POINT NAMED.** Apple's default for
+  `kCTParagraphStyleSpecifierTabStops` is "12 left-aligned tabs, spaced by 28.0 points", and a tab is a
+  `CTTextTabRef` — whose header is LATER in Apple's include order, so neither it nor the door that makes one
+  exists yet. The default is answered as an **EMPTY ARRAY** of the right type, the case asserts both halves of
+  that (the type, and the emptiness), and `ct_para_tab_fallback` is where the twelve tabs will be built.

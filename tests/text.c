@@ -24,6 +24,7 @@
 #include <CoreText/CTFontManager.h>
 #include <CoreText/CTFontManagerErrors.h>
 #include <CoreText/CTFontTraits.h>
+#include <CoreText/CTParagraphStyle.h>
 
 #include <CoreFoundation/CoreFoundation.h>
 
@@ -988,6 +989,257 @@ static int case_manager_settings(void)
 	return g_fail - before;
 }
 
+/* THE VOCABULARIES AND THE NUMBERING, WHICH ARE THE PART OF THIS TYPE A CALLER WRITES DOWN. Apple's header prints
+ * a value beside every constant, so each is named here; AND THE WIDTHS ARE ASSERTED TOO, because a setting crosses
+ * into a style as BYTES and a type that widened an alignment to four bytes would pass every comparison above and
+ * still be wrong in the buffer a caller hands it. */
+static int case_paragraph_style_values(void)
+{
+	int before = g_fail;
+
+	check(kCTLeftTextAlignment == 0 && kCTRightTextAlignment == 1 && kCTCenterTextAlignment == 2 &&
+	      kCTJustifiedTextAlignment == 3 && kCTNaturalTextAlignment == 4,
+	      "the text alignments are %d, %d, %d, %d, %d; want 0 through 4",
+	      (int)kCTLeftTextAlignment, (int)kCTRightTextAlignment, (int)kCTCenterTextAlignment,
+	      (int)kCTJustifiedTextAlignment, (int)kCTNaturalTextAlignment);
+	check(kCTLineBreakByWordWrapping == 0 && kCTLineBreakByCharWrapping == 1 &&
+	      kCTLineBreakByClipping == 2 && kCTLineBreakByTruncatingHead == 3 &&
+	      kCTLineBreakByTruncatingTail == 4 && kCTLineBreakByTruncatingMiddle == 5,
+	      "the line break modes are not 0 through 5, in Apple's order");
+	/* A WRITING DIRECTION IS SIGNED AND `Natural` IS NEGATIVE, which is the whole point of the value: it is not a
+	 * direction but the ABSENCE of one, left to the bidirectional algorithm. */
+	check(kCTWritingDirectionNatural == -1 && kCTWritingDirectionLeftToRight == 0 &&
+	      kCTWritingDirectionRightToLeft == 1,
+	      "the writing directions are %d, %d, %d; want -1, 0, 1", (int)kCTWritingDirectionNatural,
+	      (int)kCTWritingDirectionLeftToRight, (int)kCTWritingDirectionRightToLeft);
+
+	/* THE FOURTEEN SETTINGS IN APPLE'S ORDER: a caller writes these numbers into a CTParagraphStyleSetting, so a
+	 * renumbering is a silently wrong buffer rather than a compile error. */
+	check(kCTParagraphStyleSpecifierAlignment == 0 && kCTParagraphStyleSpecifierFirstLineHeadIndent == 1 &&
+	      kCTParagraphStyleSpecifierHeadIndent == 2 && kCTParagraphStyleSpecifierTailIndent == 3 &&
+	      kCTParagraphStyleSpecifierTabStops == 4 && kCTParagraphStyleSpecifierDefaultTabInterval == 5 &&
+	      kCTParagraphStyleSpecifierLineBreakMode == 6 &&
+	      kCTParagraphStyleSpecifierLineHeightMultiple == 7 &&
+	      kCTParagraphStyleSpecifierMaximumLineHeight == 8 &&
+	      kCTParagraphStyleSpecifierMinimumLineHeight == 9 && kCTParagraphStyleSpecifierLineSpacing == 10 &&
+	      kCTParagraphStyleSpecifierParagraphSpacing == 11 &&
+	      kCTParagraphStyleSpecifierParagraphSpacingBefore == 12 &&
+	      kCTParagraphStyleSpecifierBaseWritingDirection == 13,
+	      "the specifiers are not 0 through 13 in Apple's order");
+	check(kCTParagraphStyleSpecifierCount == 14, "kCTParagraphStyleSpecifierCount is %d, want 14",
+	      (int)kCTParagraphStyleSpecifierCount);
+
+	/* AND THE WIDTHS, WHICH ARE HOW A VALUE IS READ AND WRITTEN. */
+	check(sizeof(CTTextAlignment) == 1 && sizeof(CTLineBreakMode) == 1 && sizeof(CTWritingDirection) == 1,
+	      "the value types are %zu, %zu and %zu bytes; want 1, 1 and 1", sizeof(CTTextAlignment),
+	      sizeof(CTLineBreakMode), sizeof(CTWritingDirection));
+	check(sizeof(CTParagraphStyleSpecifier) == 4, "a specifier is %zu bytes, want 4",
+	      sizeof(CTParagraphStyleSpecifier));
+	return g_fail - before;
+}
+
+/* THE OBJECT: WHAT A STYLE IS MADE OF, AND THE DOOR THAT ANSWERS WHETHER OR NOT ANYTHING WAS SET. Apple's contract
+ * for that door is two sentences and both are held — an unset setting ANSWERS ITS DEFAULT, and an invalid specifier
+ * ZEROES the buffer — and so is the TabStops DEFAULT, which is this tier's recorded deviation: an EMPTY ARRAY
+ * where Apple's header names "12 left-aligned tabs, spaced by 28.0 points", because a tab is a CTTextTabRef and
+ * CTTextTab.h is LATER in Apple's include order than this header. */
+static int case_paragraph_style_object(void)
+{
+	int before = g_fail;
+	CTParagraphStyleSetting settings[4];
+	CTTextAlignment alignment = kCTCenterTextAlignment;
+	CTLineBreakMode mode = kCTLineBreakByTruncatingTail;
+	CTWritingDirection direction = kCTWritingDirectionRightToLeft;
+	CGFloat indent = 24.0;
+	CTParagraphStyleRef style, same, other, copy;
+	CFArrayRef empty_tabs, tabs, read_tabs;
+	CFMutableArrayRef wide;
+	CTTextAlignment got_alignment;
+	CTLineBreakMode got_mode;
+	CTWritingDirection got_direction;
+	CGFloat got_indent;
+	unsigned char zeroed;
+
+	/* THE DEFAULT SET, WHICH APPLE SPELLS AS A NULL `settings`. */
+	style = CTParagraphStyleCreate(NULL, 0);
+	check(style != NULL, "the default style could not be made");
+	if (style == NULL) {
+		return g_fail - before;
+	}
+	check(CFGetTypeID((CFTypeRef)style) == CTParagraphStyleGetTypeID(),
+	      "CFGetTypeID(style) is %lu and CTParagraphStyleGetTypeID() is %lu",
+	      (unsigned long)CFGetTypeID((CFTypeRef)style), (unsigned long)CTParagraphStyleGetTypeID());
+
+	/* AND EVERY UNSEEN SETTING ANSWERS ITS DEFAULT, which is the accessor's reason for existing. */
+	got_alignment = 0xff;
+	check(CTParagraphStyleGetValueForSpecifier(style, kCTParagraphStyleSpecifierAlignment,
+						   sizeof got_alignment, &got_alignment) &&
+	      got_alignment == kCTNaturalTextAlignment,
+	      "the alignment default came back as %d, want kCTNaturalTextAlignment (%d)", (int)got_alignment,
+	      (int)kCTNaturalTextAlignment);
+	got_mode = 0xff;
+	check(CTParagraphStyleGetValueForSpecifier(style, kCTParagraphStyleSpecifierLineBreakMode,
+						   sizeof got_mode, &got_mode) &&
+	      got_mode == kCTLineBreakByWordWrapping,
+	      "the line break default came back as %d, want kCTLineBreakByWordWrapping (%d)", (int)got_mode,
+	      (int)kCTLineBreakByWordWrapping);
+	got_direction = 0x7f;
+	check(CTParagraphStyleGetValueForSpecifier(style, kCTParagraphStyleSpecifierBaseWritingDirection,
+						   sizeof got_direction, &got_direction) &&
+	      got_direction == kCTWritingDirectionNatural,
+	      "the writing direction default came back as %d, want kCTWritingDirectionNatural (%d)",
+	      (int)got_direction, (int)kCTWritingDirectionNatural);
+	got_indent = -1.0;
+	check(CTParagraphStyleGetValueForSpecifier(style, kCTParagraphStyleSpecifierHeadIndent,
+						   sizeof got_indent, &got_indent) && got_indent == 0.0,
+	      "the head indent default came back as %g, want 0", (double)got_indent);
+
+	/* THE TabStops DEFAULT IS THE RECORDED DEVIATION, and both halves of it are asserted: the TYPE a caller can
+	 * use, and the emptiness that says the twelve tabs have not arrived. */
+	empty_tabs = NULL;
+	check(CTParagraphStyleGetValueForSpecifier(style, kCTParagraphStyleSpecifierTabStops,
+						   sizeof empty_tabs, &empty_tabs) && empty_tabs != NULL,
+	      "the TabStops default did not come back as an array at all");
+	if (empty_tabs != NULL) {
+		check(CFGetTypeID((CFTypeRef)empty_tabs) == CFArrayGetTypeID(),
+		      "the TabStops default is not a CFArray");
+		check(CFArrayGetCount(empty_tabs) == 0,
+		      "the TabStops default holds %ld tabs: Apple's header names 12 left-aligned tabs 28.0 points "
+		      "apart, and this tier's recorded deviation is the EMPTY array until CTTextTab lands",
+		      (long)CFArrayGetCount(empty_tabs));
+	}
+
+	/* SETTINGS GO IN AND COME BACK OUT, each at its own type's width. */
+	settings[0].spec = kCTParagraphStyleSpecifierAlignment;
+	settings[0].valueSize = sizeof alignment;
+	settings[0].value = &alignment;
+	settings[1].spec = kCTParagraphStyleSpecifierHeadIndent;
+	settings[1].valueSize = sizeof indent;
+	settings[1].value = &indent;
+	settings[2].spec = kCTParagraphStyleSpecifierLineBreakMode;
+	settings[2].valueSize = sizeof mode;
+	settings[2].value = &mode;
+	settings[3].spec = kCTParagraphStyleSpecifierBaseWritingDirection;
+	settings[3].valueSize = sizeof direction;
+	settings[3].value = &direction;
+	other = CTParagraphStyleCreate(settings, 4);
+	check(other != NULL, "a style with four settings could not be made");
+	if (other != NULL) {
+		got_alignment = 0;
+		check(CTParagraphStyleGetValueForSpecifier(other, kCTParagraphStyleSpecifierAlignment,
+							   sizeof got_alignment, &got_alignment) &&
+		      got_alignment == kCTCenterTextAlignment, "the alignment did not come back");
+		got_indent = 0.0;
+		check(CTParagraphStyleGetValueForSpecifier(other, kCTParagraphStyleSpecifierHeadIndent,
+							   sizeof got_indent, &got_indent) && got_indent == 24.0,
+		      "the head indent came back as %g, want 24", (double)got_indent);
+		got_mode = 0xff;
+		check(CTParagraphStyleGetValueForSpecifier(other, kCTParagraphStyleSpecifierLineBreakMode,
+							   sizeof got_mode, &got_mode) &&
+		      got_mode == kCTLineBreakByTruncatingTail, "the line break mode did not come back");
+		got_direction = 0x7f;
+		check(CTParagraphStyleGetValueForSpecifier(other,
+							   kCTParagraphStyleSpecifierBaseWritingDirection,
+							   sizeof got_direction, &got_direction) &&
+		      got_direction == kCTWritingDirectionRightToLeft,
+		      "the writing direction did not come back");
+		/* AND A SETTING IT WAS NOT GIVEN STILL ANSWERS ITS DEFAULT. */
+		got_indent = -1.0;
+		check(CTParagraphStyleGetValueForSpecifier(other, kCTParagraphStyleSpecifierTailIndent,
+							   sizeof got_indent, &got_indent) &&
+		      got_indent == 0.0, "a setting that was never given did not answer its default");
+	}
+
+	/* EQUALITY IS BY VALUE, AND "NEVER SET" IS NOT "SET TO THE DEFAULT". */
+	same = CTParagraphStyleCreate(settings, 4);
+	check(same != NULL && CFEqual(other, same), "two styles made from the same settings are not equal");
+	check(same != NULL && CFHash(other) == CFHash(same), "two equal styles hash differently");
+	check(!CFEqual(style, other), "the default style compares equal to one with four settings set");
+
+	/* THE COPY IS EQUAL AND IS NOT THE SAME OBJECT. */
+	copy = CTParagraphStyleCreateCopy(other);
+	check(copy != NULL, "the copy door answered nothing");
+	check(copy != NULL && copy != other, "the copy is the SAME POINTER as the original");
+	check(copy != NULL && CFEqual(copy, other), "the copy is not equal to the original");
+
+	/* AN UNKNOWN SPECIFIER ZEROES THE BUFFER AND ANSWERS FALSE, which is Apple's own sentence for it. */
+	zeroed = 0xff;
+	check(!CTParagraphStyleGetValueForSpecifier(style, (CTParagraphStyleSpecifier)999, sizeof zeroed, &zeroed),
+	      "an unknown specifier answered TRUE");
+	check(zeroed == 0, "an unknown specifier did not zero the buffer: 0x%02x", (unsigned)zeroed);
+
+	/* AND A BUFFER TOO SMALL FOR THE TYPE IS NOT WRITTEN TO AT ALL, which is asserted by looking at the bytes
+	 * rather than at a return value alone: a partial write of a number is the failure this guards. */
+	{
+		unsigned char small_buf[sizeof(CGFloat)];
+		size_t k;
+		int untouched = 1;
+
+		memset(small_buf, 0xff, sizeof small_buf);
+		check(!CTParagraphStyleGetValueForSpecifier(style, kCTParagraphStyleSpecifierHeadIndent, 1, small_buf),
+		      "a buffer smaller than the specifier's type was accepted");
+		for (k = 0; k < sizeof small_buf; k++) {
+			if (small_buf[k] != 0xff) {
+				untouched = 0;
+			}
+		}
+		check(untouched, "a buffer too small for the value was written into anyway");
+	}
+
+	/* THE TabStops VALUE IS RETAINED BY THE STYLE, which is what makes the BORROWED reference the accessor hands
+	 * back safe. The caller's own reference is released here on purpose: the style is the only thing holding the
+	 * array when it is asked for it back. */
+	wide = CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks);
+	check(wide != NULL, "the test could not make its array of tab stops");
+	if (wide != NULL) {
+		tabs = wide;
+		settings[0].spec = kCTParagraphStyleSpecifierTabStops;
+		settings[0].valueSize = sizeof tabs;
+		settings[0].value = &tabs;
+		{
+			CTParagraphStyleRef with_tabs = CTParagraphStyleCreate(settings, 1);
+
+			check(with_tabs != NULL, "a style with a TabStops setting could not be made");
+			if (with_tabs != NULL) {
+				CFRelease(wide);	/* the CALLER's reference goes, which is the point of the check */
+				read_tabs = NULL;
+				check(CTParagraphStyleGetValueForSpecifier(with_tabs,
+									   kCTParagraphStyleSpecifierTabStops,
+									   sizeof read_tabs, &read_tabs) &&
+				      read_tabs != NULL, "the TabStops value did not come back");
+				check(read_tabs != NULL && read_tabs == tabs,
+				      "the style answered a DIFFERENT array than the one it was given");
+				check(read_tabs != NULL && CFArrayGetCount(read_tabs) == 0,
+				      "the TabStops value came back changed");
+			}
+		}
+	}
+
+	/* AND A SETTING WHOSE SIZE DOES NOT MATCH ITS SPECIFIER IS SKIPPED RATHER THAN MISREAD, which is the
+	 * forward-compatible behaviour Apple asks for: the style is still usable, and what could not be read answers
+	 * its default. */
+	{
+		CTParagraphStyleSetting wrong;
+		CTParagraphStyleRef odd;
+
+		/* THE SIZE AND THE TYPE DISAGREE: an alignment is ONE byte wide and this setting claims a CGFloat's
+		 * worth, which is the case Apple's "must match" describes. */
+		wrong.spec = kCTParagraphStyleSpecifierAlignment;
+		wrong.valueSize = sizeof indent;
+		wrong.value = &indent;
+		odd = CTParagraphStyleCreate(&wrong, 1);
+		check(odd != NULL, "a style with a wrong-sized setting could not be made");
+		if (odd != NULL) {
+			got_alignment = 0xff;
+			check(CTParagraphStyleGetValueForSpecifier(odd, kCTParagraphStyleSpecifierAlignment,
+								   sizeof got_alignment, &got_alignment) &&
+			      got_alignment == kCTNaturalTextAlignment,
+			      "a setting whose size did not match its specifier was stored anyway");
+		}
+	}
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -1002,6 +1254,8 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The family-name comparator, including the recorded deviation", case_manager_comparator },
 	{ "Registration round-trips, and a scope this tier refuses", case_manager_registration },
 	{ "The auto-activation setting round-trips as a preference", case_manager_settings },
+	{ "The paragraph vocabularies and the fourteen settings", case_paragraph_style_values },
+	{ "A paragraph style answers defaults, copies and retains", case_paragraph_style_object },
 };
 
 int main(void)
