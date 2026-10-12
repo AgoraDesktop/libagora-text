@@ -431,4 +431,20 @@ ctest --test-dir build
   reasons was a CONDITION that could be checked: `GetGlyphRuns` waited for `CTRun` to exist; `CreateTruncatedLine`
   waited for "the typesetter, whose job the breaking is"; `CreateJustifiedLine` waited for a decision about where
   justification slack goes — and that decision is made and written down rather than left as a sentence. **A REASON THAT
-  CANNOT BE CHECKED IS A SENTENCE, NOT A REASON.**
+  CANNOT BE CHECKED IS A SENTENCE, NOT A REASON.**- **THE MATCHING TIER IS DECLARED AND IMPLEMENTED, AND FOUR DOORS LANDED WITH IT.** The descriptor's two and the
+  collection's two are the SAME QUESTION one level apart: **which installed faces does this query describe**. THE SET is
+  the engine's own list tested against a query — every attribute the query names must be present and equal, and a query
+  with **none** describes every face — and **THE ORDER IS THE USER'S DECISION, RECORDED**: Apple defers it to "system
+  precedence" and prints no rule for it, so the array is sorted **by family name** with
+  `CTFontManagerCompareFontFamilyNames`, which is stable and reproducible (the property a caller's own sorting needs,
+  and itself a recorded deviation from Apple's UI order). The collection's sorted door is Apple's own way out: the
+  callback *"defines the sort order"*. MEASURED: `text: 28 of 28 cases passed, 0 failed`, with `owed` down to **2** names.
+- **AND THE DESCRIPTOR DOOR'S SECOND PARAMETER IS A `CFSetRef`, NOT AN OPTIONS DICTIONARY — a correction my own first
+  draft got wrong**, on the assumption that a Core Text door's second parameter takes options. It is
+  `CFSetRef mandatoryAttributes`, and it **FILTERS THE RESULT**: every returned descriptor must carry those attributes,
+  so demanding one this tier does not build gives an **EMPTY ARRAY** rather than an approximate face — the requirement
+  cannot be met, and an empty answer says so. The case holds both directions.
+- **AND IT CLOSED A HOLE IN THE `owed` TEST.** The descriptor's two matching doors had been declared and undefined
+  since the descriptor was written; the test was built LATER, when `CTFontCollection` landed, and never picked them up
+  — so two doors escaped the very check that test exists to make. They are defined now, and the test names what is
+  left.

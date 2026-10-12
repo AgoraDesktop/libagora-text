@@ -18,6 +18,8 @@
  */
 #include <CoreText/CTFontCollection.h>
 
+#include <CoreText/CTFontMatching_internal.h>
+
 #include <CoreFoundation/CFRuntime.h>
 
 /* THE ONE OPTION KEY, WHOSE VALUE IS THE INFERENCE CTFontCollection.h's head describes in full: Apple
@@ -188,21 +190,52 @@ CTFontCollectionRef CTFontCollectionCreateCopyWithFontDescriptors(CTFontCollecti
 }
 
 /* =================================================================================================
- * OWED DOORS, EACH WITH THE REASON IT CANNOT BE ANSWERED HERE. They are DECLARED in CTFontCollection.h and NOT
- * DEFINED, so a caller who reaches for one gets a link error rather than an invented answer.
+ * THE ANSWER, WHICH USED TO BE OWED AND NOW HAS A TIER BEHIND IT.
  *
- *   CTFontCollectionCreateMatchingFontDescriptors                     Apple's result is "an array of NORMALIZED
- *   CTFontCollectionCreateMatchingFontDescriptorsSortedWithCallback   font descriptors matching the collection
- *                                                                     definition", and BOTH halves of that are
- *                                                                     Apple's rather than a signature's: which
- *                                                                     attributes a returned descriptor carries,
- *                                                                     and in what order the array arrives.
+ * THE OWED REASON SAID, exactly: "THE SET IS REACHABLE AND THE ORDER IS NOT ... THIS TIER DOES NOT INVENT AN ORDER,
+ * so these two wait for the tier that owns matching, which is the tier CTFontDescriptorCreateMatchingFontDescriptors
+ * waits for." THAT TIER EXISTS NOW (`CTFontMatching.c`), and the user decided the order's question rather than this
+ * file inventing one: the array is sorted by FAMILY NAME with the comparator `CTFontManager` offers, WHICH IS STABLE
+ * AND REPRODUCIBLE and is itself a recorded deviation from Apple's UI order. `CTFontMatching_internal.h` carries the
+ * decision; this file carries only the translation from a COLLECTION to the matcher's question.
  *
- * THE SET IS REACHABLE AND THE ORDER IS NOT, which is the precise boundary rather than a shortage of machinery.
- * `cg_font_enumerate` walks the configured font directories AND the process's registrations, so every face a
- * system has is one call away and a descriptor could be built from each. What would have to be invented is the
- * NORMALIZATION (what a returned descriptor is normalized TO) and the ORDER -- and the second door exists
- * precisely because the first one's order is Apple's. THIS TIER DOES NOT INVENT AN ORDER, so these two wait for
- * the tier that owns matching, which is the tier `CTFontDescriptorCreateMatchingFontDescriptors` waits for and
- * the reason the README names them together.
+ * AND THE SECOND DOOR IS APPLE'S OWN WAY OUT OF THE ORDERING PROBLEM, WHICH IS WHY IT IS THE ONE THAT HANDS THE
+ * ORDER TO THE CALLER: `CTFontCollectionSortDescriptorsCallback` "defines the sort order", so a caller who does not
+ * like this tier's has one of their own.
  * =============================================================================================== */
+CFArrayRef CTFontCollectionCreateMatchingFontDescriptors(CTFontCollectionRef collection)
+{
+	const struct __CTFontCollection *c = (const struct __CTFontCollection *)collection;
+
+	if (c == NULL) {
+		return NULL;
+	}
+	/* THE COLLECTION'S QUESTION AND THE MATCHER'S ARE THE SAME QUESTION: `descriptors` is the array of query
+	 * descriptors, and NULL means "every face" — which is exactly what an empty array means to the matcher. */
+	return CTFontMatchingCopyMatches(c->descriptors);
+}
+
+CFArrayRef CTFontCollectionCreateMatchingFontDescriptorsSortedWithCallback(
+	CTFontCollectionRef collection, CTFontCollectionSortDescriptorsCallback sortCallback, void *refCon)
+{
+	CFMutableArrayRef sorted;
+	CFArrayRef matches;
+
+	matches = CTFontCollectionCreateMatchingFontDescriptors(collection);
+	if (matches == NULL) {
+		return NULL;
+	}
+	/* NO CALLBACK IS NOT AN ERROR HERE, AND IT IS RECORDED: Apple's parameter list says the callback "defines the
+	 * sort order", and a caller who passes none gets this tier's own order rather than a refusal — the array is
+	 * already ordered, and refusing to hand it back would be a failure to answer a question that has an answer. */
+	if (sortCallback == NULL) {
+		return matches;
+	}
+	sorted = CFArrayCreateMutableCopy(kCFAllocatorDefault, 0, matches);
+	CFRelease(matches);
+	if (sorted == NULL) {
+		return NULL;
+	}
+	CFArraySortValues(sorted, CFRangeMake(0, CFArrayGetCount(sorted)), (CFComparatorFunction)sortCallback, refCon);
+	return sorted;
+}

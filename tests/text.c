@@ -2800,6 +2800,169 @@ static int case_line_justification(void)
 	return g_fail - before;
 }
 
+/* A VALID ORDERING FUNCTION FOR THE COLLECTION'S SORTED DOOR — by PostScript NAME, ascending — because that door's
+ * whole point is that the CALLER gives the order. It is a real comparator and not a stub: an inconsistent one would be
+ * undefined behaviour in the sort, which is the kind of "test" this tree refuses to write. */
+static CFComparisonResult matching_by_name(CTFontDescriptorRef first, CTFontDescriptorRef second, void *context)
+{
+	/* THE SIGNATURE IS APPLE'S TYPEDEF EXACTLY, and not a `const void *` pair that happens to be compatible: the
+	 * first draft took the generic comparator's types, which clang REJECTS as an incompatible function pointer, and
+	 * the rejection is right — a callback whose parameter types differ is a different callback. */
+	CFStringRef a = (CFStringRef)CTFontDescriptorCopyAttribute(first, kCTFontNameAttribute);
+	CFStringRef b = (CFStringRef)CTFontDescriptorCopyAttribute(second, kCTFontNameAttribute);
+	CFComparisonResult result = kCFCompareEqualTo;
+
+	(void)context;
+	if (a != NULL && b != NULL) {
+		result = CFStringCompare(a, b, kCFCompareCaseInsensitive);
+	}
+	if (a != NULL) {
+		CFRelease(a);
+	}
+	if (b != NULL) {
+		CFRelease(b);
+	}
+	return result;
+}
+
+/* THE MATCHING TIER, WHICH IS WHAT FOUR DOORS WERE WAITING FOR. The descriptor's two and the collection's two are the
+ * SAME QUESTION one level apart, so the case asks it both ways and holds the three things the tier decides: THE SET (a
+ * query's attributes must all be present and equal; a query with none describes everything), THE ORDER by family name,
+ * and THE MANDATORY SET — the descriptor door's second parameter, which FILTERS the result rather than shaping the
+ * query.
+ *
+ * AND IT HOLDS THE BOUNDARY THE RETURNED DESCRIPTORS CARRY: three attributes this tier can state as facts about a face,
+ * so a caller who DEMANDS one it does not build gets an EMPTY ARRAY rather than an approximate face. */
+static int case_font_matching(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(12.0);	/* this REGISTERS the face, which is what makes it matchable */
+	CFMutableDictionaryRef query_attrs;
+	CFMutableSetRef mandatory;
+	CFMutableArrayRef ask;
+	CTFontDescriptorRef query, single;
+	CFArrayRef matches, again, filtered, plain, all, every, asked, sorted;
+	CTFontCollectionRef everything, from_query;
+	CTFontDescriptorRef first;
+	CFStringRef name;
+	CFIndex i, count;
+	int named = 1;
+
+	check(font != NULL, "no font, so there is nothing to match against");
+	if (font == NULL) {
+		return g_fail - before;
+	}
+	query_attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+						&kCFTypeDictionaryValueCallBacks);
+	mandatory = CFSetCreateMutable(kCFAllocatorDefault, 0, &kCFTypeSetCallBacks);
+	check(query_attrs != NULL && mandatory != NULL, "the test could not make its query dictionary or set");
+	if (query_attrs == NULL || mandatory == NULL) {
+		return g_fail - before;
+	}
+	CFDictionarySetValue(query_attrs, kCTFontNameAttribute, CFSTR("DejaVuSansMono-Bold"));
+	query = CTFontDescriptorCreateWithAttributes(query_attrs);
+	check(query != NULL, "the query descriptor could not be made");
+	if (query == NULL) {
+		return g_fail - before;
+	}
+
+	/* THE SET: the face named is registered, so the query describes at least it, and EVERY match carries the name that
+	 * was asked for — which is the rule the tier states. */
+	matches = CTFontDescriptorCreateMatchingFontDescriptors(query, NULL);
+	check(matches != NULL, "the matching door answered nothing at all");
+	if (matches == NULL) {
+		return g_fail - before;
+	}
+	count = CFArrayGetCount(matches);
+	check(count >= 1, "the query matched %ld faces, and the one it names is registered", (long)count);
+	for (i = 0; i < count; i++) {
+		CTFontDescriptorRef match = (CTFontDescriptorRef)CFArrayGetValueAtIndex(matches, i);
+
+		name = (CFStringRef)CTFontDescriptorCopyAttribute(match, kCTFontNameAttribute);
+		if (name == NULL || !CFEqual(name, CFSTR("DejaVuSansMono-Bold"))) {
+			named = 0;
+		}
+		if (name != NULL) {
+			CFRelease(name);
+		}
+	}
+	check(named, "a matched descriptor does not carry the name the query asked for");
+
+	/* THE ORDER IS STABLE — the whole reason it is a decision rather than an accident — and the SINGULAR door is the
+	 * FIRST of the same set. */
+	again = CTFontDescriptorCreateMatchingFontDescriptors(query, NULL);
+	check(again != NULL && CFEqual(matches, again),
+	      "two identical queries answered different arrays, so the order is not stable");
+	single = CTFontDescriptorCreateMatchingFontDescriptor(query, NULL);
+	first = (CTFontDescriptorRef)CFArrayGetValueAtIndex(matches, 0);
+	check(single != NULL && CFEqual(single, first),
+	      "the singular door did not answer the first descriptor of the plural one's array");
+
+	/* THE MANDATORY SET FILTERS THE RESULT: demanding an attribute this tier does not build leaves NOTHING, and
+	 * demanding one it does leaves the match. */
+	CFSetAddValue(mandatory, kCTFontFeatureSettingsAttribute);
+	filtered = CTFontDescriptorCreateMatchingFontDescriptors(query, mandatory);
+	check(filtered != NULL && CFArrayGetCount(filtered) == 0,
+	      "%ld descriptors matched a mandatory attribute this tier cannot build",
+	      (long)((filtered != NULL) ? CFArrayGetCount(filtered) : -1));
+	if (filtered != NULL) {
+		CFRelease(filtered);
+	}
+	{
+		CFMutableSetRef names = CFSetCreateMutable(kCFAllocatorDefault, 0, &kCFTypeSetCallBacks);
+
+		check(names != NULL, "the test could not make its second set");
+		if (names != NULL) {
+			CFSetAddValue(names, kCTFontNameAttribute);
+			filtered = CTFontDescriptorCreateMatchingFontDescriptors(query, names);
+			check(filtered != NULL && CFArrayGetCount(filtered) >= 1,
+			      "demanding the NAME, which this tier's descriptors carry, left nothing");
+			if (filtered != NULL) {
+				CFRelease(filtered);
+			}
+			CFRelease(names);
+		}
+	}
+
+	/* AND THE COLLECTION'S TWO DOORS ARE THE SAME QUESTION ONE LEVEL UP. A collection that asks for everything describes
+	 * every face; one built from the query describes what the query does; and the SORTED door hands the order to the
+	 * caller. */
+	everything = CTFontCollectionCreateFromAvailableFonts(NULL);
+	every = (everything != NULL) ? CTFontCollectionCreateMatchingFontDescriptors(everything) : NULL;
+	check(every != NULL && CFArrayGetCount(every) >= count,
+	      "a collection asking for everything matched fewer faces (%ld) than one query did (%ld)",
+	      (long)((every != NULL) ? CFArrayGetCount(every) : -1), (long)count);
+	ask = CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks);
+	check(ask != NULL, "the test could not make its array of queries");
+	if (ask != NULL) {
+		CFArrayAppendValue(ask, query);
+		from_query = CTFontCollectionCreateWithFontDescriptors(ask, NULL);
+		plain = (from_query != NULL) ? CTFontCollectionCreateMatchingFontDescriptors(from_query) : NULL;
+		check(plain != NULL && CFArrayGetCount(plain) == count,
+		      "the collection's answer (%ld) differs from the descriptor's (%ld) for the same question",
+		      (long)((plain != NULL) ? CFArrayGetCount(plain) : -1), (long)count);
+		/* AND THE CALLER'S OWN ORDER IS TAKEN. */
+		sorted = (from_query != NULL)
+				 ? CTFontCollectionCreateMatchingFontDescriptorsSortedWithCallback(from_query,
+												   matching_by_name, NULL)
+				 : NULL;
+		check(sorted != NULL && CFArrayGetCount(sorted) == count,
+		      "the sorted door answered a different set from the unsorted one");
+		/* AND NO CALLBACK IS THIS TIER'S OWN ORDER RATHER THAN A REFUSAL, which is recorded. */
+		asked = (from_query != NULL)
+				? CTFontCollectionCreateMatchingFontDescriptorsSortedWithCallback(from_query, NULL, NULL)
+				: NULL;
+		check(asked != NULL && plain != NULL && CFEqual(asked, plain),
+		      "a NULL callback did not answer this tier's own order");
+	}
+
+	/* NULL SAFETY. */
+	check(CTFontDescriptorCreateMatchingFontDescriptors(NULL, NULL) == NULL, "a NULL descriptor matched");
+	check(CTFontDescriptorCreateMatchingFontDescriptor(NULL, NULL) == NULL, "a NULL descriptor matched singularly");
+	check(CTFontCollectionCreateMatchingFontDescriptors(NULL) == NULL, "a NULL collection matched");
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -2828,6 +2991,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The umbrella, and the version of the surface it implements", case_umbrella_version },
 	{ "A line truncates the way Apple prints it, and refuses another font", case_line_truncation },
 	{ "A line justifies at the spaces, by the fraction it is given", case_line_justification },
+	{ "Matching finds the faces a query describes, in a stable order", case_font_matching },
 };
 
 int main(void)

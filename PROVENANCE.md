@@ -635,3 +635,47 @@ their logs; `nm -D build/libagora-text.so` lists `CTLineCreateJustifiedLine`; an
 `100% tests passed, 0 tests failed out of 2` over `text: 27 of 27 cases passed, 0 failed`, with the `owed` test down to 4 names — none of them in `CTLine`. THE CASE HOLDS APPLE'S THREE
 SENTENCES AND THIS TIER'S TWO DECISIONS, reading the glyph POSITIONS through the run, because those are what
 justification changes: the glyphs are the same ones and their origins have moved.
+**The matching tier: `CTFontDescriptorCreateMatchingFontDescriptors` (and its singular form) and
+`CTFontCollectionCreateMatchingFontDescriptors` (and its sorted form) — four doors, and the largest remaining piece
+(2026-10-11).** They all ask ONE question — which installed faces does this query describe — so the answer has one home
+(`CTFontMatching.c`, behind `CTFontMatching_internal.h`) and the doors are its four fronts. THE DESCRIPTOR'S TWO ARE
+DEFINED THERE rather than in `CTFontDescriptor.c`, because the tier that owns matching owns the doors that ask a
+matching question.
+
+**THE SET IS APPLE'S RULE AS FAR AS ITS HEADER PRINTS IT.** A candidate matches a query when EVERY attribute the query
+names is present in the candidate with an equal value, and A QUERY WITH NO ATTRIBUTES MATCHES EVERYTHING — which is what
+makes the collection's "all available" question and an empty descriptor list the same question. The subtler half of
+Apple's matching (traits, family-name matching, substitution) is NOT attempted, and the boundary is stated where the
+rule is: half a matcher that returned plausible wrong faces would be worse than one whose rule a caller can read.
+
+**AND THE ORDER IS THE USER'S DECISION, RECORDED WITH ITS REASON.** Apple's documentation defers the order to "system
+precedence" and never says what precedence IS, which is why these doors were owed for the whole life of the library
+before this commit. THE DECISION (user, 2026-10-11): sort BY FAMILY NAME with `CTFontManagerCompareFontFamilyNames` —
+the comparator the manager already offers, itself a recorded deviation from Apple's UI order — BECAUSE STABILITY IS THE
+PROPERTY THAT MATTERS: two runs of the same program see the same array, which is what a caller's own sorting actually
+needs. AND THE COLLECTION'S SORTED DOOR IS APPLE'S OWN WAY OUT OF THE PROBLEM: its callback "defines the sort order", so
+a caller who dislikes this tier's order supplies their own — and a caller who passes NONE gets this tier's, recorded as
+an answer rather than a refusal.
+
+**AND ONE BOUNDARY IS CARRIED BY THE DESCRIPTORS THEMSELVES**: they hold the three attributes this tier can state as
+FACTS about a face — its URL, its PostScript name and its family, the family read from the `name` table through the
+engine's own door. Apple's answer is "an array of NORMALIZED font descriptors" whose normalization is not printed, and
+that normalization is not attempted.
+
+**AND TWO CORRECTIONS CAME OUT OF WRITING IT, BOTH WORTH KEEPING.** ONE: THE DESCRIPTOR DOOR'S SECOND PARAMETER IS
+`CFSetRef mandatoryAttributes`, NOT AN OPTIONS DICTIONARY — the first draft assumed options, as most Core Text doors with
+a second parameter take them, and Apple's header said otherwise. It FILTERS THE RESULT (every returned descriptor must
+carry those attributes), so demanding an attribute this tier does not build produces an EMPTY ARRAY, which is the honest
+answer to a requirement that cannot be met. TWO: A CALLBACK'S TYPE HAS TO BE THE CALLBACK'S TYPE — the test's ordering
+function was written with the generic comparator's `const void *` pair, and clang REJECTED it as an incompatible
+function pointer, which is right: a callback whose parameter types differ is a different callback.
+
+**AND THE UNIT CLOSED A HOLE IN THE `owed` TEST.** The descriptor's two matching doors had been DECLARED AND UNDEFINED
+SINCE THE DESCRIPTOR WAS WRITTEN — the README recorded them as owed with their reason — and the test that holds that
+property was built LATER, when `CTFontCollection` landed, so it named the COLLECTION's two and never picked up the
+descriptor's. TWO DOORS ESCAPED THE CHECK THE TEST EXISTS TO MAKE, and this is the second time this tree has found a
+document claiming something a measurement did not support. They are defined now, and the test names what remains.
+
+MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with no compiler diagnostic at all in
+their logs; `nm -D build/libagora-text.so` lists all four doors; and a bare `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over
+`text: 28 of 28 cases passed, 0 failed`, with the `owed` test down to 2 names.

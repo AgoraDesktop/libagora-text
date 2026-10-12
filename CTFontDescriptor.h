@@ -132,9 +132,12 @@ CTFontDescriptorRef CTFontDescriptorCreateCopyWithFeature(CTFontDescriptorRef or
 							  CFNumberRef featureTypeIdentifier,
 							  CFNumberRef featureSelectorIdentifier);
 
-/* AND THE TWO THAT NEED A REGISTRY OF INSTALLED FACES. Apple defines their answer as "based on the original
- * descriptor and SYSTEM PRECEDENCE" — a precedence order this tier does not have yet — and they are OWED
- * WITH THAT REASON rather than answered with something invented. See README.md. */
+/* AND THE TWO THAT NEED A REGISTRY OF INSTALLED FACES, WHICH THIS TIER NOW HAS. Apple defines their answer as "based
+ * on the original descriptor and SYSTEM PRECEDENCE"; the SET is the engine's own list tested against the descriptor,
+ * and THE ORDER is this tier's recorded decision (by family name — see CTFontMatching_internal.h). BOTH ARE DEFINED,
+ * in `CTFontMatching.c`, because the tier that owns matching owns the doors that ask a matching question. AND THE
+ * SECOND PARAMETER IS A SET OF ATTRIBUTE NAMES — every returned descriptor must CARRY them — not an options
+ * dictionary, which its own name says. */
 CFArrayRef CTFontDescriptorCreateMatchingFontDescriptors(CTFontDescriptorRef descriptor,
 							 CFSetRef mandatoryAttributes);
 CTFontDescriptorRef CTFontDescriptorCreateMatchingFontDescriptor(CTFontDescriptorRef descriptor,

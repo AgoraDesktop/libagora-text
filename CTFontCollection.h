@@ -89,10 +89,9 @@ CTFontCollectionRef CTFontCollectionCreateCopyWithFontDescriptors(CTFontCollecti
 								  CFDictionaryRef options);
 
 /* ---------------------------------------------------------------------------------------
- * THE ANSWER, WHICH IS OWED WITH ITS REASON (see this file's head): Apple's result is an array of NORMALIZED
- * descriptors matching the collection, and both the normalization and the order are Apple's. They are
- * declared so a caller can see the surface whole, and left undefined so that reaching for one is a link error
- * rather than an invented answer.
+ * THE ANSWER, WHICH ITS REASON NO LONGER HOLDS FOR (see this file's head and `CTFontCollection.c`): the tier that
+ * owns matching exists, so the SET is answered and the ORDER is a recorded decision — by family name, stable and
+ * reproducible. The sorted door is Apple's own way out of it: the callback "defines the sort order".
  * ------------------------------------------------------------------------------------- */
 CFArrayRef CTFontCollectionCreateMatchingFontDescriptors(CTFontCollectionRef collection);
 CFArrayRef CTFontCollectionCreateMatchingFontDescriptorsSortedWithCallback(
