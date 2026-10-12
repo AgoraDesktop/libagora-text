@@ -1068,3 +1068,67 @@ MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 wi
 library DEFINES **148** `CT…` names; and the `owed` guard is down to **13** names — `CTFontCopyVariationAxes`,
 `CTFontCopyFeatureSettings` and `CTFontDescriptorCreateCopyWithFeature` LEFT IT IN THE COMMIT THAT DEFINED THEM, which is
 the rule the last unit had to learn the hard way: DOOR FIRST, GUARD SECOND, ONE COMMIT.
+
+**The four creators that ask a registry rather than a name (2026-10-12).** `CTFontCreateCopyWithSymbolicTraits`,
+`CTFontCreateCopyWithFamily`, `CTFontCreateForString` and `CTFontCreateUIFontForLanguage` are DEFINED, and **THREE OF THE
+FOUR WERE WAITING ON REASONS THAT HAD GONE FALSE RATHER THAN ON WORK** — which is the second finding of the night and
+the same shape as the first. Their reasons were "needs a cascade and a fallback search", "needs a face with those traits
+to exist and be found" and "needs the family's faces to be enumerable": ALL THREE ARE CONDITIONS, and the walk that
+enumerates the faces has been in `CTFontMatching.c` SINCE THE MATCHING TIER LANDED. The list simply had not been read
+again. THE FOURTH IS NOT THAT AT ALL: "a ROLE is a request to a system that chooses a face" is STILL TRUE, and that door
+is answered by a DECISION recorded at the door — which is the difference between a reason that has expired and a
+boundary that has not.
+
+**AND THE FOUR SHARE A NARROWER "SYSTEM" THAN APPLE'S, MEASURED RATHER THAN ASSUMED.** A probe built against this
+prefix asked `cg_font_enumerate` what a FRESH PROCESS sees and the answer was **ZERO FACES**: this machine's engine is
+configured with no font directory that holds any, so the registry these four search is THE PROCESS'S REGISTRATIONS and
+nothing else. That is the boundary `CTFontManager` already records about its one scope, and the one the font service
+exists to remove (`FONT-SERVICE.md`) — and it is written where a caller reads it, at the head of the block that defines
+these doors, rather than left to be discovered from a NULL. THE CASES THEREFORE FILL THE REGISTRY THEMSELVES and PRINT
+that they did, so "which face answered" is a fact about the case and not a claim about the machine.
+
+**AND EVERY DOOR TAKES ITS ORDER FROM THE MATCHING TIER RATHER THAN RESTATING IT.** `CTFontMatchingCopyAvailableDescriptors`
+is the one walk, and it hands back the candidates ALREADY SORTED BY FAMILY NAME — this tier's recorded decision where
+Apple defers to "system precedence". "The first face that satisfies this" is therefore reproducible, and the case
+asserts the system role against **the first entry of that walk** rather than against a family name this machine happens
+to hold first. ONE WALK AND FOUR ACCEPTANCE RULES: `ct_font_search` takes a predicate, so the four doors do not each
+carry their own copy of the loop — and each door's rule is readable on its own.
+
+**AND TWO DECISIONS INSIDE THEM ARE ASSERTED RATHER THAN DESCRIBED, WHICH IS THE WHOLE POINT OF TAKING THEM IN A UNIT
+THAT WRITES THE CASES WITH THE DOORS.** `CTFontCreateCopyWithSymbolicTraits` computes its request as THE FONT'S OWN
+TRAITS WITH THE MASK'S BITS REPLACED BY THE VALUE'S — which is what makes CLEARING bold a question an answer exists for,
+and only the masked bits are compared afterwards. `CTFontCreateCopyWithFamily` needed a second decision before it could
+answer at all: Apple prints "with the original traits" and no rule for WHICH TRAITS CROSS A FAMILY, and the original is
+`DejaVuSansMono-Bold` — bold AND monospaced. **DEMANDING MONOSPACE OF `DejaVu Sans` ASKS FOR SOMETHING NO FACE IN IT CAN
+BE**, so the door compares under `ct_font_style_mask` (bold, italic, condensed, expanded) and the case asserts that the
+MONO BIT DOES NOT COME ACROSS, on a real pair of families.
+
+**AND THE CASCADE DOOR'S OWN HIDDEN HALF IS WHERE THE LIST COMES FROM.** Apple says the answer is "the best substitute
+font from the CASCADE LIST of the current font" and never says whose list that is. This tier reads the CALLER'S
+`kCTFontCascadeListAttribute` first and the registry after it — and the case is built so that the two answers DIFFER:
+two registered faces cover the character used (Hebrew alef, which the suite's own monospaced face has no glyph for),
+`DejaVu Sans` sorts before `FreeSerif`, so a font with NO cascade must answer DejaVu Sans and the SAME font with a
+cascade naming FreeSerif must answer FreeSerif. A case that only asked "did something answer" would have passed with
+either half broken.
+
+**AND FALSIFIED, BOTH DECISIONS AT ONCE, IN ONE RUN** — a case that cannot fail is worth nothing:
+
+    FAIL: no face of "DejaVu Sans" answered the family door
+    FAIL: Same family and these traits, and the family a style cannot cross: checks failed
+    FAIL: the door answered from somewhere other than the cascade list it was given
+    FAIL: A cascade answers by list first, and a role answers by fact: checks failed
+    text: 37 of 39 cases passed, 2 failed
+
+— with the style mask replaced by a whole-word comparison and the cascade branch forced out; restored, `39 of 39`.
+
+**AND A CASE FAILED FIRST FOR A REASON IN THE CASE, WHICH IS WORTH KEEPING BECAUSE IT WAS A REAL DISTINCTION.** It
+asserted "no face covers this" BEFORE the faces that cover it were registered, which is only a measurement if the
+registration happens after — and its first draft registered them at the top, so the assertion failed. The case now
+measures the EMPTY registry first and registers afterwards, in that order and for that reason. AND ITS SECOND FAILURE
+WAS THE RANGE RULE WORKING: it asked for a range of length 0 and expected NULL, but a length of 0 means "to the END of
+the string" — the rule `CTRun` already carries — so the door correctly answered the font it was given. The case now
+measures an empty range at the END of a string and on an EMPTY string, which are the two ranges that really are empty.
+
+MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with NO compiler diagnostic at all; a bare
+`ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over `text: 39 of 39 cases passed, 0 failed`; the
+library DEFINES **152** `CT…` names; and the `owed` guard is down to **9** — the four left in the commit that defined them.

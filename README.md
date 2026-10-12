@@ -600,4 +600,23 @@ for this ("so that the two files agree … instead of one of them `extern`ing wh
 - **AND ONE STALE PARAGRAPH OF THE OWED BLOCK WAS CORRECTED, WHICH IS WHAT THE OWED LIST IS FOR.** `CTFont.c` still said the
 descriptor's two matching doors were owed for want of a registry of installed faces; the registry exists and the doors are
 defined. MEASURED: `100% tests passed, 0 tests failed out of 2` over `text: 37 of 37 cases passed, 0 failed`,
-**148 `CT…` definitions**, and `owed` down to **13**.
+  **148 `CT…` definitions**, and `owed` down to **13**.
+- **AND THE FOUR CREATORS THAT ASK A REGISTRY RATHER THAN A NAME ARE DEFINED — THREE OF THE FOUR ON A REASON THAT HAD
+GONE FALSE: `CTFontCreateCopyWithSymbolicTraits`, `CTFontCreateCopyWithFamily` and `CTFontCreateForString` all waited
+on "a face … to be found", and the walk that finds faces has been in `CTFontMatching.c` since the matching tier
+landed. The fourth, `CTFontCreateUIFontForLanguage`, waited on a reason that is STILL TRUE ("a ROLE is a request to a
+system that chooses a face") and is answered by a **recorded decision**: the roles are answered against the faces the
+registry has, in the matching tier's order, the fixed-pitch role by the **monospace trait** (a fact read from the
+tables) and the emphasized roles by `CTFontCreateCopyWithSymbolicTraits`, so an emphasized role is the same search a
+caller could make. **AND THE BOUNDARY IS STATED WHERE A CALLER READS IT: these answer from the faces THIS PROCESS has
+registered** — MEASURED, a fresh process sees ZERO faces through `cg_font_enumerate` — which is the same boundary the
+font service exists to remove.
+- **AND TWO DECISIONS IN THE FAMILY DOOR ARE ASSERTED RATHER THAN DESCRIBED.** `CTFontCreateCopyWithSymbolicTraits`
+computes the request as the font's own traits with the mask's bits replaced, so CLEARING bold is a question with an
+answer; `CTFontCreateCopyWithFamily` compares under a **style mask** (bold/italic/condensed/expanded) and not over the
+whole trait word, because **monospace and the stylistic class are properties OF a family** — asking DejaVu Sans for a
+fixed-pitch face asks for something no face in it can be. The case asserts the mono bit does **not** cross, and that
+dropping the mask makes the door answer NULL. FALSIFIED: with the mask removed, `FAIL: no face of "DejaVu Sans"
+answered the family door`; with the caller's cascade list bypassed, `FAIL: the door answered from somewhere other than
+the cascade list it was given` — `37 of 39` on both counts, `39 of 39` restored. MEASURED: `100% tests passed, 0 tests
+failed out of 2` over `text: 39 of 39 cases passed, 0 failed`, **152 `CT…` definitions**, `owed` **9**.

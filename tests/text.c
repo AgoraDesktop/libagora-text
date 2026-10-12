@@ -24,6 +24,9 @@
 #include <CoreFoundation/CFNumber.h>
 #include <CoreFoundation/CFData.h>
 #include <CoreText/CTFontService_internal.h>
+/* AND THE MATCHING TIER'S WALK, WHICH TWO CASES READ SO THAT "the first face in the tier's order" is asserted
+ * against the order itself rather than against a family name this machine happens to hold first. */
+#include <CoreText/CTFontMatching_internal.h>
 #include <CoreText/CTFont.h>
 /* AND THE ENGINE'S INTERNAL HEADER, FOR THE DOORS CORE TEXT OWNS BUT DOES NOT IMPLEMENT: the Unicode
  * glyph step and the face registry. */
@@ -3809,6 +3812,436 @@ static int case_font_feature_settings(void)
 	return g_fail - before;
 }
 
+/* TWO HELPERS THE REGISTRY CREATORS' CASES NEED, AND BOTH SAY SOMETHING THE CASES DEPEND ON. The registry here is
+ * THE PROCESS'S -- MEASURED: a fresh process sees ZERO faces through `cg_font_enumerate`, because this machine's
+ * engine is configured with no font directory that holds any -- so a case must PUT the faces there that it asks
+ * about, and PRINT that it did. Which faces answered is then a fact about the case rather than about the machine. */
+static bool test_register_path(const char *path)
+{
+	if (access(path, R_OK) != 0) {
+		return false;
+	}
+	return cg_font_register(path) != 0 || cg_font_is_registered(path);
+}
+
+/* A FONT MADE FROM A FILE, WHICH IS HOW A CASE NAMES A FACE THE REGISTRY DOES NOT HAVE YET. */
+static CTFontRef test_font_from_path(const char *path)
+{
+	CGDataProviderRef provider = CGDataProviderCreateWithFilename(path);
+	CGFontRef face = (provider != NULL) ? CGFontCreateWithDataProvider(provider) : NULL;
+	CTFontRef font = NULL;
+
+	if (face != NULL) {
+		font = CTFontCreateWithGraphicsFont(face, 12.0, NULL, NULL);
+		CGFontRelease(face);
+	}
+	return font;
+}
+
+/* THE TWO CREATORS THAT SEARCH FOR A FACE BY ITS FAMILY AND ITS TRAITS, AND EACH IS HELD AGAINST A FACE THE CASE PUT
+ * IN THE REGISTRY ITSELF. Everything asserted here is a fact about `DejaVu Sans Mono` and `DejaVu Sans`, which are
+ * on this machine and are printed.
+ *
+ * AND THE ASSERTION THAT MATTERS MOST IS THE FAMILY DOOR'S LAST ONE. The original is BOLD AND MONOSPACED and the
+ * family asked for is one whose faces are NEITHER monospaced nor, in the face that answers, absent: demanding
+ * monospace of another family would ask for something no face in it can be, so the door compares under the STYLE
+ * mask it records -- and the case asserts the mono bit is NOT carried across, which is that decision measured
+ * rather than described. */
+static int case_font_family_and_traits(void)
+{
+	int before = g_fail;
+	const char *mono_path = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf";
+	const char *sans_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
+	CTFontRef bold_mono, regular_mono, cleared, bolded, unchanged, unsatisfiable, other_family, missing;
+	CFStringRef mono_family = NULL, sans_family = CFSTR("DejaVu Sans");
+
+	check(test_register_path(mono_path), "the registry refused %s", mono_path);
+	check(test_register_path(sans_path), "the registry refused %s", sans_path);
+	printf("  (note: the case registered %s and %s; this process's registry is what the doors see)\n",
+	       mono_path, sans_path);
+
+	/* `test_font` REGISTERS ITS OWN FACE TOO (DejaVuSansMono-Bold) and answers it at the size given, which is how the
+	 * size-preservation half is held: 18 points in, 18 points out. */
+	bold_mono = test_font(18.0);
+	check(bold_mono != NULL, "no font, so there is nothing to copy");
+	if (bold_mono == NULL) {
+		return g_fail - before;
+	}
+	check((CTFontGetSymbolicTraits(bold_mono) & kCTFontBoldTrait) != 0,
+	      "the face under test is not bold, so a request to clear bold would prove nothing");
+	mono_family = CTFontCopyFamilyName(bold_mono);
+	check(mono_family != NULL, "the face under test has no family name");
+
+	/* CLEARING BOLD, WHICH ONLY WORKS IF THE REQUEST IS COMPUTED FROM THE FONT'S OWN TRAITS. */
+	cleared = CTFontCreateCopyWithSymbolicTraits(bold_mono, 0.0, NULL, 0, kCTFontBoldTrait);
+	check(cleared != NULL, "no face in the family satisfied a request to clear bold");
+	if (cleared != NULL) {
+		CFStringRef got = CTFontCopyFamilyName(cleared);
+
+		check((CTFontGetSymbolicTraits(cleared) & kCTFontBoldTrait) == 0,
+		      "the copy kept bold after being asked to clear it");
+		check(got != NULL && CFEqual(got, mono_family), "the copy left the family it was asked to stay in");
+		check(!CFEqual(cleared, bold_mono), "clearing bold answered the very same face");
+		check(CTFontGetSize(cleared) == 18.0, "a size of 0.0 did not preserve the original's size (%g)",
+		      (double)CTFontGetSize(cleared));
+		if (got != NULL) {
+			CFRelease(got);
+		}
+		CFRelease(cleared);
+	}
+
+	/* AND SETTING IT, FROM THE FACE THAT HAS NONE -- a different question with a different answer. */
+	regular_mono = CTFontCreateWithName(CFSTR("DejaVuSansMono"), 12.0, NULL);
+	check(regular_mono != NULL, "the plain face of the family could not be made by name");
+	if (regular_mono != NULL) {
+		check((CTFontGetSymbolicTraits(regular_mono) & kCTFontBoldTrait) == 0,
+		      "the face named for the plain one is bold, so setting bold would prove nothing");
+		bolded = CTFontCreateCopyWithSymbolicTraits(regular_mono, 12.0, NULL, kCTFontBoldTrait, kCTFontBoldTrait);
+		check(bolded != NULL, "no face in the family satisfied a request for bold");
+		if (bolded != NULL) {
+			check((CTFontGetSymbolicTraits(bolded) & kCTFontBoldTrait) != 0,
+			      "the copy is not bold after being asked for bold");
+			check(!CFEqual(bolded, regular_mono), "asking for bold answered the face that is not bold");
+			CFRelease(bolded);
+		}
+		/* AN EMPTY MASK IS NOT A SEARCH: it asks for no change, so the font's own face is the answer. */
+		unchanged = CTFontCreateCopyWithSymbolicTraits(regular_mono, 0.0, NULL, 0, 0);
+		check(unchanged != NULL && CFEqual(unchanged, regular_mono),
+		      "an empty trait mask did not answer the face it was given");
+		if (unchanged != NULL) {
+			CFRelease(unchanged);
+		}
+	}
+
+	/* AND A REQUEST NOTHING CAN MEET ANSWERS NULL RATHER THAN A NEAR MISS, which is what "or NULL if none found in
+	 * the system" is for: no face of this family is EXPANDED. */
+	unsatisfiable = CTFontCreateCopyWithSymbolicTraits(bold_mono, 0.0, NULL, kCTFontExpandedTrait,
+							   kCTFontExpandedTrait);
+	check(unsatisfiable == NULL, "an expanded DejaVu Sans Mono was found, and no such face exists");
+	if (unsatisfiable != NULL) {
+		CFRelease(unsatisfiable);
+	}
+
+	/* THE FAMILY DOOR, AND THE MONO BIT IS THE MEASUREMENT: it must NOT come across. */
+	other_family = CTFontCreateCopyWithFamily(bold_mono, 0.0, NULL, sans_family);
+	check(other_family != NULL, "no face of \"DejaVu Sans\" answered the family door");
+	if (other_family != NULL) {
+		CFStringRef got = CTFontCopyFamilyName(other_family);
+
+		check(got != NULL && CFEqual(got, sans_family), "the family door answered another family");
+		check((CTFontGetSymbolicTraits(other_family) & kCTFontBoldTrait) != 0,
+		      "the family door lost the original's bold, which is a style any family can honour");
+		check((CTFontGetSymbolicTraits(other_family) & kCTFontMonoSpaceTrait) == 0,
+		      "the family door demanded MONOSPACE of a family that has none -- the style mask is what makes this door answer");
+		check(CTFontGetSize(other_family) == 18.0, "a size of 0.0 did not preserve the size (%g)",
+		      (double)CTFontGetSize(other_family));
+		if (got != NULL) {
+			CFRelease(got);
+		}
+		CFRelease(other_family);
+	}
+
+	/* AND THE SAME FAMILY ANSWERS THE FACE IN IT THAT CARRIES THE ORIGINAL'S STYLE. */
+	if (regular_mono != NULL && mono_family != NULL) {
+		CTFontRef same = CTFontCreateCopyWithFamily(regular_mono, 0.0, NULL, mono_family);
+
+		check(same != NULL, "the family door could not find the family the font is already in");
+		if (same != NULL) {
+			check((CTFontGetSymbolicTraits(same) & kCTFontMonoSpaceTrait) != 0,
+			      "the answer left a monospaced family, and it was asked for that family");
+			check((CTFontGetSymbolicTraits(same) & kCTFontBoldTrait) == 0,
+			      "the family door answered a BOLD face for a request in the original's plain style");
+			CFRelease(same);
+		}
+	}
+
+	/* A FAMILY NOBODY HAS ANSWERS NULL, AND SO DOES A MISSING ARGUMENT. */
+	missing = CTFontCreateCopyWithFamily(bold_mono, 0.0, NULL, CFSTR("No Such Family At All"));
+	check(missing == NULL, "a family that does not exist produced a font");
+	check(CTFontCreateCopyWithFamily(NULL, 0.0, NULL, sans_family) == NULL, "a NULL font produced a font");
+	check(CTFontCreateCopyWithFamily(bold_mono, 0.0, NULL, NULL) == NULL, "a NULL family produced a font");
+	check(CTFontCreateCopyWithSymbolicTraits(NULL, 0.0, NULL, 0, kCTFontBoldTrait) == NULL,
+	      "a NULL font produced a font");
+
+	if (mono_family != NULL) {
+		CFRelease(mono_family);
+	}
+	if (regular_mono != NULL) {
+		CFRelease(regular_mono);
+	}
+	CFRelease(bold_mono);
+	return g_fail - before;
+}
+
+/* THE CASCADE SEARCH AND THE ROLES, WHICH ARE THE TWO CREATORS LEFT THAT ASK A QUESTION ABOUT A FACE RATHER THAN
+ * FOR ONE. Both are held against a registry the CASE fills, and both have a half that Apple does not spell out:
+ * for the cascade it is WHERE THE LIST COMES FROM, and for a role it is WHICH FACE PLAYS IT.
+ *
+ * AND THE CASCADE HALF IS HELD BY MAKING THE TWO POSSIBLE ANSWERS DIFFERENT. Two registered faces cover the
+ * character used here (Hebrew alef, which the suite's own monospaced face does NOT cover): `DejaVu Sans` and
+ * `FreeSerif` -- and the tier's order puts `DejaVu Sans` first, so a font with NO cascade list must answer
+ * DejaVu Sans and the same font WITH a cascade list naming FreeSerif must answer FreeSerif. A case that only asked
+ * "did something answer" would pass whichever half was broken. */
+static int case_font_cascade_and_roles(void)
+{
+	int before = g_fail;
+	const char *sans_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
+	const char *serif_path = "/usr/share/fonts/truetype/freefont/FreeSerif.ttf";
+	CTFontRef mono, from_serif, cascade_font, kept, found, role, again;
+	CTFontDescriptorRef mono_descriptor, serif_descriptor, with_cascade;
+	CFMutableDictionaryRef entry, additions;
+	CFMutableArrayRef cascade;
+	CFStringRef serif_name = NULL, system_family = NULL;
+	CFArrayRef candidates;
+	UniChar alef[1];
+
+	mono = test_font(12.0);	/* registers DejaVuSansMono-Bold, and NOTHING ELSE YET: the registrations come below,
+				 * after the measurement that needs an empty registry */
+	check(mono != NULL, "no font, so there is nothing to cascade from");
+	if (mono == NULL) {
+		return g_fail - before;
+	}
+
+	/* THE CHARACTER IS THE POINT: the monospaced face has no Hebrew, which the case asserts rather than assumes. */
+	alef[0] = 0x05D0;
+	{
+		CGGlyph glyphs[1] = { 0 };
+
+		check(!CTFontGetGlyphsForCharacters(mono, alef, glyphs, 1),
+		      "the face under test maps Hebrew alef, so it could not show a cascade answering anything");
+	}
+
+	/* APPLE'S FIRST HALF: a string the CURRENT FONT can encode is answered BY that font, retained. */
+	kept = CTFontCreateForString(mono, CFSTR("A"), CFRangeMake(0, 1));
+	check(kept == mono, "\"if the current font is capable of encoding the string range then it will be retained and returned\" -- it was not");
+	if (kept != NULL) {
+		CFRelease(kept);
+	}
+
+	/* AND BEFORE ANY COVERER IS IN THE REGISTRY THE ANSWER IS NOTHING, which is asserted HERE rather than after the
+	 * two registrations below: "no face covers this" and "no face is registered" are different measurements, and
+	 * this one has to be taken first or it is neither. */
+	found = CTFontCreateForString(mono, CFSTR("\u05D0"), CFRangeMake(0, 1));
+	check(found == NULL, "a face that covers Hebrew was found before one was registered");
+	if (found != NULL) {
+		CFRelease(found);
+	}
+
+	check(test_register_path(sans_path), "the registry refused %s", sans_path);
+	check(test_register_path(serif_path), "the registry refused %s", serif_path);
+	printf("  (note: the case registered %s and %s beside the suite's own face, AFTER measuring the empty answer)\n",
+	       sans_path, serif_path);
+
+	/* AND THE CASCADE LIST IS BUILT BY THE CASE, OUT OF A DESCIPTOR THAT NAMES THE FACE TO USE. */
+	from_serif = test_font_from_path(serif_path);
+	check(from_serif != NULL, "the face at %s could not be loaded from its file", serif_path);
+	if (from_serif != NULL) {
+		serif_name = CTFontCopyPostScriptName(from_serif);
+	}
+	mono_descriptor = CTFontCopyFontDescriptor(mono);
+	check(serif_name != NULL && mono_descriptor != NULL, "the case could not build its cascade inputs");
+	if (serif_name != NULL && mono_descriptor != NULL) {
+		entry = CFDictionaryCreateMutable(kCFAllocatorDefault, 1, &kCFTypeDictionaryKeyCallBacks,
+						  &kCFTypeDictionaryValueCallBacks);
+		CFDictionarySetValue(entry, kCTFontNameAttribute, serif_name);
+		serif_descriptor = CTFontDescriptorCreateWithAttributes(entry);
+		CFRelease(entry);
+		cascade = CFArrayCreateMutable(kCFAllocatorDefault, 1, &kCFTypeArrayCallBacks);
+		CFArrayAppendValue(cascade, serif_descriptor);
+		additions = CFDictionaryCreateMutable(kCFAllocatorDefault, 1, &kCFTypeDictionaryKeyCallBacks,
+						      &kCFTypeDictionaryValueCallBacks);
+		CFDictionarySetValue(additions, kCTFontCascadeListAttribute, cascade);
+		with_cascade = CTFontDescriptorCreateCopyWithAttributes(mono_descriptor, additions);
+		CFRelease(additions);
+		CFRelease(cascade);
+		CFRelease(serif_descriptor);
+		check(with_cascade != NULL, "the descriptor would not take a cascade list");
+		if (with_cascade != NULL) {
+			cascade_font = CTFontCreateWithFontDescriptor(with_cascade, 12.0, NULL);
+			check(cascade_font != NULL, "no font could be made from a descriptor carrying a cascade list");
+			if (cascade_font != NULL) {
+				CFStringRef got;
+
+				found = CTFontCreateForString(cascade_font, CFSTR("\u05D0"), CFRangeMake(0, 1));
+				check(found != NULL, "the cascade list named a face and the door did not use it");
+				if (found != NULL) {
+					got = CTFontCopyFamilyName(found);
+					check(got != NULL && CFEqual(got, CFSTR("FreeSerif")),
+					      "the door answered from somewhere other than the cascade list it was given");
+					if (got != NULL) {
+						CFRelease(got);
+					}
+					CFRelease(found);
+				}
+				CFRelease(cascade_font);
+			}
+			CFRelease(with_cascade);
+		}
+	}
+	if (serif_name != NULL) {
+		CFRelease(serif_name);
+	}
+	if (mono_descriptor != NULL) {
+		CFRelease(mono_descriptor);
+	}
+	if (from_serif != NULL) {
+		CFRelease(from_serif);
+	}
+
+	/* AND WITHOUT A CASCADE LIST THE TIER'S OWN ORDER ANSWERS, which is `DejaVu Sans` before `FreeSerif`. */
+	found = CTFontCreateForString(mono, CFSTR("\u05D0"), CFRangeMake(0, 1));
+	check(found != NULL, "no registered face covers Hebrew, and two were registered");
+	if (found != NULL) {
+		CFStringRef got = CTFontCopyFamilyName(found);
+
+		check(got != NULL && CFEqual(got, CFSTR("DejaVu Sans")),
+		      "the registry walk answered a family other than the first in the tier's order");
+		if (got != NULL) {
+			CFRelease(got);
+		}
+		CFRelease(found);
+	}
+
+	/* AND THE RANGE RULE: a length of 0 runs to the end of the string, and ONE face must cover the WHOLE range. */
+	{
+		CTFontRef first_two = CTFontCreateForString(mono, CFSTR("AB\u05D0"), CFRangeMake(0, 2));
+		CTFontRef tail = CTFontCreateForString(mono, CFSTR("AB\u05D0"), CFRangeMake(2, 0));
+
+		check(first_two == mono, "a range the current font can encode did not answer with the current font");
+		if (first_two != NULL) {
+			CFRelease(first_two);
+		}
+		check(tail != NULL && tail != mono, "a length of 0 did not run to the end of the string");
+		if (tail != NULL) {
+			CFRelease(tail);
+		}
+	}
+	check(CTFontCreateForString(NULL, CFSTR("A"), CFRangeMake(0, 1)) == NULL, "a NULL font produced a font");
+	check(CTFontCreateForString(mono, NULL, CFRangeMake(0, 1)) == NULL, "a NULL string produced a font");
+	/* AND AN EMPTY RANGE IS A RANGE AT THE END OF THE STRING OR AN EMPTY STRING -- NOT A LENGTH OF 0, which means
+	 * "to the end" and is measured two blocks above. Getting this wrong is how the case first failed: it asked for a
+	 * length of 0 and got the font back, which is the range rule working. */
+	check(CTFontCreateForString(mono, CFSTR("A"), CFRangeMake(1, 0)) == NULL,
+	      "a range starting past the last character produced a font");
+	check(CTFontCreateForString(mono, CFSTR(""), CFRangeMake(0, 0)) == NULL,
+	      "an empty string produced a font, and no range asks for nothing");
+
+	/* THE ROLES. THE FIRST FACE IN THE TIER'S ORDER IS WHAT MOST OF THEM ASK FOR, and the case reads that order
+	 * through the same internal seam the door uses rather than assuming which family comes first. */
+	candidates = CTFontMatchingCopyAvailableDescriptors();
+	check(candidates != NULL && CFArrayGetCount(candidates) > 0,
+	      "the registry is empty, so no role can be answered");
+	if (candidates != NULL && CFArrayGetCount(candidates) > 0) {
+		CTFontDescriptorRef first = (CTFontDescriptorRef)CFArrayGetValueAtIndex(candidates, 0);
+
+		system_family = (CFStringRef)CTFontDescriptorCopyAttribute(first, kCTFontFamilyNameAttribute);
+	}
+	role = CTFontCreateUIFontForLanguage(kCTFontSystemFontType, 12.0, NULL);
+	check(role != NULL, "the system role was not answered");
+	if (role != NULL) {
+		CFStringRef got = CTFontCopyFamilyName(role);
+		char buffer[256];
+
+		check(system_family != NULL && got != NULL && CFEqual(got, system_family),
+		      "the system role did not answer the first face in the tier's order");
+		if (got != NULL && CFStringGetCString(got, buffer, (CFIndex)sizeof buffer, kCFStringEncodingUTF8)) {
+			printf("  (note: the system role is answered by \"%s\")\n", buffer);
+		}
+		check(CTFontGetSize(role) == 12.0, "the system role answered %g points where 12 were asked",
+		      (double)CTFontGetSize(role));
+		if (got != NULL) {
+			CFRelease(got);
+		}
+		CFRelease(role);
+	}
+
+	/* THE FIXED-PITCH ROLE ASKS FOR A FACT RATHER THAN A PLACE, and the registry holds non-monospaced faces for it to
+	 * reject: whatever it answers must be monospaced. The size of 0.0 is the other half of this block -- Apple prints
+	 * no per-role size, so the documented 12.0 is what it becomes. */
+	role = CTFontCreateUIFontForLanguage(kCTFontUserFixedPitchFontType, 0.0, NULL);
+	check(role != NULL, "the fixed-pitch role was not answered");
+	if (role != NULL) {
+		check((CTFontGetSymbolicTraits(role) & kCTFontMonoSpaceTrait) != 0,
+		      "the fixed-pitch role answered a face that is not fixed-pitch");
+		check(CTFontGetSize(role) == 12.0, "a size of 0.0 did not become the default 12.0 (%g)",
+		      (double)CTFontGetSize(role));
+		CFRelease(role);
+	}
+
+	/* THE EMPHASIZED ROLE ASKS FOR THE BASE FACE BOLD, THROUGH THE TRAIT COPY DOOR -- so what holds it is a RELATION
+	 * rather than a name: the same family as the plain role, bold set, and a DIFFERENT face when the base was not
+	 * bold. A case that asserted a name here would be asserting which face this machine's registry holds first. */
+	role = CTFontCreateUIFontForLanguage(kCTFontSystemFontType, 12.0, NULL);
+	again = CTFontCreateUIFontForLanguage(kCTFontEmphasizedSystemFontType, 12.0, NULL);
+	check(again != NULL, "the emphasized system role was not answered");
+	if (role != NULL && again != NULL) {
+		CFStringRef base_family = CTFontCopyFamilyName(role);
+		CFStringRef bold_family = CTFontCopyFamilyName(again);
+
+		check(base_family != NULL && bold_family != NULL && CFEqual(base_family, bold_family),
+		      "the emphasized role left the family the plain role answered from");
+		check((CTFontGetSymbolicTraits(again) & kCTFontBoldTrait) != 0,
+		      "the emphasized role answered a face that is not bold");
+		if ((CTFontGetSymbolicTraits(role) & kCTFontBoldTrait) == 0) {
+			check(!CFEqual(again, role),
+			      "the base face is not bold, so the emphasized role must be a different face");
+		}
+		if (base_family != NULL) {
+			CFRelease(base_family);
+		}
+		if (bold_family != NULL) {
+			CFRelease(bold_family);
+		}
+	}
+	if (role != NULL) {
+		CFRelease(role);
+	}
+	if (again != NULL) {
+		CFRelease(again);
+	}
+
+	/* AND THE LANGUAGE IS ACCEPTED AND CHANGES NOTHING, which is this door's recorded boundary: choosing a face for a
+	 * localization needs the languages a face supports, and that door is still owed. */
+	role = CTFontCreateUIFontForLanguage(kCTFontSystemFontType, 12.0, CFSTR("en"));
+	again = CTFontCreateUIFontForLanguage(kCTFontSystemFontType, 12.0, NULL);
+	check(role != NULL && again != NULL, "the system role was not answered with a language and without one");
+	if (role != NULL && again != NULL) {
+		CFStringRef with_language = CTFontCopyFamilyName(role);
+		CFStringRef without = CTFontCopyFamilyName(again);
+
+		check(with_language != NULL && without != NULL && CFEqual(with_language, without),
+		      "the language changed which face plays the role, and this door records that it cannot");
+		if (with_language != NULL) {
+			CFRelease(with_language);
+		}
+		if (without != NULL) {
+			CFRelease(without);
+		}
+	}
+	if (role != NULL) {
+		CFRelease(role);
+	}
+	if (again != NULL) {
+		CFRelease(again);
+	}
+
+	/* AND WHAT IS NOT A ROLE ANSWERS NOTHING: Apple's own "none", and a value past the end of its enum. */
+	check(CTFontCreateUIFontForLanguage(kCTFontNoFontType, 12.0, NULL) == NULL, "\"no font type\" produced a font");
+	check(CTFontCreateUIFontForLanguage((CTFontUIFontType)27, 12.0, NULL) == NULL,
+	      "27 produced a font, and Apple's roles stop at 26");
+	check(CTFontCreateUIFontForLanguage((CTFontUIFontType)9999, 12.0, NULL) == NULL,
+	      "a value past the end of the enum produced a font");
+
+	if (system_family != NULL) {
+		CFRelease(system_family);
+	}
+	if (candidates != NULL) {
+		CFRelease(candidates);
+	}
+	CFRelease(mono);
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -3847,6 +4280,8 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "A variation instance is the choice the font was asked for", case_font_variation },
 	{ "The variation axes come out of `fvar`, and the case reads it too", case_font_variation_axes },
 	{ "A feature setting is a tuple, and toggling one keeps the others", case_font_feature_settings },
+	{ "Same family and these traits, and the family a style cannot cross", case_font_family_and_traits },
+	{ "A cascade answers by list first, and a role answers by fact", case_font_cascade_and_roles },
 };
 
 int main(void)

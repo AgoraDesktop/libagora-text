@@ -25,6 +25,9 @@
 #include <CoreText/CTFont.h>
 #include <CoreText/CTFontTraits.h>
 #include <CoreText/CTFontDescriptor_internal.h>
+/* THE MATCHING TIER'S WALK, WHICH THE FOUR CREATORS THAT ASK A REGISTRY USE AND DO NOT REIMPLEMENT: it is the
+ * one place the candidates are gathered and put into this tier's order. */
+#include <CoreText/CTFontMatching_internal.h>
 
 #include <CoreFoundation/CFRuntime.h>
 #include <CoreFoundation/CFNumber.h>
@@ -301,6 +304,381 @@ CTFontRef CTFontCreateCopyWithAttributes(CTFontRef font, CGFloat size, const CGA
 	}
 	return (CTFontRef)ct_font_alloc(original->graphics, size, &m,
 					(attributes != NULL) ? attributes : original->descriptor);
+}
+
+/* =================================================================================================
+ * THE FOUR CREATORS THAT ASK A REGISTRY RATHER THAN A NAME. Each asks a question whose answer is A FACE THE
+ * SYSTEM HAS -- "same family, these traits", "this family, my traits", "a face that can encode this string", "the
+ * face that plays this role" -- and the registry they ask is the engine's: THE FACES THIS PROCESS HAS REGISTERED,
+ * plus the directories the engine is configured with.
+ *
+ * AND THAT BOUNDARY IS STATED BEFORE THE DOORS ARE, BECAUSE IT CHANGES WHAT EACH OF THEM ANSWERS. Apple's four
+ * read a SYSTEM-WIDE font store. MEASURED on this machine, a fresh process sees ZERO faces through
+ * `cg_font_enumerate`, so the honest description of the answer here is "a face THIS PROCESS can see" -- the same
+ * boundary `CTFontManager` already records about its one scope, and the same one the font service exists to
+ * remove (FONT-SERVICE.md). The cases register the faces they ask about and PRINT that they did.
+ *
+ * AND THE ORDER IS THE MATCHING TIER'S, TAKEN RATHER THAN RESTATED: `CTFontMatchingCopyAvailableDescriptors`
+ * hands back the candidates ALREADY SORTED BY FAMILY NAME -- this tier's recorded decision where Apple leaves the
+ * order to "system precedence" -- so "the first face that satisfies this" is reproducible rather than whichever
+ * the directory walk happened to reach first.
+ * =============================================================================================== */
+
+/* ONE WALK, USED BY ALL FOUR: each candidate is turned into a font BY NAME -- the route the suite measures every
+ * run, and the only one a descriptor offers -- and the door's own test decides whether that font is the answer. A
+ * candidate that cannot be made into a font is SKIPPED rather than fatal, which is the rule the matching tier
+ * already applies to a listing door: the registry names FILES, and one the engine will not open is not a reason to
+ * fail the others. */
+static CTFontRef ct_font_from_descriptor(CTFontDescriptorRef candidate, CGFloat size,
+					 const CGAffineTransform *matrix)
+{
+	CFStringRef name = (CFStringRef)CTFontDescriptorCopyAttribute(candidate, kCTFontNameAttribute);
+	CTFontRef font;
+
+	if (name == NULL || CFGetTypeID(name) != CFStringGetTypeID()) {
+		if (name != NULL) {
+			CFRelease(name);
+		}
+		return NULL;
+	}
+	font = CTFontCreateWithName(name, size, matrix);
+	CFRelease(name);
+	return font;
+}
+
+typedef bool (*ct_font_accept)(CTFontRef candidate, void *info);
+
+static CTFontRef ct_font_search(CFArrayRef candidates, CGFloat size, const CGAffineTransform *matrix,
+				ct_font_accept accept, void *info)
+{
+	CFIndex i, count = (candidates != NULL) ? CFArrayGetCount(candidates) : 0;
+
+	for (i = 0; i < count; i++) {
+		CTFontRef candidate = ct_font_from_descriptor(
+			(CTFontDescriptorRef)CFArrayGetValueAtIndex(candidates, i), size, matrix);
+
+		if (candidate == NULL) {
+			continue;
+		}
+		if (accept(candidate, info)) {
+			return candidate;
+		}
+		CFRelease(candidate);
+	}
+	return NULL;
+}
+
+/* APPLE'S TWO DEFAULTING RULES, WHICH THESE COPY DOORS SHARE VERBATIM: "If 0.0 is specified, the original font's
+ * size will be preserved", and the same sentence for the matrix. Stated once rather than four times, because four
+ * copies of a defaulting rule are four chances to keep a 0.0. */
+static void ct_font_copy_defaults(const struct __CTFont *original, CGFloat *size, const CGAffineTransform **matrix)
+{
+	if (*size <= 0.0) {
+		*size = original->size;
+	}
+	if (*matrix == NULL) {
+		*matrix = &original->matrix;
+	}
+}
+
+/* THE STYLE BITS A FAMILY CAN HONOUR, which is the mask `CTFontCreateCopyWithFamily` compares under. Bold, italic,
+ * condensed and expanded are REQUESTS any family can satisfy; monospace and the stylistic class are properties OF
+ * the family -- asking DejaVu Sans for a fixed-pitch face asks for something no face in it can be. Apple prints
+ * "with the original traits" and no rule for which of them cross a family, SO THIS IS A DECISION, recorded here
+ * and asserted by the case rather than left to be discovered from a NULL. */
+#define ct_font_style_mask (kCTFontBoldTrait | kCTFontItalicTrait | kCTFontCondensedTrait | kCTFontExpandedTrait)
+
+struct ct_traits_request {
+	CFStringRef family;		/* NULL when the original named no family */
+	CTFontSymbolicTraits value;	/* the traits the masked bits should END UP carrying */
+	CTFontSymbolicTraits mask;	/* the bits the caller asked to change */
+};
+
+static bool ct_accept_traits(CTFontRef candidate, void *info)
+{
+	const struct ct_traits_request *want = (const struct ct_traits_request *)info;
+	CFStringRef family = NULL;
+	bool ok = true;
+
+	if (want->family != NULL) {
+		family = CTFontCopyFamilyName(candidate);
+		ok = (family != NULL) && CFEqual(family, want->family);
+		if (family != NULL) {
+			CFRelease(family);
+		}
+	}
+	return ok && (CTFontGetSymbolicTraits(candidate) & want->mask) == (want->value & want->mask);
+}
+
+/* SAME FAMILY, THESE TRAITS. Apple's own sentence: "Returns a new font reference in the same family with the given
+ * symbolic traits, or NULL if none found in the system." The two parameters are spelled out beside it -- the VALUE
+ * gives the traits named by the MASK their desired setting, which "can allow for trait REMOVAL as well as
+ * addition".
+ *
+ * SO THE REQUEST IS COMPUTED RATHER THAN GUESSED: the font's own traits with the mask's bits REPLACED by the
+ * value's, which is what makes clearing bold a question an answer exists for. ONLY THE MASKED BITS ARE COMPARED,
+ * because those are the only bits the caller asked to change -- comparing the whole value would fail a request to
+ * clear bold over some bit nobody mentioned.
+ *
+ * AND A MASK OF ZERO IS NOT A SEARCH: it asks for no change, and the answer is the font's own face -- the copy
+ * door with no attributes -- rather than a walk that would break a tie it was never asked to break. */
+CTFontRef CTFontCreateCopyWithSymbolicTraits(CTFontRef font, CGFloat size, const CGAffineTransform *matrix,
+					     CTFontSymbolicTraits symTraitValue, CTFontSymbolicTraits symTraitMask)
+{
+	const struct __CTFont *original = (const struct __CTFont *)font;
+	struct ct_traits_request want;
+	CFArrayRef candidates;
+	CTFontRef found;
+
+	if (original == NULL) {
+		return NULL;
+	}
+	if (symTraitMask == 0) {
+		return CTFontCreateCopyWithAttributes(font, size, matrix, NULL);
+	}
+	ct_font_copy_defaults(original, &size, &matrix);
+	want.value = (CTFontGetSymbolicTraits(font) & ~symTraitMask) | (symTraitValue & symTraitMask);
+	want.mask = symTraitMask;
+	want.family = CTFontCopyFamilyName(font);
+	candidates = CTFontMatchingCopyAvailableDescriptors();
+	found = ct_font_search(candidates, size, matrix, ct_accept_traits, &want);
+	if (candidates != NULL) {
+		CFRelease(candidates);
+	}
+	if (want.family != NULL) {
+		CFRelease(want.family);
+	}
+	return found;
+}
+
+struct ct_family_request {
+	CFStringRef family;
+	CTFontSymbolicTraits traits;
+};
+
+static bool ct_accept_family(CTFontRef candidate, void *info)
+{
+	const struct ct_family_request *want = (const struct ct_family_request *)info;
+	CFStringRef family = CTFontCopyFamilyName(candidate);
+	bool ok = (family != NULL) && CFEqual(family, want->family);
+
+	if (family != NULL) {
+		CFRelease(family);
+	}
+	return ok && (CTFontGetSymbolicTraits(candidate) & ct_font_style_mask) == (want->traits & ct_font_style_mask);
+}
+
+/* THIS FAMILY, MY TRAITS. Apple: "Returns a new font reference with the original traits in the given family. NULL
+ * if non found in the system." THE COMPARISON IS UNDER `ct_font_style_mask` AND NOT OVER THE WHOLE VALUE, which
+ * is the decision that makes the door answer at all -- see that mask's own comment. A family with several faces
+ * under the same style (DejaVu Sans Mono's Regular and its Oblique are not the same request) is decided by the
+ * TIER'S ORDER, which is declared above rather than left to the walk. */
+CTFontRef CTFontCreateCopyWithFamily(CTFontRef font, CGFloat size, const CGAffineTransform *matrix,
+				     CFStringRef family)
+{
+	const struct __CTFont *original = (const struct __CTFont *)font;
+	struct ct_family_request want;
+	CFArrayRef candidates;
+	CTFontRef found = NULL;
+
+	if (original == NULL || family == NULL) {
+		return NULL;
+	}
+	ct_font_copy_defaults(original, &size, &matrix);
+	want.family = family;
+	want.traits = CTFontGetSymbolicTraits(font);
+	candidates = CTFontMatchingCopyAvailableDescriptors();
+	found = ct_font_search(candidates, size, matrix, ct_accept_family, &want);
+	if (candidates != NULL) {
+		CFRelease(candidates);
+	}
+	return found;
+}
+
+struct ct_cascade_request {
+	const UniChar *characters;
+	CFIndex count;
+};
+
+static bool ct_accept_covers(CTFontRef candidate, void *info)
+{
+	const struct ct_cascade_request *want = (const struct ct_cascade_request *)info;
+	CGGlyph *glyphs = (CGGlyph *)malloc((size_t)want->count * sizeof(CGGlyph));
+	bool covered;
+
+	if (glyphs == NULL) {
+		return false;
+	}
+	covered = CTFontGetGlyphsForCharacters(candidate, want->characters, glyphs, want->count);
+	free(glyphs);
+	return covered;
+}
+
+/* A FACE THAT CAN ENCODE THIS STRING, AND APPLE'S TWO HALVES ARE BOTH ANSWERED: "If the current font is capable of
+ * encoding the string range then it will be RETAINED and returned" -- so the first question is asked of the font
+ * the caller already has, and only a font that fails it sends the door to the registry. THE TEST IS THIS
+ * LIBRARY'S OWN GLYPH DOOR, which answers true only when EVERY character mapped, so "capable of encoding" is
+ * decided by the same fact a caller would use.
+ *
+ * AND THE RANGE RULE IS THE ONE THIS LIBRARY ALREADY APPLIES ELSEWHERE: a length of 0 continues from the start
+ * index to the END OF THE STRING, and a range running past the end is CLAMPED rather than read -- the rule
+ * `ct_run_clamp` carries, applied here to a string rather than to a run.
+ *
+ * AND WHAT APPLE LEAVES UNSAID IS SAID HERE: the answer comes from "the CASCADE LIST of the current font", which
+ * in this tier is the caller's own `kCTFontCascadeListAttribute` if the font carries one and the REGISTRY
+ * otherwise -- the walk above -- in the tier's order. Apple's cascade list is a system property with an order
+ * nobody prints, which is the same wall the matching tier hit and the same recorded answer. */
+CTFontRef CTFontCreateForString(CTFontRef currentFont, CFStringRef string, CFRange range)
+{
+	const struct __CTFont *original = (const struct __CTFont *)currentFont;
+	CFIndex length, i;
+	CFRange asked;
+	UniChar *characters;
+	CGGlyph *glyphs;
+	struct ct_cascade_request want;
+	CFArrayRef cascade;
+	CTFontRef found = NULL;
+
+	if (original == NULL || string == NULL) {
+		return NULL;
+	}
+	length = CFStringGetLength(string);
+	asked = range;
+	if (asked.location < 0) {
+		asked.location = 0;
+	}
+	if (asked.location > length) {
+		asked.location = length;
+	}
+	if (asked.length <= 0 || asked.location + asked.length > length) {
+		asked.length = length - asked.location;
+	}
+	if (asked.length == 0) {
+		return NULL;	/* an empty range asks for nothing, and there is no face that answers nothing */
+	}
+	characters = (UniChar *)malloc((size_t)asked.length * sizeof(UniChar));
+	glyphs = (CGGlyph *)malloc((size_t)asked.length * sizeof(CGGlyph));
+	if (characters == NULL || glyphs == NULL) {
+		free(characters);
+		free(glyphs);
+		return NULL;
+	}
+	CFStringGetCharacters(string, asked, characters);
+	if (CTFontGetGlyphsForCharacters(currentFont, characters, glyphs, asked.length)) {
+		free(characters);
+		free(glyphs);
+		return (CTFontRef)CFRetain(currentFont);	/* Apple's own first half, word for word */
+	}
+	want.characters = characters;
+	want.count = asked.length;
+
+	/* THE CALLER'S OWN CASCADE LIST FIRST, WHICH IS WHAT APPLE'S SENTENCE NAMES, and the registry after it. */
+	cascade = (original->descriptor != NULL)
+			? (CFArrayRef)CTFontDescriptorCopyAttribute(original->descriptor, kCTFontCascadeListAttribute)
+			: NULL;
+	if (cascade != NULL && CFGetTypeID(cascade) == CFArrayGetTypeID() && CFArrayGetCount(cascade) > 0) {
+		CFMutableArrayRef kept = CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks);
+
+		if (kept != NULL) {
+			for (i = 0; i < CFArrayGetCount(cascade); i++) {
+				CFTypeRef entry = CFArrayGetValueAtIndex(cascade, i);
+
+				if (CFGetTypeID(entry) == CTFontDescriptorGetTypeID()) {
+					CFArrayAppendValue(kept, entry);
+				}
+			}
+			found = ct_font_search(kept, original->size, &original->matrix, ct_accept_covers, &want);
+			CFRelease(kept);
+		}
+	}
+	if (cascade != NULL) {
+		CFRelease(cascade);
+	}
+	if (found == NULL) {
+		CFArrayRef candidates = CTFontMatchingCopyAvailableDescriptors();
+
+		found = ct_font_search(candidates, original->size, &original->matrix, ct_accept_covers, &want);
+		if (candidates != NULL) {
+			CFRelease(candidates);
+		}
+	}
+	free(characters);
+	free(glyphs);
+	return found;
+}
+
+struct ct_role_request {
+	bool fixed_pitch;
+};
+
+static bool ct_accept_role(CTFontRef candidate, void *info)
+{
+	const struct ct_role_request *want = (const struct ct_role_request *)info;
+
+	/* THE ONE ROLE THAT CARRIES A REQUEST RATHER THAN A PLACE: the fixed-pitch role asks for a fact about the
+	 * face, which `CTFontGetSymbolicTraits` reads out of the tables. Every other role asks for "the face the
+	 * system would use", and in a tier with no theme the first face in the tier's order IS that answer. */
+	return want->fixed_pitch ? ((CTFontGetSymbolicTraits(candidate) & kCTFontMonoSpaceTrait) != 0) : true;
+}
+
+/* A ROLE, WHICH IS A REQUEST TO A SYSTEM THAT CHOOSES A FACE -- AND THE DECISION IS RECORDED RATHER THAN PRETENDED
+ * AWAY. Apple: "Returns the special UI font for the given language and UI type." There is no UI here to have a
+ * font, and what Agora's desktop will put on its buttons is not this library's to invent, so THE ROLES ARE
+ * ANSWERED AGAINST THE FACES THE REGISTRY HAS, in the matching tier's order, and the mapping is written down:
+ *
+ *   kCTFontNoFontType            is not a role -- it is Apple's own value for "none" -- and answers NULL.
+ *   kCTFontUserFixedPitchFontType  asks for the MONOSPACED face, which is a TRAIT read out of the tables, so the
+ *                                  role is answered by a fact rather than by a face this library decided to like.
+ *   the EMPHASIZED roles          (System, SmallSystem, MiniSystem and SystemDetail) ask for the base face BOLD,
+ *                                  THROUGH `CTFontCreateCopyWithSymbolicTraits` -- so an emphasized role is
+ *                                  answered by the same search a caller could make, and a system with no bold face
+ *                                  answers NULL rather than handing back a plain face under a bold role's name.
+ *   every other role              asks for the FIRST face in the registry order.
+ *   a value that is not one of    answers NULL. Apple's enum stops at 26, and 27 is not a role.
+ *   Apple's roles
+ *
+ * AND THE SIZE DEFAULT IS THE DOCUMENTED ONE: "If 0.0 is specified, the default size for the requested uiType is
+ * used" -- and Apple prints NO per-role size anywhere in the era's headers, so a 0.0 becomes 12.0, which is the
+ * default this library already applies to a font made without a size.
+ *
+ * AND THE LANGUAGE IS ACCEPTED AND CHANGES NOTHING, RECORDED RATHER THAN LEFT TO BE DISCOVERED: choosing a face
+ * for a localization needs the languages a face supports, and that door is still owed
+ * (`CTFontCopySupportedLanguages`). A caller passing a language gets the answer a caller passing NULL gets, and
+ * this paragraph is why. */
+CTFontRef CTFontCreateUIFontForLanguage(CTFontUIFontType uiType, CGFloat size, CFStringRef language)
+{
+	struct ct_role_request want;
+	CFArrayRef candidates;
+	CTFontRef base;
+	bool emphasized;
+
+	(void)language;	/* recorded above: no localized face selection exists in this tier */
+	if (uiType == (CTFontUIFontType)kCTFontNoFontType || uiType > (CTFontUIFontType)kCTFontControlContentFontType) {
+		return NULL;
+	}
+	if (size <= 0.0) {
+		size = 12.0;
+	}
+	emphasized = (uiType == kCTFontEmphasizedSystemFontType) ||
+		     (uiType == kCTFontSmallEmphasizedSystemFontType) ||
+		     (uiType == kCTFontMiniEmphasizedSystemFontType) ||
+		     (uiType == kCTFontEmphasizedSystemDetailFontType);
+	want.fixed_pitch = (uiType == kCTFontUserFixedPitchFontType);
+	candidates = CTFontMatchingCopyAvailableDescriptors();
+	base = ct_font_search(candidates, size, NULL, ct_accept_role, &want);
+	if (candidates != NULL) {
+		CFRelease(candidates);
+	}
+	if (base == NULL || !emphasized) {
+		return base;
+	}
+	{
+		CTFontRef bold = CTFontCreateCopyWithSymbolicTraits(base, size, NULL, kCTFontBoldTrait,
+								    kCTFontBoldTrait);
+
+		CFRelease(base);
+		return bold;	/* NULL when no face of that family is bold, as this door's comment states */
+	}
 }
 
 /* =================================================================================================
@@ -1427,11 +1805,25 @@ CFCharacterSetRef CTFontCopyCharacterSet(CTFontRef font)
  *   CTFontGetSlantAngle                           Apple's slant is the GLYPH-SPACE slant, not the italic
  *                                                 angle Core Graphics reports; they are different numbers.
  *   CTFontGetVerticalTranslationsForGlyphs        needs the vertical metrics the advances door also lacks.
- *   CTFontCreateUIFontForLanguage                 a ROLE is a request to a system that chooses a face.
- *   CTFontCreateForString                         needs a cascade and a fallback search.
- *   CTFontCreateCopyWithSymbolicTraits            needs a face with those traits to exist and be found.
- *   CTFontCreateCopyWithFamily                    needs the family's faces to be enumerable.
- *   CTFontGetPlatformFont, ...WithPlatformFont    these speak in ATS ids, and this tree has no ATS.
+ *   CTFontGetPlatformFont, ...WithPlatformFont    PERMANENT, AND THE DECISION IS RECORDED: these speak in ATSFontRef
+ *                                                 and Agora HAS NO ATS, so they stay declared and owed. The
+ *                                                 alternative -- an Agora id space standing in for ATS's -- would be
+ *                                                 this library answering in a vocabulary the era's framework does
+ *                                                 not have, which is the one thing it will not do.
+ *   CTFontManagerCreateFontRequestRunLoopSource   the Agora font service: the WIRE is built (CTFontService.c) and the
+ *                                                 TRANSPORT is not. See FONT-SERVICE.md for which half is which.
+ *
+ * AND FOUR DOORS LEFT THIS LIST BY THE SAME CONDITION, WHICH IS WORTH READING AS ONE THING: `CTFontCreateForString`,
+ * `CTFontCreateCopyWithSymbolicTraits`, `CTFontCreateCopyWithFamily` and `CTFontCreateUIFontForLanguage` are DEFINED,
+ * and the three that waited on a REGISTRY stopped waiting when the matching tier landed — the reasons said "needs a
+ * cascade and a fallback search", "needs a face with those traits to exist and be found" and "needs the family's
+ * faces to be enumerable", and the walk that enumerates them has been in `CTFontMatching.c` since. THE REASONS WERE
+ * CONDITIONS AND THEY HAD GONE FALSE WITHOUT THE LIST BEING READ AGAIN, which is the failure mode this block exists
+ * to avoid. THE FOURTH IS DIFFERENT AND IS NOT A FALSIFIED REASON AT ALL: "a ROLE is a request to a system that
+ * chooses a face" is still TRUE, and that door is answered by a DECISION (recorded at the door) rather than by a
+ * condition changing. AND ALL FOUR ANSWER FROM THE FACES **THIS PROCESS HAS REGISTERED**, which their own block
+ * states: a fresh process here sees ZERO faces, so "the system" is a narrower thing than Apple's and the difference
+ * is written where a caller reads it rather than left to be discovered from a NULL.
  *
  * AND ONE PARAGRAPH OF THIS BLOCK WAS WRONG ABOUT THE MATCHING DOORS, which is corrected here rather than deleted: it
  * said the two doors on CTFontDescriptorRef were owed "because the ordering it must impose is Apple's and not

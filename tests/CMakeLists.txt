@@ -43,5 +43,5 @@ add_test(NAME owed
     COMMAND "${CMAKE_COMMAND}"
             "-DNM=${AGORA_NM}"
             "-DLIB=$<TARGET_FILE:Text>"
-            "-DSYMBOLS=CTFontCopyFeatures;CTFontCopySupportedLanguages;CTFontCopyTraits;CTFontCreateCopyWithFamily;CTFontCreateCopyWithSymbolicTraits;CTFontCreateForString;CTFontCreateUIFontForLanguage;CTFontCreateWithPlatformFont;CTFontGetPlatformFont;CTFontGetSlantAngle;CTFontGetStringEncoding;CTFontGetVerticalTranslationsForGlyphs;CTFontManagerCreateFontRequestRunLoopSource"
+            "-DSYMBOLS=CTFontCopyFeatures;CTFontCopySupportedLanguages;CTFontCopyTraits;CTFontCreateWithPlatformFont;CTFontGetPlatformFont;CTFontGetSlantAngle;CTFontGetStringEncoding;CTFontGetVerticalTranslationsForGlyphs;CTFontManagerCreateFontRequestRunLoopSource"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/owed_symbols.cmake")

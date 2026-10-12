@@ -104,9 +104,12 @@ enum {
 typedef CFOptionFlags CTFontOptions;
 
 /* THE INTERFACE FONT ROLES, WHICH ARE THE ONLY FONTS IN THIS VOCABULARY THAT ARE NOT ASKED FOR BY NAME. A
- * role is a request to a system that decides which face plays it; this tier has no such system, so the door
- * that takes one is owed rather than answered (see CTFont.c). THE VALUES ARE APPLE'S, AND THERE ARE GAPS IN
- * THE NUMBERING AT 27 AND ABOVE — they stop at 26, and 27 is not a role. */
+ * role is a request to a system that decides which face plays it — and THIS TIER HAS NO SUCH SYSTEM, WHICH IS A
+ * DECISION RATHER THAN A SHORTAGE: the door that takes a role is DEFINED, and it answers against the faces the
+ * process's registry has, in the matching tier's own order. Which face plays which role is recorded where that
+ * door is, in `CTFont.c`, because it is a decision about THIS tier and not a fact about Apple's enum.
+ * THE VALUES ARE APPLE'S, AND THERE ARE GAPS IN THE NUMBERING AT 27 AND ABOVE — they stop at 26, and 27 is not
+ * a role. */
 enum {
 	kCTFontNoFontType                     = (uint32_t)-1,
 	kCTFontUserFontType                   = 0,
