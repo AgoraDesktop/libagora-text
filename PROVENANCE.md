@@ -416,3 +416,45 @@ doors and both option constants; and a bare `ctest --test-dir build` is `100% te
 over `text: 20 of 20 cases passed, 0 failed`. AND THE REFACTOR WAS CHECKED BY MORE THAN THE NEW CASES: changing
 `CTLine.c` to build over a range left all eighteen earlier cases passing, which is the regression evidence for the one
 touch this unit made outside its own files.
+
+**`CTFrame` and `CTFramesetter` — the text-layout half of Apple's include order, finished (2026-10-11).** Declared and
+implemented: a framesetter's five doors (one creator, `CreateFrame`, `GetTypesetter`,
+`SuggestFrameSizeWithConstraints`, `GetTypeID` — and no options door, because Apple adds `…AndOptions` LATER in the
+era, which is a fact about the 10.6 header rather than a decision here) and a frame's ten (two ranges, path, frame
+attributes, lines, line origins, draw, `GetTypeID`, and the progression vocabulary with its attribute key as an
+inference). APPLE'S SENTENCE IS THE ALGORITHM ONCE MORE: filling continues "until it either runs out of text or it
+finds that text no longer fits" — so a frame may show LESS than it was asked for, and `CTFrameGetVisibleStringRange`
+is the door that says how much.
+
+**THE LAYOUT IS SIX LINES AND EVERY DECISION IN IT BELONGS TO SOMEBODY ELSE.** The typesetter says where each line ends
+(asked with a width), the line says how tall the text is (asked for the font's metrics), and the path says how much
+room there is; the framesetter adds the ARITHMETIC BETWEEN THEM. The first baseline is one ascent below the path's
+top and each line after it is one line height lower, which is what makes a frame's origin its BOTTOM-LEFT. THE CASE
+HOLDS THE PROPERTY THAT MATTERS RATHER THAN ANY SINGLE NUMBER: the lines TILE the visible range — the first starts
+where the range does, each starts where the last ended, and together they cover every character the frame claims to
+have shown — and the origins DESCEND and lie inside the box. A gap would drop text and an overlap would draw it twice,
+and no accessor-by-accessor assertion could tell either.
+
+**AND TWO BOUNDARIES ARE RECORDED WHERE A CALLER READS THEM.** ONE: THE PATH IS READ AS ITS BOUNDING BOX. Apple fills
+the path's SHAPE, reflowing a line around a notch or inside a circle; this tier fills the path's BOX, which is exact for
+every rectangle and wrong for everything else, because the rules for filling an arbitrary outline belong to the text
+system and not to a signature — and a rectangle is what a page of text actually is. TWO: THE PROGRESSION IS READ AND NOT
+HONOURED. `CTFrameProgression` exists for VERTICAL text, where lines stack in columns; this tier lays out horizontally
+only, so a frame attribute asking for right-to-left or left-to-right progression is KEPT (the dictionary is retained
+whole) and changes no origin.
+
+**AND A FRAME HAS NO PUBLIC CREATOR EITHER, WHICH MAKES A THIRD INTERNAL SEAM.** `CTFrame_internal.h` is where the
+framesetter and the frame agree about how one is built. THE LINES AND THEIR ORIGINS ARRIVE TOGETHER — a frame with one
+and not the other is not a frame, and a seam that allowed it would be a seam that lets a frame be built wrong — and
+both are COPIED, so a frame can never be left pointing at a framesetter's finished stack.
+
+**AND TWO MISTAKES OF MY OWN WERE FOUND BY THE FIRST RUN, BOTH WORTH KEEPING.** ONE WAS A LATENT BUG IN THE IMPLEMENTATION
+THAT READING THE CASE'S FAILURES SURFACED: the fit test compared the line's baseline against **ZERO** rather than against
+the PATH's origin, so a frame drawn away from the origin would have mis-measured every line; it is now a RECTANGLE test
+in the path's own coordinates. THE OTHER WAS THE CASE'S: it expected **49** characters of a string that has **48**, and
+it drew a frame whose top line sits at y ≈ 391 into a bitmap **200** pixels tall, so the ink landed outside the buffer —
+a draw case that had asserted only "no crash" would have passed while measuring nothing.
+
+MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with no compiler diagnostic at all in
+their logs; `nm -D build/libagora-text.so` lists a frame's nine doors plus the seam and a framesetter's five; and a bare
+`ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over `text: 21 of 21 cases passed, 0 failed`.

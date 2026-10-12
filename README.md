@@ -327,3 +327,25 @@ ctest --test-dir build
   — and it carries the font-key accessor too, so the value is written **once** and the line and the typesetter cannot
   disagree about which attribute names a font. The case holds the property that makes it necessary: a line cut from
   characters 4..6 reports the range **(4, 3)**, in the STRING's coordinates rather than its own.
+- **`CTFrame` AND `CTFramesetter` ARE DECLARED AND IMPLEMENTED, AND THE TEXT-LAYOUT HALF OF APPLE'S ORDER IS DONE.**
+  A framesetter is *a typesetter with a shape to fill*: its five doors are `CreateWithAttributedString`,
+  `CreateFrame`, `GetTypesetter`, `SuggestFrameSizeWithConstraints` and `GetTypeID`, and Apple's own sentence is the
+  algorithm — fill "until it either runs out of **text** or it finds that text no longer **fits**". A frame's ten doors
+  report the range it was asked for, the **prefix of it that fit** (two different doors, and the pair is the point), the
+  path, the frame attributes, its **lines** and their **origins**, and draw them. MEASURED:
+  `text: 21 of 21 cases passed, 0 failed`.
+- **THE FRAME'S LAYOUT IS SIX LINES AND EVERY DECISION IN IT IS SOMEBODY ELSE'S**: the typesetter says where each line
+  ends, the line says how tall the text is, the path says how much room there is, and the framesetter adds only the
+  arithmetic between them. The first baseline is **one ascent below the path's top** and each line after it is one line
+  height lower, which is what makes a frame's origin its **bottom-left** — and the case holds the property that
+  matters: the lines **tile** the visible range (first line starts where the range does, each starts where the last
+  ended, no gap and no overlap), and the origins **descend** and sit inside the box.
+- **AND ITS TWO BOUNDARIES ARE RECORDED WHERE A CALLER READS THEM.** THE PATH IS READ AS ITS BOUNDING BOX: this tier
+  fills the path's *box*, which is exact for every rectangle and wrong for a circle or a notch, because the rules for
+  filling an arbitrary outline are the text system's and not a signature's. AND THE PROGRESSION IS READ AND NOT
+  HONOURED: `CTFrameProgression` exists for **vertical** text, where lines stack in columns, and this tier lays out
+  horizontally only — the frame attributes are kept whole and change no origin.
+- **A FRAME HAS NO PUBLIC CREATOR EITHER, SO THERE IS A THIRD INTERNAL SEAM.** `CTFrame_internal.h` is where the
+  framesetter and the frame agree about how one is built — the lines and their origins arrive **together**, because a
+  frame without either is not a frame — and the arrays are **copied**, so a frame cannot be left pointing at a
+  framesetter's freed stack.

@@ -28,6 +28,8 @@
 #include <CoreText/CTParagraphStyle.h>
 #include <CoreText/CTRun.h>
 #include <CoreText/CTTypesetter.h>
+#include <CoreText/CTFrame.h>
+#include <CoreText/CTFramesetter.h>
 
 #include <CoreFoundation/CoreFoundation.h>
 
@@ -2003,6 +2005,250 @@ static int case_typesetter_breaking(void)
 	return g_fail - before;
 }
 
+/* THE FRAME AND THE FRAMESETTER, WHICH IS THIS WHOLE LAYER DOING ITS JOB: a string, a rectangle, and the lines that
+ * fit. The assertions go outwards — the frame's ranges, its path and its attributes; then its LINES, which must TILE
+ * the visible range and start where the frame says they do; then a path too SHORT to hold the text, which is the door's
+ * reason for existing; then the size door and the typesetter underneath; and finally that DRAWING the frame marks
+ * pixels, which no accessor can show. */
+static int case_frame_object(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(12.0);
+	CFMutableDictionaryRef attrs, frame_attrs;
+	CFAttributedStringRef astr;
+	CTFramesetterRef fs;
+	CTTypesetterRef under;
+	CGPathRef path, short_path;
+	CTFrameRef frame, clipped;
+	CFArrayRef lines;
+	CFRange range, visible, fit, line_range, previous;
+	CGPoint origins[64];
+	CGSize suggested;
+	CGFloat advance, lineHeight;
+	CFIndex i, count, covered;
+	int descending;
+
+	check(font != NULL, "no font, so there is nothing to lay out in a frame");
+	if (font == NULL) {
+		return g_fail - before;
+	}
+	advance = typesetter_advance(font);
+	check(advance > 0.0, "the face's advance is not positive");
+	if (advance <= 0.0) {
+		return g_fail - before;
+	}
+	attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					  &kCFTypeDictionaryValueCallBacks);
+	frame_attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+						&kCFTypeDictionaryValueCallBacks);
+	check(attrs != NULL && frame_attrs != NULL, "the test could not make its dictionaries");
+	if (attrs == NULL || frame_attrs == NULL) {
+		return g_fail - before;
+	}
+	CFDictionarySetValue(attrs, CFSTR("NSFontAttributeName"), font);
+	astr = CFAttributedStringCreate(kCFAllocatorDefault,
+					CFSTR("one two three four five six seven eight nine ten"), attrs);
+	fs = (astr != NULL) ? CTFramesetterCreateWithAttributedString(astr) : NULL;
+	check(fs != NULL, "a framesetter could not be made");
+	if (fs == NULL) {
+		return g_fail - before;
+	}
+	check(CFGetTypeID((CFTypeRef)fs) == CTFramesetterGetTypeID(),
+	      "CFGetTypeID(framesetter) is %lu and CTFramesetterGetTypeID() is %lu",
+	      (unsigned long)CFGetTypeID((CFTypeRef)fs), (unsigned long)CTFramesetterGetTypeID());
+
+	/* THE TYPESETTER UNDER IT — the door that exists so a caller can break lines itself — and it must be usable: asked
+	 * for a very wide line, it answers the WHOLE string, which says it is the same text. */
+	under = CTFramesetterGetTypesetter(fs);
+	check(under != NULL, "the framesetter handed back no typesetter");
+	if (under != NULL) {
+		check(CTTypesetterSuggestLineBreak(under, 0, 1.0e7) == 48,
+		      "the typesetter under the framesetter answered %ld characters for the whole string, want 48",
+		      (long)CTTypesetterSuggestLineBreak(under, 0, 1.0e7));
+	}
+
+	/* A BOX TWENTY ADVANCES WIDE AND TALL ENOUGH TO HOLD EVERYTHING — the frame that must show the LOT. AND THE
+	 * RECTANGLE IS BUILT THE ERA'S WAY, because this tree's own Core Graphics header records that
+	 * `CGPathCreateWithRect` is macOS 10.7 and was DELIBERATELY STRUCK: `CGPathCreateMutable` plus `CGPathAddRect` is
+	 * the 10.6 spelling, and a test written with the later one would not build at all. */
+	path = CGPathCreateMutable();
+	check(path != NULL, "the test could not make a mutable path");
+	if (path != NULL) {
+		CGPathAddRect((CGMutablePathRef)path, NULL, CGRectMake(0.0, 0.0, 20.0 * advance, 400.0));
+	}
+	check(path != NULL, "the test could not make its path");
+	if (path == NULL) {
+		return g_fail - before;
+	}
+	frame = CTFramesetterCreateFrame(fs, CFRangeMake(0, 0), path, frame_attrs);
+	check(frame != NULL, "the framesetter made no frame");
+	if (frame == NULL) {
+		return g_fail - before;
+	}
+	check(CFGetTypeID((CFTypeRef)frame) == CTFrameGetTypeID(),
+	      "CFGetTypeID(frame) is %lu and CTFrameGetTypeID() is %lu",
+	      (unsigned long)CFGetTypeID((CFTypeRef)frame), (unsigned long)CTFrameGetTypeID());
+
+	/* ITS RANGES, ITS PATH AND ITS ATTRIBUTES. A zero-length range means the rest of the string, as it does for every
+	 * range-taking door here, and with room to spare the VISIBLE range is the whole of it — the two doors agreeing
+	 * because the frame really did show everything. */
+	range = CTFrameGetStringRange(frame);
+	visible = CTFrameGetVisibleStringRange(frame);
+	check(range.location == 0 && range.length == 48, "the frame's string range is (%ld, %ld), want (0, 48)",
+	      (long)range.location, (long)range.length);
+	check(visible.location == 0 && visible.length == 48,
+	      "the frame showed (%ld, %ld) of a string it had room for", (long)visible.location,
+	      (long)visible.length);
+	check(CTFrameGetPath(frame) == path, "the frame did not hand back the path it was given");
+	check(CTFrameGetFrameAttributes(frame) == frame_attrs,
+	      "the frame did not hand back the attributes it was given");
+
+	/* AND ITS LINES TILE THE VISIBLE RANGE: the first starts where the range does, each one starts where the last
+	 * ended, and together they cover every character the frame says it showed. THAT PROPERTY IS THE LAYOUT — a gap
+	 * drops text and an overlap draws it twice, and no single assertion above can tell either. */
+	lines = CTFrameGetLines(frame);
+	check(lines != NULL, "the frame answered no lines at all");
+	if (lines == NULL) {
+		return g_fail - before;
+	}
+	count = CFArrayGetCount(lines);
+	check(count > 1, "a 48-character string in a 20-advance box became %ld line(s)", (long)count);
+	covered = 0;
+	previous = CFRangeMake(0, 0);
+	for (i = 0; i < count; i++) {
+		CTLineRef line = (CTLineRef)CFArrayGetValueAtIndex(lines, i);
+
+		check(line != NULL && CFGetTypeID((CFTypeRef)line) == CTLineGetTypeID(),
+		      "frame line %ld is not a CTLine", (long)i);
+		if (line == NULL) {
+			continue;
+		}
+		line_range = CTLineGetStringRange(line);
+		if (i == 0) {
+			check(line_range.location == visible.location,
+			      "the first line starts at %ld and the visible range at %ld", (long)line_range.location,
+			      (long)visible.location);
+		} else {
+			check(line_range.location == previous.location + previous.length,
+			      "line %ld starts at %ld and the one before it ended at %ld", (long)i,
+			      (long)line_range.location, (long)(previous.location + previous.length));
+		}
+		previous = line_range;
+		covered += line_range.length;
+	}
+	check(covered == visible.length, "the lines cover %ld characters and the frame reports %ld visible",
+	      (long)covered, (long)visible.length);
+
+	/* AND THE ORIGINS DESCEND, from the top of the box downwards, all at the box's left edge — which is what makes a
+	 * frame's origin its bottom-left and a caller's drawing loop an iteration over these points. */
+	memset(origins, 0, sizeof origins);
+	CTFrameGetLineOrigins(frame, CFRangeMake(0, 0), origins);
+	descending = 1;
+	for (i = 0; i < count; i++) {
+		check(origins[i].x == 0.0, "line %ld is placed at x = %g, and the box starts at 0",
+		      (long)i, (double)origins[i].x);
+		check(origins[i].y > 0.0 && origins[i].y < 400.0, "line %ld is placed at y = %g, outside the box",
+		      (long)i, (double)origins[i].y);
+		if (i > 0 && !(origins[i].y < origins[i - 1].y)) {
+			descending = 0;
+		}
+	}
+	check(descending, "the line origins do not descend, so the lines are not stacked");
+	/* AND A RANGE OF ORIGINS WRITES ONLY ITS OWN, which is the framework's zero-length rule once more. (A `CGPoint` is
+	 * a struct and has no `==` in C, so the two fields are compared.) */
+	CTFrameGetLineOrigins(frame, CFRangeMake(1, 1), origins);
+	check(origins[0].x == origins[1].x && origins[0].y == origins[1].y,
+	      "a one-line range at 1 did not write that line's origin where it was asked: (%g, %g) against (%g, %g)",
+	      (double)origins[0].x, (double)origins[0].y, (double)origins[1].x, (double)origins[1].y);
+
+	/* NOW THE SAME TEXT IN A BOX TOO SHORT FOR IT: the frame must show a PREFIX and fewer lines, which is Apple's own
+	 * sentence — filling stops "when it finds that text no longer fits". */
+	lineHeight = 0.0;
+	{
+		CGFloat ascent = 0.0, descent = 0.0, leading = 0.0;
+
+		(void)CTLineGetTypographicBounds((CTLineRef)CFArrayGetValueAtIndex(lines, 0), &ascent, &descent,
+						 &leading);
+		lineHeight = ascent + descent + leading;
+	}
+	short_path = CGPathCreateMutable();
+	check(short_path != NULL, "the test could not make a mutable short path");
+	if (short_path != NULL) {
+		CGPathAddRect((CGMutablePathRef)short_path, NULL,
+			      CGRectMake(0.0, 0.0, 20.0 * advance, lineHeight * 2.0));
+	}
+	check(short_path != NULL, "the test could not make its short path");
+	if (short_path != NULL) {
+		clipped = CTFramesetterCreateFrame(fs, CFRangeMake(0, 0), short_path, NULL);
+		check(clipped != NULL, "the short path made no frame");
+		if (clipped != NULL) {
+			CFRange small = CTFrameGetVisibleStringRange(clipped);
+
+			check(small.length < visible.length,
+			      "a box two lines tall showed %ld of %ld characters", (long)small.length,
+			      (long)visible.length);
+			check(small.length > 0, "a box two lines tall showed nothing at all");
+			check(small.location == 0, "the visible range does not start where the string does");
+			check(CFArrayGetCount(CTFrameGetLines(clipped)) <= 2,
+			      "a box two lines tall holds %ld lines", (long)CFArrayGetCount(CTFrameGetLines(clipped)));
+		}
+	}
+
+	/* THE SIZE DOOR: WITH ROOM TO SPARE IT ANSWERS THE WHOLE TEXT, and with a height for two lines it answers less and
+	 * says so through the fit range. */
+	fit = CFRangeMake(0, 0);
+	suggested = CTFramesetterSuggestFrameSizeWithConstraints(fs, CFRangeMake(0, 0), NULL,
+								 CGSizeMake(20.0 * advance, 1.0e6), &fit);
+	check(fit.location == 0 && fit.length == 48,
+	      "an unconstrained suggestion fits (%ld, %ld) of 48 characters", (long)fit.location, (long)fit.length);
+	check(suggested.width > 0.0 && suggested.height > 0.0,
+	      "the suggested size is %g by %g", (double)suggested.width, (double)suggested.height);
+	fit = CFRangeMake(0, 0);
+	suggested = CTFramesetterSuggestFrameSizeWithConstraints(fs, CFRangeMake(0, 0), NULL,
+								 CGSizeMake(20.0 * advance, lineHeight * 2.0), &fit);
+	check(fit.length < 48 && fit.length > 0,
+	      "a two-line-high constraint fits %ld of 48 characters", (long)fit.length);
+	check(suggested.height <= lineHeight * 2.0 + 0.01,
+	      "a two-line-high constraint suggested a height of %g", (double)suggested.height);
+
+	/* AND IT DRAWS, WHICH NO ACCESSOR CAN SHOW. */
+	{
+		enum { W = 260, H = 440 };
+		static unsigned char pixels[W * H * 4];
+		CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
+
+		check(space != NULL, "the test could not make a colour space");
+		if (space != NULL) {
+			CGContextRef ctx = CGBitmapContextCreate(pixels, W, H, 8, W * 4, space,
+				kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
+
+			check(ctx != NULL, "the test could not make a bitmap context for the frame");
+			if (ctx != NULL) {
+				CGContextSetRGBFillColor(ctx, 0.0, 0.0, 0.0, 1.0);
+				memset(pixels, 0, sizeof pixels);
+				CTFrameDraw(frame, ctx);
+				check(line_ink_count(pixels, W, H) > 0, "CTFrameDraw marked NO pixels at all");
+			}
+		}
+	}
+
+	/* NULL SAFETY, THE SAME CONTRACT AS EVERYWHERE ELSE IN THIS LIBRARY. */
+	check(CTFrameGetStringRange(NULL).length == 0, "a NULL frame answered a string range");
+	check(CTFrameGetLines(NULL) == NULL, "a NULL frame answered lines");
+	check(CTFrameGetPath(NULL) == NULL, "a NULL frame answered a path");
+	CTFrameGetLineOrigins(NULL, CFRangeMake(0, 0), origins);
+	CTFrameDraw(NULL, NULL);
+	check(CTFramesetterCreateFrame(NULL, CFRangeMake(0, 0), path, NULL) == NULL,
+	      "a NULL framesetter made a frame");
+	check(CTFramesetterCreateFrame(fs, CFRangeMake(0, 100), path, NULL) == NULL,
+	      "a range past the end of the string made a frame");
+	check(CTFramesetterGetTypesetter(NULL) == NULL, "a NULL framesetter handed back a typesetter");
+	check(CTFramesetterSuggestFrameSizeWithConstraints(NULL, CFRangeMake(0, 0), NULL, CGSizeMake(0.0, 0.0),
+							   NULL).width == 0.0,
+	      "a NULL framesetter suggested a size");
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -2024,6 +2270,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The run agrees with its line, and draws over a range", case_run_object },
 	{ "The typesetter's own surface, and its range rule", case_typesetter_object },
 	{ "The typesetter breaks at the width, and the paragraph style says how", case_typesetter_breaking },
+	{ "A frame fills a path, and its lines tile what it showed", case_frame_object },
 };
 
 int main(void)
