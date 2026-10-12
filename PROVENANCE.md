@@ -679,3 +679,22 @@ document claiming something a measurement did not support. They are defined now,
 MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with no compiler diagnostic at all in
 their logs; `nm -D build/libagora-text.so` lists all four doors; and a bare `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over
 `text: 28 of 28 cases passed, 0 failed`, with the `owed` test down to 2 names.
+**And the matching tier FALSIFIED an owed reason, which is recorded where the reason lives (2026-10-11).** The reason
+`CTFontManagerEnableFontDescriptors` carried was a CONDITION: "matching is the thing this tier does not have ...
+It lands with the tier that owns matching, beside them." THE TIER LANDED, so the condition is met and the reason is no
+longer true. It is replaced in `CTFontManager.c` by what is now the case, and NOT by quietly implementing the door.
+
+**WHAT THE DOOR NOW WAITS FOR IS A DECISION, AND IT IS WORTH STATING PRECISELY BECAUSE IT IS AN ARCHITECTURAL FIRST.**
+`CTFontManagerEnableFontDescriptors` enables and disables fonts "based on the provided array of font descriptors" —
+PROCESS-GLOBAL MUTABLE STATE, WHICH THIS LIBRARY WOULD HAVE FOR THE FIRST TIME: every object in it is immutable by
+construction, which is why its registration doors, its collections and its lines all answer without a lock. Apple's own
+header promises that all of its functions "are thread safe unless otherwise specified", so A LOCK OR A RECORDED CAVEAT
+IS THE DECISION — and choosing one on the way past would be exactly the failure this tree refuses.
+
+**AND THIS IS THE SECOND TIME AN OWED REASON HAS BEEN FALSIFIED BY A LATER COMMIT AND SAID SO RATHER THAN QUIETLY
+REPAIRED**: `CTLineCreateTruncatedLine`'s reason named the typesetter, and the commit that brought the typesetter is the
+one that noticed. AN OWED REASON IS A CONDITION THAT CAN BE CHECKED — that is what makes it different from a sentence —
+and a condition that becomes true is a door that has to move.
+
+MEASURED, from the run in the same command: a bare `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over `text: 28 of 28 cases passed, 0 failed`, with the `owed` test at
+2 names.

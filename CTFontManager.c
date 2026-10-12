@@ -512,12 +512,21 @@ CTFontManagerAutoActivationSetting CTFontManagerGetAutoActivationSetting(CFStrin
  * OWED DOORS, EACH WITH THE REASON IT CANNOT BE ANSWERED HERE. They are DECLARED in CTFontManager.h and NOT
  * DEFINED, so a caller who reaches for one gets a link error rather than an invented answer.
  *
- *   CTFontManagerEnableFontDescriptors            it ENABLES OR DISABLES descriptors "for font descriptor
- *                                                 matching", and matching is the thing this tier does not have:
- *                                                 `CTFontDescriptorCreateMatchingFontDescriptors` and the
- *                                                 collection's two matching doors are owed for the same reason,
- *                                                 so there is no visibility state for this door to toggle. It
- *                                                 lands with the tier that owns matching, beside them.
+ *   CTFontManagerEnableFontDescriptors            THE REASON THIS DOOR WAS OWED HAS BECOME FALSE, AND THAT IS RECORDED
+ *                                                 RATHER THAN QUIETLY FIXED. It read: "matching is the thing this
+ *                                                 tier does not have ... It lands with the tier that owns matching,
+ *                                                 beside them." THAT TIER LANDED (`CTFontMatching.c`), so the door is
+ *                                                 BUILDABLE and the condition its reason named is MET — which is what
+ *                                                 an owed reason is for, and the second time in this library that
+ *                                                 meeting one has been noticed and said. WHAT IT WAITS FOR NOW IS A
+ *                                                 DECISION AND NOT A TIER: it enables and disables fonts "based on the
+ *                                                 provided array of font descriptors", which is PROCESS-GLOBAL
+ *                                                 MUTABLE STATE — THE FIRST THIS LIBRARY WOULD HAVE, since every
+ *                                                 object in it is immutable by construction — and Apple's own header
+ *                                                 promises that all of its functions "are thread safe unless
+ *                                                 otherwise specified". A LOCK, OR A RECORDED CAVEAT, IS THE
+ *                                                 DECISION; choosing one on the way past is the failure this tree
+ *                                                 refuses.
  *
  *   CTFontManagerCreateFontRequestRunLoopSource   A FONT SERVER ON THE OTHER END: the source conveys font
  *                                                 requests FROM the manager, which in Apple's implementation is a

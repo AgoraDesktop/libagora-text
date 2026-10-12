@@ -447,4 +447,12 @@ ctest --test-dir build
 - **AND IT CLOSED A HOLE IN THE `owed` TEST.** The descriptor's two matching doors had been declared and undefined
   since the descriptor was written; the test was built LATER, when `CTFontCollection` landed, and never picked them up
   — so two doors escaped the very check that test exists to make. They are defined now, and the test names what is
-  left.
+  left.- **AND THE `owed` LIST SHRANK BY FOUR, WHICH FALSIFIED ONE MORE REASON** — the one `CTFontManagerEnableFontDescriptors`
+  carried: *"matching is the thing this tier does not have … It lands with the tier that owns matching, beside them."*
+  **THAT TIER EXISTS NOW**, so the door is buildable and what it waits for is no longer a tier but a **DECISION**: it
+  enables and disables fonts from a descriptor array, which is **process-global mutable state — the first this library
+  would have**, since every object in it is immutable by construction, while Apple's header promises that all of its
+  functions *"are thread safe unless otherwise specified"*. **A lock, or a recorded caveat, is the decision**; choosing
+  one on the way past is what this tree refuses. `CTFontManager.c` now says exactly that in place of the reason the
+  matching tier made false. MEASURED: `text: 28 of 28 cases passed, 0 failed`, `owed` at **2** — one needing that decision, one needing the font server
+  itself.
