@@ -627,11 +627,91 @@ CGRect CTFontGetBoundingRectsForGlyphs(CTFontRef font, CTFontOrientation orienta
 }
 
 /* =================================================================================================
+ * THE GLYPH AS GEOMETRY.
+ *
+ * APPLE'S OWN SENTENCE FIXES THE COMPOSITION ORDER, and it is why this is three transforms rather than one:
+ * "The path will reflect the font point size, matrix, and transform parameter, IN THAT ORDER." So the
+ * outline is scaled by the font's size, then carried through THE FONT'S OWN MATRIX -- the one thing in this
+ * object nothing else in this file reads -- and then through the caller's `transform`, about which Apple
+ * adds that it "will most commonly be used to provide a translation to the desired glyph origin".
+ *
+ * THE ENGINE'S OUTLINE DOOR ALREADY COMPOSES THE FIRST TWO. `cg_font_glyph_outline` takes the em and a
+ * matrix and concatenates them itself, so handing it the size and the concatenation of the font's matrix
+ * with the caller's transform produces size, matrix, transform -- in exactly that order, once. THE POINTS
+ * COME BACK IN USER SPACE, Y-UP, RELATIVE TO THE ORIGIN: the seam applies no flip, which is what a CGPath
+ * in Core Text's coordinate system is.
+ *
+ * A GLYPH WITH NO OUTLINE IS AN EMPTY PATH AND NOT NULL. A space, or a bitmap-only face, has nothing to
+ * draw, which is not an error -- the seam says so and succeeds with no segments. NULL is kept for the case
+ * Apple's own result line names, "an error occurred": a glyph the engine will not load at all.
+ * =============================================================================================== */
+struct ct_outline_path {
+	CGMutablePathRef path;
+};
+
+static void ct_path_move_to(void *info, CGFloat x, CGFloat y)
+{
+	CGPathMoveToPoint(((struct ct_outline_path *)info)->path, NULL, x, y);
+}
+
+static void ct_path_line_to(void *info, CGFloat x, CGFloat y)
+{
+	CGPathAddLineToPoint(((struct ct_outline_path *)info)->path, NULL, x, y);
+}
+
+/* A CONIC IS ADDED AS A QUADRATIC, because a quadratic is the only curve a CGPath holds -- the same
+ * conversion Core Graphics' own glyph path makes, for the same reason (see CGContext.c). */
+static void ct_path_conic_to(void *info, CGFloat cx, CGFloat cy, CGFloat x, CGFloat y)
+{
+	CGPathAddQuadCurveToPoint(((struct ct_outline_path *)info)->path, NULL, cx, cy, x, y);
+}
+
+static void ct_path_cubic_to(void *info, CGFloat c1x, CGFloat c1y, CGFloat c2x, CGFloat c2y, CGFloat x,
+			     CGFloat y)
+{
+	CGPathAddCurveToPoint(((struct ct_outline_path *)info)->path, NULL, c1x, c1y, c2x, c2y, x, y);
+}
+
+static void ct_path_close(void *info)
+{
+	CGPathCloseSubpath(((struct ct_outline_path *)info)->path);
+}
+
+CGPathRef CTFontCreatePathForGlyph(CTFontRef font, CGGlyph glyph, const CGAffineTransform *transform)
+{
+	static const cg_outline_sink sink = {
+		ct_path_move_to, ct_path_line_to, ct_path_conic_to, ct_path_cubic_to, ct_path_close
+	};
+	const struct __CTFont *f = (const struct __CTFont *)font;
+	struct ct_outline_path ctx;
+	CGAffineTransform m;
+
+	if (f == NULL) {
+		return NULL;
+	}
+	/* SIZE, THEN THE FONT'S MATRIX, THEN THE CALLER'S TRANSFORM; and a NULL transform is
+	 * CGAffineTransformIdentity, which is Apple's own sentence for that parameter. */
+	m = f->matrix;
+	if (transform != NULL) {
+		m = CGAffineTransformConcat(m, *transform);
+	}
+	ctx.path = CGPathCreateMutable();
+	if (ctx.path == NULL) {
+		return NULL;
+	}
+	if (!cg_font_glyph_outline(f->graphics, glyph, f->size, m, &sink, &ctx)) {
+		CGPathRelease((CGPathRef)ctx.path);
+		return NULL;
+	}
+	/* RETAINED, WHICH IS WHAT APPLE'S RESULT LINE SAYS: `Create` hands the caller the +1 reference and
+	 * nothing makes a second one here. */
+	return (CGPathRef)ctx.path;
+}
+
+/* =================================================================================================
  * OWED DOORS, EACH WITH THE REASON IT CANNOT BE ANSWERED HERE. They are DECLARED in CTFont.h and NOT DEFINED,
  * so a caller who reaches for one gets a link error rather than a plausible wrong answer.
  *
- *   CTFontCreatePathForGlyph                      the core outline IS reachable (cg_font_glyph_outline) and
- *                                                 lands next, with the CGPath it builds.
  *   CTFontGetSymbolicTraits, CTFontCopyTraits     the seam reports no style flags, and deriving traits from a
  *                                                 subfamily STRING would be a guess wearing a fact's clothes.
  *   CTFontCopyCharacterSet, CFStringEncoding      needs every character the face covers: the inverse of the

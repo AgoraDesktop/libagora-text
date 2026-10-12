@@ -201,6 +201,13 @@ CFArrayRef CTFontCopySupportedLanguages(CTFontRef font);
  *
  * CTFontGetGlyphsForCharacters answers true when EVERY character mapped, and leaves 0 -- which is `.notdef`'s
  * index -- in the slot of one that did not, which is Apple's own contract.
+ *
+ * AND THE OTHER DOOR APPLE PUTS ON THIS OBJECT IS THE GLYPH AS GEOMETRY. `CTFontCreatePathForGlyph` builds a
+ * `CGPath` from the face's outline, and Apple's own sentence fixes what the path contains: "the font point
+ * size, matrix, and transform parameter, IN THAT ORDER" -- the size scaled in, then THIS FONT'S OWN matrix,
+ * then the caller's transform, which is usually a translation to the glyph's origin. A glyph with no outline
+ * (a space, a bitmap-only face) is an EMPTY PATH rather than NULL; NULL means the glyph could not be loaded
+ * at all, which is Apple's "or NULL if an error occurred".
  * ------------------------------------------------------------------------------------- */
 bool CTFontGetGlyphsForCharacters(CTFontRef font, const UniChar characters[], CGGlyph glyphs[],
 				  CFIndex count);

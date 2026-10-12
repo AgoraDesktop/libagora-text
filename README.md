@@ -98,7 +98,20 @@ rows are the AAT/SFNT structure vocabulary, which is a data port of two headers 
   than a comment asserting it: `CTFontCreateWithName` finds a face once it has been registered — the case
   PRINTS which of two routes answered, and every run says the name route did. An earlier attempt answered NULL
   because the face was unregistered, which is what a NULL there means.
-- **Doors OWED, EACH NAMED WITH ITS REASON in `CTFont.c`** rather than defined approximately: the outline
-  path (lands next, with the `CGPath` it builds), the traits, the character set and languages, the
-  `fvar`/`avar`/`feat` tables, the raw table doors, the `post` table's underline metrics, the slant angle, the
-  vertical translations, the UI-role creator, the string/family/trait copies, and the ATS pair.
+- **THE GLYPH IS NOW GEOMETRY AS WELL AS AN INDEX, WHICH CLOSES THE SECOND HALF OF THE RESTART'S FIRST
+  ARCHITECTURAL QUESTION.** `CTFontCreatePathForGlyph` builds a `CGPath` from the face's outline through
+  `cg_font_glyph_outline`, and Apple's own sentence for the door — "the path will reflect the font point size,
+  matrix, and transform parameter, **in that order**" — is held end to end, each of the three ingredients
+  measured: the box doubles with the size, the caller's transform moves it by what it says (a translation of
+  (100, 7) shifts the box by (100, 7)), and **the font's own matrix is in the path**, which is the only place
+  in this object anything reads it. AND THE TWO NEGATIVES ARE HELD TOO, because that is what tells a real door
+  from a plausible one: a glyph with no outline (a space) is an **empty path and not NULL**, while a glyph the
+  engine will not load IS NULL — Apple's "an error occurred". MEASURED: `text: 6 of 6 cases passed`, with the
+  unloadable-glyph case printing the engine's own `CG-REFUSE: the engine would not load glyph 65534 for its
+  outline` above it. FALSIFIED: forcing the font's matrix out of the composition (`m = CGAffineTransformIdentity`)
+  makes exactly that case fail — `the matrixed font's outline starts at x 0.193359 and the plain font's at
+  0.193359, want a shift of 30` — and `text: 5 of 6 cases passed, 1 failed`; restored, `6 of 6`.
+- **Doors OWED, EACH NAMED WITH ITS REASON in `CTFont.c`** rather than defined approximately: the traits, the
+  character set and languages, the `fvar`/`avar`/`feat` tables, the raw table doors, the `post` table's
+  underline metrics, the slant angle, the vertical translations, the UI-role creator, the string/family/trait
+  copies, and the ATS pair.

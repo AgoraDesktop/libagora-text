@@ -302,6 +302,48 @@ static int case_descriptor_object(void)
 	return g_fail - before;
 }
 
+/* ONE FACE, FOUND THE SAME TWO WAYS IN EVERY CASE THAT NEEDS ONE: Apple's CTFontCreateWithName asks a font
+ * system for a face by name, this tier has no font system, so the name is offered to the face registry the
+ * engine keeps and, if that finds nothing, the face is loaded from its own file. WHICH ROUTE ANSWERED IS
+ * PRINTED RATHER THAN ASSUMED, because it is a fact about this tree that the suite can measure every run and
+ * a comment cannot -- printed once per process, because every case runs in its own child and the answer is
+ * the same one.
+ *
+ * THE FACE IS REGISTERED BEFORE THE NAME IS TRIED, which is what gives the name route something to find: an
+ * earlier attempt answered NULL because the face was unregistered, and a NULL there means exactly that. */
+static CTFontRef test_font(CGFloat size)
+{
+	static bool reported;
+	const char *path = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf";
+	CGDataProviderRef provider;
+	CGFontRef face = NULL;
+	CTFontRef font;
+
+	if (access(path, R_OK) == 0) {
+		provider = CGDataProviderCreateWithFilename(path);
+		if (provider != NULL) {
+			face = CGFontCreateWithDataProvider(provider);
+		}
+		check(cg_font_register(path) != 0 || cg_font_is_registered(path),
+		      "the face at %s could not be registered", path);
+	} else if (!reported) {
+		printf("  (note: %s is not on this machine)\n", path);
+	}
+
+	font = CTFontCreateWithName(CFSTR("DejaVuSansMono-Bold"), size, NULL);
+	if (font == NULL && face != NULL) {
+		if (!reported) {
+			printf("  (note: the NAME route found no face for \"%s\" even when registered; using the file)\n",
+			       "DejaVuSansMono-Bold");
+		}
+		font = CTFontCreateWithGraphicsFont(face, size, NULL, NULL);
+	} else if (font != NULL && !reported) {
+		printf("  (note: the NAME route found the face through the engine's registry)\n");
+	}
+	reported = true;
+	return font;
+}
+
 /* A REAL FONT, END TO END, WITH THE GLYPH STEP THAT IS THIS LIBRARY'S WHOLE REASON FOR EXISTING. Everything
  * here is asserted against a face that is actually on this machine, and the door the architecture was built
  * for is CTFontGetGlyphsForCharacters: Core Graphics no longer offers it, Core Text must, and the answer has
@@ -313,9 +355,6 @@ static int case_font_object(void)
 {
 	int before = g_fail;
 	CFStringRef name = CFSTR("DejaVuSansMono-Bold");
-	const char *path = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf";
-	CGDataProviderRef provider = NULL;
-	CGFontRef face = NULL;
 	CTFontRef font, doubled;
 	CFTypeRef got;
 	CGGlyph glyphs[3];
@@ -323,31 +362,8 @@ static int case_font_object(void)
 	CGFloat ascent, twice;
 	bool all;
 
-	/* TWO ROUTES TO A FACE, AND THE PRINTED LINE SAYS WHICH ONE ANSWERED. Apple's CTFontCreateWithName asks
-	 * a font system for a face by name; this tier has no font system, so the name is offered to the face
-	 * registry the engine keeps and, if that finds nothing, the face is loaded from its own file. WHICH
-	 * HAPPENED IS PRINTED RATHER THAN ASSUMED, because it is a fact about this tree that the suite can
-	 * measure every time it runs and a comment cannot. */
-	/* THE FACE ITSELF, REGISTERED, SO THAT THE NAME ROUTE HAS SOMETHING TO FIND. */
-	if (access(path, R_OK) == 0) {
-		provider = CGDataProviderCreateWithFilename(path);
-		if (provider != NULL) {
-			face = CGFontCreateWithDataProvider(provider);
-		}
-		check(cg_font_register(path) != 0 || cg_font_is_registered(path),
-		      "the face at %s could not be registered", path);
-	} else {
-		printf("  (note: %s is not on this machine)\n", path);
-	}
-
-	font = CTFontCreateWithName(name, 12.0, NULL);
-	if (font == NULL && face != NULL) {
-		printf("  (note: the NAME route found no face for \"%s\" even when registered; using the file)\n",
-		       "DejaVuSansMono-Bold");
-		font = CTFontCreateWithGraphicsFont(face, 12.0, NULL, NULL);
-	} else if (font != NULL) {
-		printf("  (note: the NAME route found the face through the engine's registry)\n");
-	}
+	/* THE ROUTE TO THE FACE, AND THE LINE THE SUITE PRINTS SAYS WHICH ONE ANSWERED (see `test_font`). */
+	font = test_font(12.0);
 	check(font != NULL, "a font could not be made from \"DejaVuSansMono-Bold\", by name or from its file");
 	if (font == NULL) {
 		return g_fail - before;
@@ -411,12 +427,123 @@ static int case_font_object(void)
 	return g_fail - before;
 }
 
+/* THE OUTLINE: THE GLYPH AS GEOMETRY, which is the other half of the step Core Graphics' deprecated drawing
+ * doors left behind, and the reason `CTFontCreatePathForGlyph` exists beside `CTFontGetGlyphsForCharacters`.
+ * Apple's own sentence for the door names its three ingredients AND THEIR ORDER -- "the path will reflect the
+ * font point size, matrix, and transform parameter, in that order" -- so this case holds all three on a real
+ * face: the outline is scaled BY THE SIZE, carried through THE FONT'S OWN MATRIX, and moved by the caller's
+ * TRANSFORM.
+ *
+ * AND IT HOLDS THE TWO NEGATIVES, which are what keep a plausible door from passing. A glyph with no outline
+ * (a space) is an EMPTY PATH and not NULL, because that is not an error; and a glyph the engine will not load
+ * IS NULL, which is the "an error occurred" of Apple's result line. A door that answered NULL for both would
+ * satisfy every positive assertion here and fail at the two. */
+static int case_font_outline(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(12.0);
+	UniChar ch = (UniChar)'A';
+	UniChar sp_ch = (UniChar)' ';
+	CGGlyph a = 0, sp = 0;
+	CGAffineTransform shift = CGAffineTransformMakeTranslation(100.0, 7.0);
+	CGAffineTransform lean = CGAffineTransformMakeTranslation(30.0, 0.0);
+	CTFontRef with_matrix, taller;
+	CGPathRef plain, moved, matrixed, scaled, blank;
+	CGRect box, shifted, lean_box, tall_box;
+
+	check(font != NULL, "no font, so there is no outline to ask for");
+	if (font == NULL) {
+		return g_fail - before;
+	}
+	check(CTFontGetGlyphsForCharacters(font, &ch, &a, 1) && a != 0,
+	      "the face has no glyph for 'A', so no outline can be asked for");
+
+	/* A REAL OUTLINE, NON-EMPTY, WITH A BOX OF ITS OWN. */
+	plain = CTFontCreatePathForGlyph(font, a, NULL);
+	check(plain != NULL, "CTFontCreatePathForGlyph answered nothing for 'A'");
+	if (plain == NULL) {
+		return g_fail - before;
+	}
+	check(!CGPathIsEmpty(plain), "the outline of 'A' is an EMPTY path");
+	box = CGPathGetPathBoundingBox(plain);
+	check(box.size.width > 0.0 && box.size.height > 0.0,
+	      "the outline of 'A' has an empty bounding box: %g by %g", (double)box.size.width,
+	      (double)box.size.height);
+
+	/* THE TRANSFORM PARAMETER MOVES IT, which is Apple's own account of what that parameter is for. */
+	moved = CTFontCreatePathForGlyph(font, a, &shift);
+	check(moved != NULL, "the door answered nothing when it was given a transform");
+	if (moved != NULL) {
+		shifted = CGPathGetPathBoundingBox(moved);
+		check(shifted.origin.x > box.origin.x + 99.0 && shifted.origin.x < box.origin.x + 101.0,
+		      "the transformed outline starts at x %g and the plain one at %g, want a shift of 100",
+		      (double)shifted.origin.x, (double)box.origin.x);
+		check(shifted.origin.y > box.origin.y + 6.0 && shifted.origin.y < box.origin.y + 8.0,
+		      "the transformed outline starts at y %g and the plain one at %g, want a shift of 7",
+		      (double)shifted.origin.y, (double)box.origin.y);
+	}
+
+	/* THE FONT'S OWN MATRIX IS THE MIDDLE INGREDIENT, and no other door in this library reads it -- which is
+	 * why the case reads it back through CTFontGetMatrix as well as through the path. */
+	with_matrix = CTFontCreateWithName(CFSTR("DejaVuSansMono-Bold"), 12.0, &lean);
+	check(with_matrix != NULL, "a font could not be made with a matrix");
+	if (with_matrix != NULL) {
+		CGAffineTransform got = CTFontGetMatrix(with_matrix);
+
+		check(got.tx > 29.0 && got.tx < 31.0, "the font's own matrix came back with tx = %g, want 30",
+		      (double)got.tx);
+		matrixed = CTFontCreatePathForGlyph(with_matrix, a, NULL);
+		check(matrixed != NULL, "the font that carries a matrix answered no outline");
+		if (matrixed != NULL) {
+			lean_box = CGPathGetPathBoundingBox(matrixed);
+			check(lean_box.origin.x > box.origin.x + 29.0 &&
+			      lean_box.origin.x < box.origin.x + 31.0,
+			      "the matrixed font's outline starts at x %g and the plain font's at %g, want a shift "
+			      "of 30 -- the font's own matrix is NOT in the path",
+			      (double)lean_box.origin.x, (double)box.origin.x);
+		}
+	}
+
+	/* THE SIZE IS IN THE PATH: twice the font, twice the box. */
+	taller = test_font(24.0);
+	check(taller != NULL, "the 24-point font could not be made");
+	if (taller != NULL) {
+		scaled = CTFontCreatePathForGlyph(taller, a, NULL);
+		check(scaled != NULL, "the 24-point font answered no outline");
+		if (scaled != NULL) {
+			tall_box = CGPathGetPathBoundingBox(scaled);
+			check(tall_box.size.height > box.size.height * 1.9 &&
+			      tall_box.size.height < box.size.height * 2.1,
+			      "the outline is %g tall at 24 points and %g at 12, want about twice",
+			      (double)tall_box.size.height, (double)box.size.height);
+		}
+	}
+
+	/* A GLYPH WITH NO OUTLINE IS AN EMPTY PATH, NOT NULL. */
+	if (CTFontGetGlyphsForCharacters(font, &sp_ch, &sp, 1) && sp != 0) {
+		blank = CTFontCreatePathForGlyph(font, sp, NULL);
+		check(blank != NULL, "the space's outline answered NULL rather than an empty path");
+		if (blank != NULL) {
+			check(CGPathIsEmpty(blank), "the space has a NON-empty outline");
+		}
+	} else {
+		printf("  (note: the face maps no glyph for the space character)\n");
+	}
+
+	/* AND A GLYPH THE ENGINE WILL NOT LOAD IS NULL, which is Apple's "an error occurred". 0xFFFE is past
+	 * the end of this face's glyph array, so the engine refuses it rather than answering an empty outline. */
+	check(CTFontCreatePathForGlyph(font, (CGGlyph)0xFFFE, NULL) == NULL,
+	      "a glyph the engine cannot load answered a path rather than NULL");
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
 	{ "The descriptor's twenty-two key strings", case_descriptor_key_strings },
 	{ "The descriptor is an object, and its identity is the runtime's", case_descriptor_object },
 	{ "A font is a face, and the glyph step is the reason for it", case_font_object },
+	{ "A glyph's outline is a path, scaled, matrixed and transformed", case_font_outline },
 };
 
 int main(void)

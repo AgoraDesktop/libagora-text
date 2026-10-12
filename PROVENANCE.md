@@ -118,6 +118,28 @@ is measuring a different program.
 **The restart itself is this section's first entry**: the import deleted, the build rewritten for a C-only
 library with two dependencies, and the package config's `find_dependency(Foundation)` removed.
 
+**`CTFontCreatePathForGlyph` — the glyph as geometry (2026-10-11).** The door the restart's own owed list said
+"lands next, with the `CGPath` it builds" is defined, over the seam `cg_font_glyph_outline` that Core
+Graphics already carries: the outline is decomposed into moves, lines, quadratics and cubics and hung on a
+mutable `CGPath`. What was settled by Apple's header rather than by this repository is the composition order,
+and it is written into both `CTFont.h` and `CTFont.c` as the quotation it is: *"The path will reflect the
+font point size, matrix, and transform parameter, in that order."* The middle ingredient — **the font's own
+matrix** — is what the seam's `matrix` parameter receives, concatenated with the caller's `transform`, and
+`cg_font_glyph_outline` composes the size in front of both, so the three land in Apple's order once. The
+`transform` parameter is `CGAffineTransformIdentity` when NULL, which the header states; the path is
+**RETAINED**, which its result line states; and NULL is kept for the case that line names, "an error occurred"
+— a glyph the engine will not load. A glyph with no outline is an EMPTY PATH, not NULL, because a space is not
+an error.
+
+MEASURED: `cmake --build build` exits 0, `nm -D build/libagora-text.so` lists `CTFontCreatePathForGlyph`, and
+`text: 6 of 6 cases passed, 0 failed`. AND FALSIFIED, because a case that cannot fail is worth nothing: with
+the font's matrix forced out of the composition the new case fails on exactly that claim —
+
+    FAIL: the matrixed font's outline starts at x 0.193359 and the plain font's at 0.193359, want a shift of 30 -- the font's own matrix is NOT in the path
+    text: 5 of 6 cases passed, 1 failed
+
+— and restored it is `6 of 6` again.
+
 This section is changed IN THE SAME COMMIT as the change it describes, and `README.md`'s status with it. The
 previous repository got that wrong — its `PROVENANCE.md` said "not yet made" long after the work was finished
 and its `README.md` went on claiming the NS types were unconverted — and the only defence is the rule.
