@@ -164,13 +164,49 @@ static CTFontDescriptorRef ct_match_descriptor_for_path(const char *path)
 static void ct_match_add(CFMutableArrayRef list, CTFontDescriptorRef descriptor)
 {
 	CFIndex i, count;
+	CFURLRef wanted;
+	char wanted_path[1024];
 
 	if (descriptor == NULL) {
 		return;
 	}
+	/* **THE DUPLICATE CHECK IS BY FILE, AND THAT IS BOTH THE CORRECT QUESTION AND THE ONLY ONE THAT CAN BE ASKED
+	 * HERE.** The comment above says what a duplicate IS — "a file reached through both a directory and a
+	 * registration IS one font" — so the file is what to compare. It used to compare the whole DESCRIPTOR with
+	 * `CFEqual`, which is a much broader claim, AND WHICH DOES NOT WORK IN THIS TREE: MEASURED, with Foundation
+	 * loaded, `CFEqual` on two `CTFontDescriptor`s with DIFFERENT families answers TRUE, so 118 faces collapsed
+	 * to ONE, the role matcher found no regular face, and `+[NSFont systemFontOfSize:]` answered nil.
+	 *
+	 * THE CAUSE IS ONE LEVEL DOWN AND IS NOT FIXED HERE (see the note in `libagora-core`'s `CFEqual` row): the
+	 * dispatch to `-[__NSCFType isEqual:]` fires for a Core Foundation object that should be compared by Core
+	 * Foundation, and that path then crashes in `objc_retain` under `-[NSDictionary isEqualToDictionary:]`. Asking
+	 * about the FILE instead of the whole object is the smaller question, the one this walk actually has, and it
+	 * does not go near that path. */
+	wanted = (CFURLRef)CTFontDescriptorCopyAttribute(descriptor, kCTFontURLAttribute);
+	if (wanted == NULL ||
+	    !CFURLGetFileSystemRepresentation(wanted, false, (UInt8 *)wanted_path, (CFIndex)sizeof wanted_path)) {
+		if (wanted != NULL) {
+			CFRelease(wanted);
+		}
+		CFArrayAppendValue(list, descriptor);
+		return;
+	}
+	CFRelease(wanted);
 	count = CFArrayGetCount(list);
 	for (i = 0; i < count; i++) {
-		if (CFEqual(CFArrayGetValueAtIndex(list, i), descriptor)) {
+		CFURLRef other = (CFURLRef)CTFontDescriptorCopyAttribute(
+			(CTFontDescriptorRef)CFArrayGetValueAtIndex(list, i), kCTFontURLAttribute);
+		char other_path[1024];
+		bool same = false;
+
+		if (other != NULL) {
+			if (CFURLGetFileSystemRepresentation(other, false, (UInt8 *)other_path,
+							     (CFIndex)sizeof other_path)) {
+				same = (strcmp(other_path, wanted_path) == 0);
+			}
+			CFRelease(other);
+		}
+		if (same) {
 			return;
 		}
 	}
