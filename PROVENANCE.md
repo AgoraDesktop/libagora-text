@@ -789,3 +789,29 @@ this target's lack of `-fblocks`. Two checkable things, neither of them a tier.
 MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with NO compiler diagnostic at all; a bare
 `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over `text: 30 of 30 cases passed, 0 failed`; and the `owed` test still names 1 door. Two documents say which half of the
 service is built, and this commit changes both.
+**The `owed` guard was blind to twenty-two declared doors, and the check that found it is now part of the record
+(2026-10-11).** The library had an ACCOUNTING and a GUARD that disagreed, and only the accounting was right. `CTFont.c`
+has carried an owed block naming its twenty-two declared-and-undefined doors with a checkable reason each — the
+font-table readers (`fvar`, `avar`, `feat`, `post`, a raw `CTFontCopyTable`), the doors where a SYSTEM CHOOSES A FACE
+(`CTFontCreateUIFontForLanguage`, `CTFontCreateForString`, the copy-with-traits and copy-with-family doors), and the
+ATS pair that speaks in ids this tree has no system for. THE `owed` TEST NAMED ONE OF THEM. It was written when the
+`CTFontManager` doors were owed and the older `CTFont` tier's were never added, so TWENTY-TWO DOORS WOULD HAVE PASSED
+THAT TEST HAD THEY QUIETLY ACQUIRED A DEFINITION — which is precisely the property the test exists to hold, and this is
+the THIRD time in this library that a guard has been found narrower than the truth it was guarding (the descriptor's
+matching doors escaped the same list, and `CTLineCreateTruncatedLine`'s reason was falsified by a later commit).
+
+**AND THE CHECK THAT FOUND IT IS THE ONE THE LIBRARY DID NOT HAVE: COMPARING THE DECLARED SURFACE WITH APPLE'S.**
+`nm -D` on the built library against the fifteen `CT*.h` in the era's headers gives an arithmetic that CLOSES — 151
+names Apple declares, 127 this library defines, 24 unaccounted for — and the 24 are 23 declared here and undefined plus
+**ONE APPLE DECLARES AND THIS LIBRARY NEVER MENTIONS: `CTFontCreateWithQuickdrawInstance`**. Apple's 10.6 header
+declares it plainly, with no guard; this library does not declare it at all, so a caller gets no symbol AND no
+declaration — a louder absence than an owed door's link error, and until now an UNRECORDED one. It is recorded in
+`CTFont.c` beside the other owed doors, with its reason: QUICKDRAW IS A DRAWING SYSTEM AGORA DOES NOT HAVE, and an
+omission with no note is the one kind of absence nobody can check later.
+
+**AND WHAT WAS FIXED IS THE GUARD, NOT THE ACCOUNTING**: the `owed` test's list now names all twenty-three doors whose
+headers declare them and whose library does not define them, so it fails if any one of them silently acquires a
+definition. Nothing was implemented by this commit and no behaviour changed.
+
+MEASURED, from the run in the same command: a bare `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over `text: 30 of 30 cases passed, 0 failed`, and the `owed` test now
+names **23** doors where it named one.

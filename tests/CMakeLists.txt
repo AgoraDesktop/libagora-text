@@ -31,10 +31,17 @@ set_tests_properties(text PROPERTIES ENVIRONMENT "LD_LIBRARY_PATH=${_agora_ld_pa
 # door that quietly acquired a definition elsewhere would keep the comment and lose the property. `nm` is the
 # instrument and tests/owed_symbols.cmake reads it — and the list below is the one place a newly-owed door has
 # to be named, beside the reason its own file carries.
+#
+# AND THE LIST WAS INCOMPLETE, WHICH IS A FIX AND NOT A TIDY-UP: it named ONE door while TWENTY-THREE were declared
+# and undefined, because it was written when the `CTFontManager` doors were owed and never picked up the older `CTFont`
+# tier's. THE CHECK AND THE ACCOUNTING DISAGREED, and the accounting was the honest one: `CTFont.c` has carried an owed
+# block naming all twenty-two of its own with a reason each. What was missing was the GUARD — a door that quietly
+# acquired a definition would have passed this test without a word. The list is now every door whose header declares it
+# and whose library does not define it, measured by comparing Apple's headers against `nm -D` on the built library.
 find_program(AGORA_NM NAMES nm llvm-nm REQUIRED)
 add_test(NAME owed
     COMMAND "${CMAKE_COMMAND}"
             "-DNM=${AGORA_NM}"
             "-DLIB=$<TARGET_FILE:Text>"
-            "-DSYMBOLS=CTFontManagerCreateFontRequestRunLoopSource"
+            "-DSYMBOLS=CTFontCopyAvailableTables;CTFontCopyCharacterSet;CTFontCopyFeatures;CTFontCopyFeatureSettings;CTFontCopySupportedLanguages;CTFontCopyTable;CTFontCopyTraits;CTFontCopyVariation;CTFontCopyVariationAxes;CTFontCreateCopyWithFamily;CTFontCreateCopyWithSymbolicTraits;CTFontCreateForString;CTFontCreateUIFontForLanguage;CTFontCreateWithPlatformFont;CTFontDescriptorCreateCopyWithFeature;CTFontGetPlatformFont;CTFontGetSlantAngle;CTFontGetStringEncoding;CTFontGetSymbolicTraits;CTFontGetUnderlinePosition;CTFontGetUnderlineThickness;CTFontGetVerticalTranslationsForGlyphs;CTFontManagerCreateFontRequestRunLoopSource"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/owed_symbols.cmake")

@@ -735,4 +735,14 @@ CGPathRef CTFontCreatePathForGlyph(CTFontRef font, CGGlyph glyph, const CGAffine
  * INSTALLED faces with a registration scope. The engine behind CGFont can enumerate and register faces
  * (cg_font_enumerate, cg_font_register, cg_font_is_registered), so the tier that answers them is buildable --
  * it is just not this one, because the ordering it must impose is Apple's and not something to invent.
+ *
+ * AND ONE DOOR OF APPLE'S IS NOT EVEN DECLARED HERE, WHICH IS THE ONLY ABSENCE OF THAT KIND: `CTFontCreateWithQuickdraw-
+ * Instance`. Apple's 10.6 header declares it plainly, with no guard, and this library does not declare it at all --
+ * so a caller does not get a link error, they get nothing to compile against, WHICH IS A LOUDER ABSENCE AND A WORSE ONE
+ * TO LEAVE UNSAID. THE REASON IS A DRAWING SYSTEM AND NOT A TIER: QuickDraw is the Macintosh-era drawing system, Agora
+ * is a desktop environment that does not have it, and the door speaks in its terms.
+ *
+ * RECORDED HERE RATHER THAN LEFT OUT, because of what this tree's rules actually say: owed doors are DECLARED, with a
+ * reason each, so that reaching for one gets a link error rather than a guess. A door that is not declared has left the
+ * mechanism entirely, and an omission with no note is the one kind of absence that cannot be checked by anybody later.
  * =============================================================================================== */

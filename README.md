@@ -484,4 +484,12 @@ ctest --test-dir build
   was **leaked on the reply path**; and the blocker — **A MATCHED FACE'S ATTRIBUTES CARRY `kCTFontURLAttribute`, A
   `CFURL`, AND A PROPERTY LIST CANNOT HOLD ONE**, so the reply never encoded at all. The wire now carries
   **property-list types and nothing else**, crossing a URL as its string. MEASURED: `100% tests passed, 0 tests failed out of 2` over `text: 30 of 30 cases passed, 0 failed`, **137 public doors**,
-  `owed` at **1** — the door itself, waiting on its transport and on one build flag.
+  `owed` at **1** — the door itself, waiting on its transport and on one build flag.- **AND THE `owed` TEST WAS BLIND TO TWENTY-TWO DECLARED DOORS — FOUND BY COMPARING APPLE'S HEADERS WITH OURS, WHICH
+  IS THE CHECK THE LIBRARY DID NOT HAVE.** `nm -D` on the built library against Apple's 15 `CT*.h` gives an arithmetic
+  that closes: **151 Apple-declared names, 127 defined, 24 unaccounted — 23 declared here and undefined, plus 1 Apple
+  declares and we never mention** (`CTFontCreateWithQuickdrawInstance`, now recorded in `CTFont.c` with its reason: a
+  drawing system Agora does not have). ALL 23 ARE HONESTLY DOCUMENTED — `CTFont.c`'s owed block names twenty-two of
+  them with a checkable reason each: the font-table readers (`fvar`, `avar`, `feat`, `post`, raw `CTFontCopyTable`) and
+  the doors where a SYSTEM CHOOSES A FACE (UI roles, cascade/fallback). WHAT WAS WRONG WAS THE GUARD: the `owed` test
+  named **one** of the twenty-three, so a door that quietly acquired a definition would have passed it. The list is now
+  all twenty-three. MEASURED: `text: 30 of 30 cases passed, 0 failed`, `owed` **23** names.
