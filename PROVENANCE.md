@@ -953,3 +953,36 @@ MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 wi
 `CTFontGetSymbolicTraits` in the commit that defined it — and NOT BEFORE, which this unit had to learn: an earlier
 attempt in the same session removed the guard entry while the door was still undefined, and put it back before anything
 was built. THE DOOR AND THE GUARD MOVE IN ONE COMMIT, DOOR FIRST.
+**The variation instance, and the font-creation bug it exposed (2026-10-11).** `CTFontCopyVariation` is DEFINED, and it
+needed no table at all, because ITS OWED REASON WAS WRONG ABOUT IT. The reason said the variation doors were "the `fvar`
+and `avar` tables"; APPLE'S OWN WORDS SAY OTHERWISE — this door returns "the CURRENT VARIATION INSTANCE as a dictionary"
+while the axes door returns "an ARRAY of variation AXES" — AND AN INSTANCE IS A CHOICE WHERE AN AXIS IS A CAPABILITY. The
+choice is the descriptor's, and this tier has held a descriptor since it began. `fvar` is still owed, for the axes door,
+and the owed block now says so with a note that no variable font is installed on this machine, so a case there could
+only exercise the no-`fvar` path.
+
+**AND ONE BOUNDARY IS RECORDED RATHER THAN IMPLIED BY THE DOOR'S PRESENCE: THIS TIER CAN REPORT THE INSTANCE IT WAS ASKED
+FOR AND CANNOT APPLY IT.** Nothing in the seam sets a variation coordinate on a face, so the glyphs a caller draws from
+such a font are the DEFAULT instance's. The door answers what the font REPRESENTS, which is honest, and that is not the
+same as what it RENDERS, which is a capability the engine here does not have — a caller who needs the applied instance
+needs a seam door that sets coordinates, and there is none. AND A FONT WITH NO INSTANCE ANSWERS NULL RATHER THAN AN EMPTY
+DICTIONARY: Apple's header describes the answer for a font that has one and says nothing about one that has not, so this
+is a CHOICE, recorded as one, on the grounds that "there is none" is said more plainly by NULL.
+
+**AND THE DOOR EXPOSED A REAL BUG IN FONT CREATION, WHICH IS THE PART WORTH CARRYING FORWARD.**
+`CTFontCreateWithFontDescriptor` read the NAME out of the caller's descriptor and called `CTFontCreateWithName`, LETTING
+EVERY OTHER ATTRIBUTE FALL — against this file's own struct, whose field says "RETAINED: what this font was asked for"
+while the code did the opposite. WHAT IT COST WAS EVERY ATTRIBUTE THAT IS NOT A NAME: a variation instance, a feature
+setting, a trait request, all discarded on the way in, and `CTFontCopyVariation` is simply THE FIRST DOOR THAT COULD SHOW
+IT. The font now keeps THE CALLER'S ATTRIBUTES MERGED WITH THE SIZE IT ACTUALLY RESOLVED — from the font rather than from
+the parameter, because the parameter is allowed to be 0.0 and the size the font resolved is the truth then. THE FIELD IS
+ASSIGNED AFTER CREATION, which is safe HERE and nowhere else: the font has not been returned to anybody, and fonts are
+immutable once visible, which is why nothing else in the file assigns that field.
+
+**AND ONE PROCESS CORRECTION IS RECORDED, because it happened twice in two units**: the `owed` guard entry for a door
+must move IN THE SAME SCRIPT that defines it, sequenced after the write — an earlier attempt in this session dropped a
+guard entry while its door was still undefined (twice), leaving a tree whose guard and truth disagreed until the next
+step noticed. THE RULE IS NOW MECHANICAL RATHER THAN REMEMBERED: door first, guard second, one script, asserted anchors.
+
+MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with NO compiler diagnostic at all; a bare
+`ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over `text: 35 of 35 cases passed, 0 failed`; and the `owed` guard is down to **16** names.

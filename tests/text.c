@@ -3417,6 +3417,70 @@ static int case_font_symbolic_traits(void)
 	return g_fail - before;
 }
 
+/* THE CURRENT VARIATION INSTANCE, WHICH IS A CHOICE RATHER THAN A CAPABILITY: it needs no `fvar` table, because it is
+ * the variation dictionary the font was ASKED FOR, and the font has been carrying its descriptor all along.
+ *
+ * AND THE CASE HOLDS BOTH DIRECTIONS OF THAT, because either one alone is passable by accident: a font asked for NOTHING
+ * must report nothing, and a font asked for an instance must hand back THE SAME DICTIONARY -- compared with CFEqual
+ * against the one that went in, so a door that invented a dictionary would fail rather than merely differ. */
+static int case_font_variation(void)
+{
+	int before = g_fail;
+	CTFontRef plain = test_font(12.0);
+	CFMutableDictionaryRef attrs, variation;
+	CFNumberRef axis, weight;
+	CTFontDescriptorRef descriptor;
+	CTFontRef asked;
+	CFDictionaryRef back;
+	int tag = 0x77676874;	/* 'wght', the four-character axis code Apple's keys hold */
+	int value = 700;
+	int answered_nothing;
+
+	check(plain != NULL, "no font, so there is no instance to ask about");
+	if (plain == NULL) {
+		return g_fail - before;
+	}
+	answered_nothing = (CTFontCopyVariation(plain) == NULL);
+	check(answered_nothing, "a font asked for no instance reported one anyway");
+
+	attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					  &kCFTypeDictionaryValueCallBacks);
+	variation = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					      &kCFTypeDictionaryValueCallBacks);
+	axis = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &tag);
+	weight = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &value);
+	check(attrs != NULL && variation != NULL && axis != NULL && weight != NULL,
+	      "the test could not make its instance");
+	if (attrs == NULL || variation == NULL || axis == NULL || weight == NULL) {
+		return g_fail - before;
+	}
+	CFDictionarySetValue(variation, axis, weight);
+	CFRelease(axis);
+	CFRelease(weight);
+	CFDictionarySetValue(attrs, kCTFontNameAttribute, CFSTR("DejaVuSansMono-Bold"));
+	CFDictionarySetValue(attrs, kCTFontVariationAttribute, variation);
+	descriptor = CTFontDescriptorCreateWithAttributes(attrs);
+	asked = (descriptor != NULL) ? CTFontCreateWithFontDescriptor(descriptor, 12.0, NULL) : NULL;
+	check(asked != NULL, "a descriptor with a name and an instance could not make a font");
+	if (asked != NULL) {
+		back = CTFontCopyVariation(asked);
+		check(back != NULL, "a font asked for an instance reported none");
+		check(back != NULL && CFEqual(back, variation),
+		      "the instance that came back is not the one that went in");
+		if (back != NULL) {
+			CFRelease(back);
+		}
+		CFRelease(asked);
+	}
+	check(CTFontCopyVariation(NULL) == NULL, "a NULL font produced an instance");
+	if (descriptor != NULL) {
+		CFRelease(descriptor);
+	}
+	CFRelease(variation);
+	CFRelease(attrs);
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -3452,6 +3516,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "A table copies as the file holds it, and the directory agrees", case_font_tables },
 	{ "The underline metrics come out of `post`, scaled to the point size", case_font_post_metrics },
 	{ "The symbolic traits come out of OS/2, head and post", case_font_symbolic_traits },
+	{ "A variation instance is the choice the font was asked for", case_font_variation },
 };
 
 int main(void)

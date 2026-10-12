@@ -556,4 +556,20 @@ ctest --test-dir build
   three things, and the third keeps the other two honest: the loaded face is named `-Bold` so bold **must** be set; the
   door **must** agree with `OS/2` and `head` recomputed from their raw bytes; and **the tables must actually state it**,
   since a check that passes with both sides silent proves nothing. MEASURED: `100% tests passed, 0 tests failed out of 2` over `text: 34 of 34 cases passed, 0 failed`, **143 public doors**, `owed`
-  **17**.
+  **17**.- **AND `CTFontCopyVariation` IS DEFINED — WITHOUT A TABLE, BECAUSE ITS REASON WAS WRONG ABOUT IT.** The reason said the
+  variation doors were *"the `fvar` and `avar` tables"*; **Apple's own words say otherwise**: this door returns *"the
+  current variation **instance**"*, while the axes door returns *"an array of variation **axes**"* — **an instance is a
+  CHOICE and an axis is a CAPABILITY**, and the choice is the descriptor's, which this tier has been holding all along.
+  `fvar` is still owed for the axes door, and the owed block now says so — **with a note for whoever takes it: no variable
+  font is installed here, so a case could only exercise the no-`fvar` path.**
+- **AND ONE BOUNDARY IS RECORDED RATHER THAN IMPLIED BY THE DOOR'S PRESENCE: this tier can REPORT the instance it was
+  asked for and CANNOT APPLY it.** Nothing in the seam sets a variation coordinate on a face, so the glyphs a caller
+  draws are the **default** instance's. The door answers what the font *represents* — honest — and that is not the same
+  as what it *renders*, which needs a seam door that does not exist. A font with no instance answers **NULL** rather
+  than an empty dictionary, a choice recorded as one.
+- **AND THE DOOR EXPOSED A REAL BUG IN FONT CREATION**: `CTFontCreateWithFontDescriptor` read the **name** out of the
+  caller's descriptor and let every other attribute fall — **against this file's own struct, whose field says "RETAINED:
+  what this font was asked for."** What it cost was **every attribute that is not a name**: a variation instance, a
+  feature setting, a trait request. The font now keeps **the caller's attributes merged with the size it actually
+  resolved** (from the font, not the parameter, because the parameter is allowed to be `0.0`). MEASURED: `100% tests passed, 0 tests failed out of 2` over `text: 35 of 35 cases passed, 0 failed`,
+  **144 public doors**, `owed` **16**.

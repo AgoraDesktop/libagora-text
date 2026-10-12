@@ -205,6 +205,47 @@ CTFontRef CTFontCreateWithFontDescriptor(CTFontDescriptorRef descriptor, CGFloat
 		return NULL;
 	}
 	font = CTFontCreateWithName((CFStringRef)name, size, matrix);
+	if (font != NULL) {
+		/* AND THE DESCRIPTOR THE FONT WAS ASKED WITH IS KEPT, WHICH THIS DOOR USED TO THROW AWAY -- A BUG AGAINST THIS
+		 * FILE'S OWN STRUCT, whose field says "RETAINED: what this font was asked for" while the code above took the
+		 * NAME out of the caller's descriptor and let the rest fall. WHAT IT COST WAS EVERY ATTRIBUTE THAT IS NOT A
+		 * NAME: a variation instance, a feature setting, a trait request -- all of them discarded on the way in, and
+		 * `CTFontCopyVariation` is simply the first door that could show it.
+		 *
+		 * THE MERGE IS THE CALLER'S ATTRIBUTES PLUS THE SIZE THE FONT ACTUALLY HAS, and the size comes from the FONT
+		 * rather than from the parameter because the parameter is allowed to be 0.0, in which case the size the font
+		 * resolved is the truth and 0.0 is not. A descriptor for a font should describe that font.
+		 *
+		 * THE FIELD IS ASSIGNED AFTER CREATION, WHICH IS SAFE HERE AND NOWHERE ELSE: this font has not been returned to
+		 * anybody yet, so no other thread can reach it, and fonts are immutable once they are visible -- which is why
+		 * nothing else in this file assigns this field at all. */
+		struct __CTFont *created = (struct __CTFont *)font;
+		CFDictionaryRef given = (CFDictionaryRef)CTFontDescriptorCopyAttributes(descriptor);
+		CFMutableDictionaryRef asked = (given != NULL)
+						       ? CFDictionaryCreateMutableCopy(kCFAllocatorDefault, 0, given)
+						       : NULL;
+		CFNumberRef point_size;
+
+		if (given != NULL) {
+			CFRelease(given);
+		}
+		if (asked != NULL) {
+			point_size = CFNumberCreate(kCFAllocatorDefault, kCFNumberCGFloatType, &created->size);
+			if (point_size != NULL) {
+				CFDictionarySetValue(asked, kCTFontSizeAttribute, point_size);
+				CFRelease(point_size);
+			}
+			if (created->descriptor != NULL) {
+				CTFontDescriptorRef merged = CTFontDescriptorCreateWithAttributes(asked);
+
+				if (merged != NULL) {
+					CFRelease(created->descriptor);
+					created->descriptor = merged;
+				}
+			}
+			CFRelease(asked);
+		}
+	}
 	CFRelease(name);
 	return font;
 }
@@ -962,6 +1003,44 @@ CFArrayRef CTFontCopyAvailableTables(CTFontRef font, CTFontTableOptions options)
 	return array;
 }
 
+/* THE CURRENT VARIATION INSTANCE, WHICH NEEDS NO TABLE AT ALL -- AND THE OWED REASON NAMED TWO OF THEM, WHICH IS WHY
+ * THIS COMMIT CORRECTS IT RATHER THAN QUIETLY IMPLEMENTING THE DOOR.
+ *
+ * APPLE'S OWN WORDS SETTLE WHICH DOOR NEEDS WHAT: `CTFontCopyVariation` "returns the CURRENT VARIATION INSTANCE as a
+ * dictionary", while `CTFontCopyVariationAxes` returns "an ARRAY of variation AXES". AN INSTANCE IS A CHOICE AND AN AXIS
+ * IS A CAPABILITY: the axes come out of the `fvar` table, which this library still owes, and the INSTANCE is the
+ * variation dictionary the font was ASKED FOR, which this tier has been storing since it began holding the descriptor it
+ * was made from. The keys are CFNumbers holding four-character axis codes, which is what Apple documents and what a
+ * caller passes in.
+ *
+ * AND ONE BOUNDARY IS RECORDED HERE RATHER THAN IMPLIED BY THE DOOR'S PRESENCE: THIS TIER CAN REPORT THE INSTANCE IT WAS
+ * ASKED FOR AND CANNOT APPLY IT. Nothing in the seam sets a variation coordinate on the face, so the glyphs a caller
+ * draws from such a font are the DEFAULT instance's -- this door answers what the font REPRESENTS, which is honest, and
+ * that is not the same as what the font RENDERS, which is a capability the engine here does not have. A caller who needs
+ * the applied instance needs a seam door that sets coordinates, and there is none.
+ *
+ * AND A FONT WITH NO INSTANCE ANSWERS NULL RATHER THAN AN EMPTY DICTIONARY, WHICH IS A CHOICE AND IS RECORDED AS ONE:
+ * Apple's header describes the answer for a font that HAS an instance and says nothing about one that has not, and
+ * "there is none" is said more plainly by NULL than by a dictionary with no keys in it. */
+CFDictionaryRef CTFontCopyVariation(CTFontRef font)
+{
+	const struct __CTFont *f = (const struct __CTFont *)font;
+	CFTypeRef variation;
+
+	if (f == NULL || f->descriptor == NULL) {
+		return NULL;
+	}
+	variation = CTFontDescriptorCopyAttribute(f->descriptor, kCTFontVariationAttribute);
+	if (variation == NULL) {
+		return NULL;
+	}
+	if (CFGetTypeID(variation) != CFDictionaryGetTypeID()) {
+		CFRelease(variation);	/* AN INSTANCE THAT IS NOT A DICTIONARY is not one this door can answer with. */
+		return NULL;
+	}
+	return (CFDictionaryRef)variation;	/* +1, from the descriptor's own copy door. */
+}
+
 /* THE FACE'S CHARACTER SET: EVERY CODE UNIT THE FACE MAPS TO A GLYPH, AND IT IS ANSWERED BY THE SAME STEP
  * `CTFontGetGlyphsForCharacters` USES, ASKED EXHAUSTIVELY RATHER THAN ONE CHARACTER AT A TIME. The seam maps a BATCH
  * of code units in one call, so the whole basic multilingual plane is SIXTEEN calls and no table access is needed --
@@ -1049,8 +1128,15 @@ CFCharacterSetRef CTFontCopyCharacterSet(CTFontRef font)
  * `libagora-drawing` grew `cg_font_copy_table` and `cg_font_table_tags`, which hand back the file's bytes and the
  * directory. WHAT EACH OF THESE STILL NEEDS IS THE FORMAT PARSING ON THIS SIDE, one table at a time:
  *
- *   CTFontCopyVariationAxes, CTFontCopyVariation  the `fvar` and `avar` tables: the axis records with their names,
- *                                                 ranges and default values, and the normalised coordinates.
+ * AND `CTFontCopyVariation` HAS LEFT THIS LIST BECAUSE ITS REASON WAS WRONG ABOUT IT, not because a table arrived:
+ * Apple's own words are that it returns "the CURRENT VARIATION INSTANCE", while the AXES door returns "an array of
+ * variation AXES" -- AN INSTANCE IS A CHOICE AND AN AXIS IS A CAPABILITY, and the choice has been stored in the font's
+ * descriptor since this tier began holding one. See the door for the boundary that goes with it.
+ *
+ *   CTFontCopyVariationAxes                       the `fvar` table: the axis records with their names, ranges and
+ *                                                 default values, and the `avar` table's normalised coordinates.
+ *                                                 NOTE FOR WHOEVER TAKES IT: no variable font is installed on this
+ *                                                 machine, so a case here could only exercise the NO-`fvar` path.
  *   CTFontCopyFeatures, CTFontCopyFeatureSettings  the `feat` table: the feature records and their exclusive
  *                                                 settings, versioned like the rest.
  * AND `CTFontGetUnderlinePosition` AND `...Thickness` HAVE LEFT THIS LIST TOO, as the first doors here to read a table
