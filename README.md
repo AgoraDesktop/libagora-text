@@ -524,4 +524,19 @@ ctest --test-dir build
   and `CTFontCopyVariation`), `feat` (features), `post` (the underline metrics) and `OS/2`+`head` (traits) all read
   through the same two seam doors and each needs the table's **versioned binary layout** understood on this side. The
   owed block now says exactly that, one table at a time. MEASURED: `100% tests passed, 0 tests failed out of 2` over `text: 32 of 32 cases passed, 0 failed`, **140 public doors**, `owed` down to
-  **20**.
+  **20**.- **AND THE FIRST TWO DOORS THAT READ A TABLE AND INTERPRET IT: `CTFontGetUnderlinePosition` and `…Thickness`, out of
+  `post`.** Their reason said *"the `post` table; the seam reports no underline metrics"* — the seam reads the table now,
+  and **the two fields sit at fixed offsets 8 and 10 in EVERY version of `post`** (versions differ in what *follows*
+  them), so **there is no version check to get wrong** — unlike `OS/2`, whose version decides whether a field exists at
+  all. **The parse is two big-endian signed 16-bit values**, which is the one thing about tables that is easy to get
+  wrong and impossible to notice: a little-endian read gives a *plausible* number, not an error.
+- **AND THE CASE DOES THE INTERPRETING ITSELF, which is the only way to hold a parser to anything**: it reads `post`
+  through the table door, takes the two values at their offsets big-endian, scales them by the point size itself, and
+  requires both metric doors to agree. **A parser checked against its own output checks nothing.** The case also holds
+  that the answers are **scaled and not raw** — a font unit is a fraction of a point, so a metric in the tens would mean
+  the scale was never applied.
+- **AND THE SIGN IS THE TABLE'S, NOT INVERTED, AND THAT IS RECORDED WHERE THE DOORS ARE**: a negative `underlinePosition`
+  places the line **below the baseline**, which is `post`'s own convention and how the value is written down. Apple's
+  header says the door returns *"the scaled underline position"* and says nothing about a sign — so inverting it would be
+  a guess about a convention neither document states, and a caller who wants the other sign is one subtraction away.
+  MEASURED: `100% tests passed, 0 tests failed out of 2` over `text: 33 of 33 cases passed, 0 failed`, **142 public doors**, `owed` down to **18**.

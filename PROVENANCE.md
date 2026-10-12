@@ -881,3 +881,36 @@ table it names.
 MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with NO compiler diagnostic at all; a
 bare `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over `text: 32 of 32 cases passed, 0 failed`; and the `owed` guard — which names every declared-but-undefined door —
 is down to **20** names, having dropped BOTH table doors in the commit that defined them.
+**The `post` metrics, the first doors here to read a table and interpret it (2026-10-11).**
+`CTFontGetUnderlinePosition` and `CTFontGetUnderlineThickness` are DEFINED, and their reason — "the `post` table; the
+seam reports no underline metrics" — was already false when this commit began, because the seam reads tables now. THE
+OMITTED HALF OF THE REASON WAS THE INTERPRETATION, and that is what this commit supplies.
+
+**AND THE INTERPRETATION IS SMALL ON PURPOSE, WHICH IS WHY THIS PAIR WENT FIRST.** `underlinePosition` and
+`underlineThickness` sit at FIXED OFFSETS 8 AND 10 IN EVERY VERSION OF THE `post` TABLE — the versions differ in what
+FOLLOWS them — so THERE IS NO VERSION CHECK TO GET WRONG, unlike `OS/2`, whose version decides whether a field exists at
+all and whose readers in this tree already have to say so. The parse is two values, and the whole door is a table read, a
+big-endian signed 16-bit read, and the scale every other metric in the library uses.
+
+**AND THE BYTE ORDER IS THE PART THAT WOULD HAVE BEEN INVISIBLE IF IT WERE WRONG**: sfnt is BIG-ENDIAN, so a
+little-endian read of these fields gives a PLAUSIBLE NUMBER rather than an error, and nothing downstream would complain
+about a metric that is merely wrong. `fn_table_s16` does the read and says why in its own comment; it also SIGN EXTENDS
+BY HAND rather than through a typedef, because the two bytes are big-endian but their SIGN is the format's.
+
+**AND THE SIGN IS THE TABLE'S AND IS NOT INVERTED, RECORDED WHERE THE DOORS ARE**: a negative `underlinePosition` places
+the line BELOW the baseline, which is the `post` table's own convention and the way the value is written down. Apple's
+header says the door returns "the scaled underline position" and says NOTHING about a sign, so inverting it would be a
+guess about a convention neither document states — and a caller who wants the other sign has an answer one subtraction
+away. "SCALED" MEANS THE POINT SIZE, which is this library's rule for every metric: the matrix moves GLYPHS and not
+metrics, which the font object's own fields say and which every metric door here already does.
+
+**AND THE CASE DOES THE INTERPRETING ITSELF, WHICH IS THE ONLY WAY TO HOLD A PARSER TO ANYTHING**: it reads the `post`
+table through the table door, takes the two values at their fixed offsets in BIG-ENDIAN, SCALES THEM BY THE POINT SIZE
+ITSELF, and requires both metric doors to agree with that arithmetic — A PARSER CHECKED AGAINST ITS OWN OUTPUT CHECKS
+NOTHING. It also holds that the answers are SCALED AND NOT RAW (a font unit is a fraction of a point, so a metric in the
+tens would mean the scale was never applied), that the thickness is positive, and that a NULL font answers 0 and not a
+metric.
+
+MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with NO compiler diagnostic at all; a bare
+`ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over `text: 33 of 33 cases passed, 0 failed`; and the `owed` guard is down to **18** names, having dropped both `post`
+doors in the commit that defined them.

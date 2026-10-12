@@ -20,6 +20,7 @@
  * rather than after them for that reason. */
 #include <CoreText/CoreText.h>
 #include <CoreFoundation/CFPropertyList.h>
+#include <math.h>
 #include <CoreFoundation/CFNumber.h>
 #include <CoreFoundation/CFData.h>
 #include <CoreText/CTFontService_internal.h>
@@ -3292,6 +3293,76 @@ static int case_font_tables(void)
 	return g_fail - before;
 }
 
+/* THE `post` METRICS, WHICH ARE THE FIRST OWED DOORS TO READ A TABLE AND INTERPRET IT.
+ *
+ * AND THE CASE DOES THE INTERPRETING ITSELF, WHICH IS THE ONLY WAY TO HOLD A PARSER TO ANYTHING: it reads the `post`
+ * table through the table door, takes the two values at their fixed offsets BOTH BIG-ENDIAN, scales them by the point
+ * size itself, and requires the two metric doors to agree. A parser checked against its own output checks nothing. */
+static int case_font_post_metrics(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(12.0);
+	CFDataRef post;
+	const UInt8 *bytes;
+	CGFloat size, scale, position, thickness;
+	int raw_position, raw_thickness;
+	CFIndex length;
+
+	check(font != NULL, "no font, so there are no underline metrics");
+	if (font == NULL) {
+		return g_fail - before;
+	}
+	post = CTFontCopyTable(font, (CTFontTableTag)kCTFontTablePost, kCTFontTableOptionNoOptions);
+	check(post != NULL, "the `post` table could not be copied");
+	if (post == NULL) {
+		return g_fail - before;
+	}
+	length = CFDataGetLength(post);
+	bytes = (const UInt8 *)CFDataGetBytePtr(post);
+	check(bytes != NULL && length >= 12,
+	      "`post` came back as %ld bytes, and its first four fields need twelve", (long)length);
+	if (bytes == NULL || length < 12) {
+		CFRelease(post);
+		return g_fail - before;
+	}
+	/* THE TWO FIELDS AS THE FORMAT WRITES THEM: signed, and big-endian. */
+	raw_position = (int)(((unsigned)bytes[8] << 8) | (unsigned)bytes[9]);
+	raw_position = (raw_position >= 0x8000) ? raw_position - 0x10000 : raw_position;
+	raw_thickness = (int)(((unsigned)bytes[10] << 8) | (unsigned)bytes[11]);
+	raw_thickness = (raw_thickness >= 0x8000) ? raw_thickness - 0x10000 : raw_thickness;
+	CFRelease(post);
+
+	check(CTFontGetUnitsPerEm(font) > 0, "the face reports %u units per em", CTFontGetUnitsPerEm(font));
+	check(CTFontGetUnitsPerEm(font) > 0, "no units per em, so nothing can be scaled");
+	if (CTFontGetUnitsPerEm(font) == 0) {
+		return g_fail - before;
+	}
+	size = CTFontGetSize(font);
+	scale = size / (CGFloat)CTFontGetUnitsPerEm(font);
+	position = CTFontGetUnderlinePosition(font);
+	thickness = CTFontGetUnderlineThickness(font);
+
+	/* THE DOORS AGREE WITH THE TABLE, to the precision a scaled metric can be compared at. */
+	check(fabs((double)position - (double)((CGFloat)raw_position * scale)) < 0.0001,
+	      "the position door answered %g where the table's %d scaled to %g points is %g",
+	      (double)position, raw_position, (double)size, (double)((CGFloat)raw_position * scale));
+	check(fabs((double)thickness - (double)((CGFloat)raw_thickness * scale)) < 0.0001,
+	      "the thickness door answered %g where the table's %d scaled to %g points is %g",
+	      (double)thickness, raw_thickness, (double)size, (double)((CGFloat)raw_thickness * scale));
+
+	/* AND THEY ARE SCALED AND NOT RAW: a font unit is a fraction of a point at any real size, so a metric in the TENS
+	 * would mean the scale was never applied -- which is the failure this line exists to catch. */
+	check(fabs((double)position) < (double)size && fabs((double)thickness) < (double)size,
+	      "the metrics are not scaled to the point size (%g and %g at %g points)",
+	      (double)position, (double)thickness, (double)size);
+	check(thickness > 0.0, "the face states an underline thickness of %g, and a face that draws one states a positive size",
+	      (double)thickness);
+
+	check(CTFontGetUnderlinePosition(NULL) == 0.0, "a NULL font produced an underline position");
+	check(CTFontGetUnderlineThickness(NULL) == 0.0, "a NULL font produced an underline thickness");
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -3325,6 +3396,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The two halves of the font service speak the same wire", case_font_service_wire },
 	{ "The character set agrees with the mapping, code unit by code unit", case_font_character_set },
 	{ "A table copies as the file holds it, and the directory agrees", case_font_tables },
+	{ "The underline metrics come out of `post`, scaled to the point size", case_font_post_metrics },
 };
 
 int main(void)

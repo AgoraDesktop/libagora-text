@@ -492,6 +492,74 @@ CGFloat CTFontGetCapHeight(CTFontRef font)
 	return (f == NULL) ? 0.0 : (CGFloat)CGFontGetCapHeight(f->graphics) * ct_font_scale(f);
 }
 
+/* A SIGNED 16-BIT VALUE OUT OF A TABLE, IN THE BYTE ORDER sfnt SPECIFIES -- BIG-ENDIAN, WHICH IS THE ONE THING ABOUT
+ * FONT TABLES THAT IS EASY TO GET WRONG AND IMPOSSIBLE TO NOTICE: a little-endian read of a two-byte field gives a
+ * PLAUSIBLE number rather than an error, so nothing downstream would complain. A SHORT TABLE ANSWERS 0, which is what a
+ * missing field would say too, and a caller cannot tell the two apart -- the same choice the seam's own table door makes
+ * about a missing table. */
+static int fn_table_s16(CFDataRef table, CFIndex offset)
+{
+	const UInt8 *bytes = (table != NULL) ? CFDataGetBytePtr(table) : NULL;
+	unsigned raw;
+
+	if (bytes == NULL || offset < 0 || offset + 2 > CFDataGetLength(table)) {
+		return 0;
+	}
+	raw = ((unsigned)bytes[offset] << 8) | (unsigned)bytes[offset + 1];
+	/* SIGN EXTENDED BY HAND RATHER THAN THROUGH A TYPEDEF: the two bytes are big-endian, but their SIGN is the
+	 * format's, and `post`'s underline position is NEGATIVE for a baseline offset in the usual case. */
+	return (raw >= 0x8000u) ? (int)raw - 0x10000 : (int)raw;
+}
+
+/* THE `post` METRICS, WHICH ARE THE FIRST DOORS IN THIS LIBRARY TO READ A TABLE AND INTERPRET IT.
+ *
+ * AND THE INTERPRETATION IS SMALL ON PURPOSE: `underlinePosition` and `underlineThickness` sit at FIXED OFFSETS 8 AND 10
+ * IN EVERY VERSION OF THE `post` TABLE -- version 1 and 2 differ in what FOLLOWS them -- so there is no version check
+ * to get wrong, unlike `OS/2`, whose version decides whether a field exists at all.
+ *
+ * THE SIGN IS THE TABLE'S AND THIS DOOR DOES NOT INVERT IT: a negative `underlinePosition` places the line BELOW the
+ * baseline, which is the `post` table's own convention and the way the value is written down. Apple's header says the
+ * door returns "the scaled underline position" and says nothing about a sign, so inverting it would be a guess about a
+ * convention neither document states -- and a caller who wants the other sign has an answer that is one subtraction
+ * away. AND "SCALED" IS THE POINT SIZE, WHICH IS THIS LIBRARY'S RULE FOR EVERY METRIC: the matrix moves GLYPHS and not
+ * metrics (see the font object's own fields), so these are the font units times `ct_font_scale`, like every other
+ * metric here. */
+CGFloat CTFontGetUnderlinePosition(CTFontRef font)
+{
+	const struct __CTFont *f = (const struct __CTFont *)font;
+	CFDataRef post;
+	int value;
+
+	if (f == NULL) {
+		return 0.0;
+	}
+	post = CTFontCopyTable(font, (CTFontTableTag)kCTFontTablePost, kCTFontTableOptionNoOptions);
+	if (post == NULL) {
+		return 0.0;	/* A FACE WITH NO `post` TABLE STATES NOTHING, and 0 is the only honest answer. */
+	}
+	value = fn_table_s16(post, 8);
+	CFRelease(post);
+	return (CGFloat)value * ct_font_scale(f);
+}
+
+CGFloat CTFontGetUnderlineThickness(CTFontRef font)
+{
+	const struct __CTFont *f = (const struct __CTFont *)font;
+	CFDataRef post;
+	int value;
+
+	if (f == NULL) {
+		return 0.0;
+	}
+	post = CTFontCopyTable(font, (CTFontTableTag)kCTFontTablePost, kCTFontTableOptionNoOptions);
+	if (post == NULL) {
+		return 0.0;
+	}
+	value = fn_table_s16(post, 10);
+	CFRelease(post);
+	return (CGFloat)value * ct_font_scale(f);
+}
+
 CGFloat CTFontGetXHeight(CTFontRef font)
 {
 	const struct __CTFont *f = (const struct __CTFont *)font;
@@ -873,8 +941,10 @@ CFCharacterSetRef CTFontCopyCharacterSet(CTFontRef font)
  *                                                 ranges and default values, and the normalised coordinates.
  *   CTFontCopyFeatures, CTFontCopyFeatureSettings  the `feat` table: the feature records and their exclusive
  *                                                 settings, versioned like the rest.
- *   CTFontGetUnderlinePosition, ...Thickness      the `post` table: `underlinePosition` and `underlineThickness`,
- *                                                 and the SIGN CONVENTION Apple's numbers follow.
+ * AND `CTFontGetUnderlinePosition` AND `...Thickness` HAVE LEFT THIS LIST TOO, as the first doors here to read a table
+ * and interpret it. Their reason said "the `post` table; the seam reports no underline metrics" -- the seam reads the
+ * table now, and the two fields sit at FIXED OFFSETS in every `post` version, so the parse is two big-endian int16s and
+ * no version check. The sign is the table's, which is recorded where the doors are.
  *   CTFontGetSlantAngle                           Apple's slant is the GLYPH-SPACE slant, not the italic
  *                                                 angle Core Graphics reports; they are different numbers.
  *   CTFontGetVerticalTranslationsForGlyphs        needs the vertical metrics the advances door also lacks.
