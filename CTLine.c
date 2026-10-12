@@ -230,16 +230,19 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 /* =================================================================================================
  * CREATION.
  * =============================================================================================== */
-/* THE FACE OUT OF AN ATTRIBUTED STRING, AND THE ONE PLACE THAT NAMES THE KEY. Apple's key is
- * `kCTFontAttributeName`, declared in `CTStringAttributes.h` — MUCH LATER in the include order this repository writes
- * the headers in, so the constant does not exist. THE VALUE IS WRITTEN HERE RATHER THAN A CONSTANT INVENTED:
- * "NSFontAttributeName" is the value that header will carry (the rule this tree measured on the AppKit's crossing
- * dictionaries), and THIS FUNCTION IS WHAT GOES AWAY the day `CTStringAttributes.h` lands. IT IS ALSO WHAT A
- * TYPESETTER READS THE KEY THROUGH, which is why it is declared in `CTLine_internal.h` instead of being kept to this
- * file: one copy of a value is one thing to keep in step, and two copies are two. */
+/* THE FACE OUT OF AN ATTRIBUTED STRING, AND ONE OF THE TWO DOORS THAT NAMED A KEY BEFORE THE KEY EXISTED. This used
+ * to return a literal — "NSFontAttributeName" — with the reason written down: the constant lives in
+ * `CTStringAttributes.h`, which was later in the include order than this file, so the value was carried here as a
+ * recorded boundary and the comment said the function would go the day that header landed. IT HAS LANDED, and what
+ * the function returns is now `kCTFontAttributeName`: ONE COPY OF THE VALUE, in the header that owns it, and no
+ * inference in this file to keep in step.
+ *
+ * AND ITS VALUE IS NO LONGER AN INFERENCE EITHER: `CTStringAttributes.c` records the measurement — Apple's
+ * `NSAttributedString.h` declares `NSFontAttributeName`, and a dictionary crosses between the two frameworks — so
+ * this is the PROVEN key it always should have been. */
 CFStringRef CTLineFontAttributeName(void)
 {
-	return CFSTR("NSFontAttributeName");
+	return kCTFontAttributeName;
 }
 
 CTLineRef CTLineCreateWithAttributedString(CFAttributedStringRef string)

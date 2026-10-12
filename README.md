@@ -349,3 +349,20 @@ ctest --test-dir build
   framesetter and the frame agree about how one is built — the lines and their origins arrive **together**, because a
   frame without either is not a frame — and the arrays are **copied**, so a frame cannot be left pointing at a
   framesetter's freed stack.
+- **`CTStringAttributes` IS DECLARED AND IMPLEMENTED, AND IT RETIRED TWO RECORDED BOUNDARIES.** Fourteen attribute
+  keys and the two underline vocabularies — and `kCTFontAttributeName` and `kCTParagraphStyleAttributeName` are now
+  read from **this** header by `CTLine.c` and `CTTypesetter.c`, which each carried the value as a **local literal**
+  because the header did not exist. The comments that said *"this function goes away the day `CTStringAttributes.h`
+  lands"* have been **paid**: the value exists in **exactly one place**, and the suite's substitution was checked by
+  every earlier case still passing. MEASURED: `text: 22 of 22 cases passed, 0 failed`.
+- **AND TWELVE OF THE FOURTEEN KEYS ARE NOW PROVEN RATHER THAN INFERRED.** The crossing rule is the font descriptor's
+  — **a dictionary crosses between Core Text and the AppKit**, so a key's string must be the one the other framework
+  reads it by — and the **measurement** is Apple's own `NSAttributedString.h`, which at 10.6 declares **twenty-six**
+  `NS…AttributeName` constants. **Twelve of the fourteen pair exactly**; the two that do not are
+  `kCTForegroundColorFromContextAttributeName` and `kCTVerticalFormsAttributeName`, and each keeps the standing the
+  library's other unprovable values have. The case names all fourteen **and asserts the count of provable ones**, so a
+  key moving between standings is a deliberate act.
+- **AND THE UNDERLINE VOCABULARY HAS A GAP WORTH HOLDING.** The styles are **0x00, 0x01, 0x02 and 0x09** — so a library
+  that COUNTED the members of that enum would put `Double` at 3 and be wrong from there on — and the patterns sit in
+  the **high byte**, which is what lets a style and a pattern combine into the one number the attribute carries. The
+  case asserts the gap, the byte, and `Single | Dash == 0x0201`.

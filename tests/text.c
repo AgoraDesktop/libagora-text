@@ -30,6 +30,7 @@
 #include <CoreText/CTTypesetter.h>
 #include <CoreText/CTFrame.h>
 #include <CoreText/CTFramesetter.h>
+#include <CoreText/CTStringAttributes.h>
 
 #include <CoreFoundation/CoreFoundation.h>
 
@@ -2249,6 +2250,91 @@ static int case_frame_object(void)
 	return g_fail - before;
 }
 
+/* THE ATTRIBUTE VOCABULARY: FOURTEEN KEYS AND TWO ENUMS, held exactly as the font descriptor's keys are. TWELVE OF THE
+ * FOURTEEN ARE PROVABLE NOW — Apple's `NSAttributedString.h` declares the same name with `NS` in place of `CT`, and a
+ * dictionary crosses between the frameworks — and TWO have no counterpart there, so each key is named with the value
+ * it must have and the COUNT OF PROVABLE ONES is asserted, because a key that moved between those two standings is a
+ * deliberate act rather than a detail.
+ *
+ * AND TWO OF THESE KEYS ARE WHY THIS CASE HAS A PLACE IN THE SUITE RATHER THAN BESIDE THE OTHERS: `kCTFontAttributeName`
+ * and `kCTParagraphStyleAttributeName` were carried as LOCAL LITERALS by `CTLine.c` and `CTTypesetter.c` until this
+ * header landed, and the suite now reads them from the header like any other caller would. */
+static int case_string_attribute_keys(void)
+{
+	int before = g_fail;
+	/* AUTOMATIC, NEITHER static NOR const: these are `extern const CFStringRef` VARIABLES, so their values are not
+	 * constant expressions. The last column is the standing each key has — 1 provable, 0 inferred — and its sum is
+	 * asserted below. */
+	struct { CFStringRef key; const char *want; int provable; } keys[] = {
+		{ kCTFontAttributeName, "NSFontAttributeName", 1 },
+		{ kCTForegroundColorFromContextAttributeName, "NSForegroundColorFromContextAttributeName", 0 },
+		{ kCTKernAttributeName, "NSKernAttributeName", 1 },
+		{ kCTLigatureAttributeName, "NSLigatureAttributeName", 1 },
+		{ kCTForegroundColorAttributeName, "NSForegroundColorAttributeName", 1 },
+		{ kCTParagraphStyleAttributeName, "NSParagraphStyleAttributeName", 1 },
+		{ kCTStrokeWidthAttributeName, "NSStrokeWidthAttributeName", 1 },
+		{ kCTStrokeColorAttributeName, "NSStrokeColorAttributeName", 1 },
+		{ kCTUnderlineStyleAttributeName, "NSUnderlineStyleAttributeName", 1 },
+		{ kCTSuperscriptAttributeName, "NSSuperscriptAttributeName", 1 },
+		{ kCTUnderlineColorAttributeName, "NSUnderlineColorAttributeName", 1 },
+		{ kCTVerticalFormsAttributeName, "NSVerticalFormsAttributeName", 0 },
+		{ kCTGlyphInfoAttributeName, "NSGlyphInfoAttributeName", 1 },
+		{ kCTCharacterShapeAttributeName, "NSCharacterShapeAttributeName", 1 },
+	};
+	size_t i, j;
+	int provable = 0;
+
+	for (i = 0; i < sizeof keys / sizeof keys[0]; i++) {
+		char buf[96];
+		size_t length;
+
+		check(keys[i].key != NULL, "attribute key %zu is NULL", i);
+		if (keys[i].key == NULL) {
+			continue;
+		}
+		check(CFGetTypeID(keys[i].key) == CFStringGetTypeID(), "attribute key %zu is not a CFString", i);
+		buf[0] = '\0';
+		check(CFStringGetCString(keys[i].key, buf, (CFIndex)sizeof buf, kCFStringEncodingUTF8) &&
+		      strcmp(buf, keys[i].want) == 0,
+		      "an attribute key is \"%s\", want \"%s\"", buf, keys[i].want);
+		/* AND EVERY VALUE TAKES THE APPKIT'S FORM, which is the rule the twelve proofs are instances of: it starts
+		 * with `NS` and ends with `AttributeName`. */
+		length = strlen(keys[i].want);
+		check(length > 15 && strncmp(keys[i].want, "NS", 2) == 0 &&
+		      strcmp(keys[i].want + length - 13, "AttributeName") == 0,
+		      "an attribute key's value does not take the AppKit's form: \"%s\"", keys[i].want);
+		provable += keys[i].provable;
+		for (j = i + 1; j < sizeof keys / sizeof keys[0]; j++) {
+			if (CFEqual(keys[i].key, keys[j].key)) {
+				check(0, "attribute keys %zu and %zu are the same string", i, j);
+			}
+		}
+	}
+	check(provable == 12, "%d of the fourteen attribute keys are provable, want 12", provable);
+
+	/* THE TWO UNDERLINE VOCABULARIES, VALUES AND ALL — INCLUDING THE GAP. The styles are 0x00, 0x01, 0x02 and 0x09, so
+	 * a library that COUNTED the members of that enum would put Double at 3 and be wrong from there on; the gap is
+	 * asserted as a gap rather than left implied by the values above. */
+	check(kCTUnderlineStyleNone == 0x00 && kCTUnderlineStyleSingle == 0x01 && kCTUnderlineStyleThick == 0x02 &&
+	      kCTUnderlineStyleDouble == 0x09,
+	      "the underline styles are %d, %d, %d and %d; want 0, 1, 2 and 9",
+	      (int)kCTUnderlineStyleNone, (int)kCTUnderlineStyleSingle, (int)kCTUnderlineStyleThick,
+	      (int)kCTUnderlineStyleDouble);
+	check(kCTUnderlineStyleDouble != 3, "the underline styles were renumbered: Double is 3");
+	/* AND THE PATTERNS ARE IN THE HIGH BYTE, which is what makes a style and a pattern ONE NUMBER rather than two. */
+	check(kCTUnderlinePatternSolid == 0x0000 && kCTUnderlinePatternDot == 0x0100 &&
+	      kCTUnderlinePatternDash == 0x0200 && kCTUnderlinePatternDashDot == 0x0300 &&
+	      kCTUnderlinePatternDashDotDot == 0x0400,
+	      "the underline patterns are not in the high byte");
+	check((kCTUnderlineStyleSingle | kCTUnderlinePatternDash) == 0x0201,
+	      "a style and a pattern do not combine: 0x%04x",
+	      (unsigned)(kCTUnderlineStyleSingle | kCTUnderlinePatternDash));
+	check(sizeof(CTUnderlineStyle) == 4 && sizeof(CTUnderlineStyleModifiers) == 4,
+	      "the underline types are %zu and %zu bytes, want 4 and 4", sizeof(CTUnderlineStyle),
+	      sizeof(CTUnderlineStyleModifiers));
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -2271,6 +2357,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The typesetter's own surface, and its range rule", case_typesetter_object },
 	{ "The typesetter breaks at the width, and the paragraph style says how", case_typesetter_breaking },
 	{ "A frame fills a path, and its lines tile what it showed", case_frame_object },
+	{ "The attribute keys, twelve proven and two inferred", case_string_attribute_keys },
 };
 
 int main(void)

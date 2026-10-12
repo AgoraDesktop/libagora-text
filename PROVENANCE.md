@@ -458,3 +458,33 @@ a draw case that had asserted only "no crash" would have passed while measuring 
 MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with no compiler diagnostic at all in
 their logs; `nm -D build/libagora-text.so` lists a frame's nine doors plus the seam and a framesetter's five; and a bare
 `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over `text: 21 of 21 cases passed, 0 failed`.
+
+**`CTStringAttributes` — the attribute vocabulary, and TWO RECORDED BOUNDARIES RETIRED (2026-10-11).** Fourteen keys and
+the two underline vocabularies (`CTUnderlineStyle`, whose members are 0x00, 0x01, 0x02 and **0x09** — a gap a counting
+implementation would fall into — and `CTUnderlineStyleModifiers`, whose patterns live in the HIGH BYTE so that a style
+and a pattern combine into one number). NO DOORS AT ALL: a string attribute is a key and the value belongs to somebody
+else, so everything here is a constant or an enum.
+
+**AND THE PAYOFF IS THE TWO VALUES THAT STOPPED BEING DUPLICATED.** `CTLine.c` and `CTTypesetter.c` each carried the
+VALUE of an attribute key as a local literal — `"NSFontAttributeName"` and `"NSParagraphStyleAttributeName"` — with the
+reason written down: the constants live in `CTStringAttributes.h`, which was later in the documented include order, so
+each file read the key by a value of its own and the comment said the function would go the day that header landed. IT
+HAS LANDED: both now return `kCTFontAttributeName` and `kCTParagraphStyleAttributeName`, the values exist in EXACTLY ONE
+PLACE, and the retirement was checked by every one of the twenty-one earlier cases still passing — which is the evidence
+that a key read by a copy and a key read by the constant are the same key.
+
+**AND TWELVE OF THE FOURTEEN KEYS MOVED FROM INFERENCE TO PROOF, BY MEASUREMENT.** The rule is the font descriptor's —
+a dictionary CROSSES between Core Text and the AppKit, so the string has to be the one the other framework reads it by,
+which makes the AppKit's spelling of the same name evidence for Core Text's value. THE MEASUREMENT: Apple's
+`NSAttributedString.h` at 10.6 declares TWENTY-SIX `NS…AttributeName` constants, and TWELVE of the fourteen keys below
+pair with one exactly. THE TWO THAT DO NOT are `kCTForegroundColorFromContextAttributeName` and
+`kCTVerticalFormsAttributeName`, and each has a reason rather than an accident: the first pairs with nothing because the
+AppKit's counterpart carries an `NSColor` where Core Text carries a `CGColorRef`, and the second exists for the
+VERTICAL-text support Core Text has and the AppKit's attribute vocabulary does not name — the same support `CTFrame`'s
+progression records as not honoured here. The case names all fourteen, asserts the count of provable ones, and holds the
+underline gap and the pattern byte.
+
+MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with no compiler diagnostic at all in
+their logs; `nm -D build/libagora-text.so` lists the fourteen keys; `grep` over the library's sources finds the two
+retired VALUES in exactly one file; and a bare `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2`
+over `text: 22 of 22 cases passed, 0 failed`.

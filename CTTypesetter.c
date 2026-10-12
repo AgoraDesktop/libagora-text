@@ -26,6 +26,7 @@
 #include <CoreText/CTFont.h>
 #include <CoreText/CTLine_internal.h>
 #include <CoreText/CTParagraphStyle.h>
+#include <CoreText/CTStringAttributes.h>
 
 #include <CoreFoundation/CFCharacterSet.h>
 #include <CoreFoundation/CFRuntime.h>
@@ -40,13 +41,15 @@
 const CFStringRef kCTTypesetterOptionDisableBidiProcessing = CFSTR("CTTypesetterOptionDisableBidiProcessing");
 const CFStringRef kCTTypesetterOptionForcedEmbeddingLevel = CFSTR("CTTypesetterOptionForcedEmbeddingLevel");
 
-/* AND THE PARAGRAPH STYLE'S NAME, WHICH IS THE SECOND ATTRIBUTE KEY THIS LIBRARY HAS TO READ WITHOUT ITS CONSTANT.
- * `kCTParagraphStyleAttributeName` lives in `CTStringAttributes.h`, later in the documented include order — exactly
- * as the font's key does — so the VALUE is written here with the same recorded reason. THE LINE DOES NOT NEED THIS
- * KEY, which is why it is not in the internal header beside the font's: only a breaker asks about line break modes. */
+/* AND THE PARAGRAPH STYLE'S KEY, WHICH IS NO LONGER WRITTEN HERE. This function used to return the literal
+ * "NSParagraphStyleAttributeName", because `kCTParagraphStyleAttributeName` lives in a header this repository had not
+ * reached; THAT HEADER HAS LANDED, so the value is Apple's constant and this file no longer knows it. THE FUNCTION
+ * STAYS, and the reason is not ceremony: the line-break mode under this key is the ONE attribute this tier OBEYS, so
+ * a reader asking what a typesetter reads should find one place that says so rather than a symbol buried in a call
+ * two hundred lines down. */
 static CFStringRef ct_ts_paragraph_style_attribute(void)
 {
-	return CFSTR("NSParagraphStyleAttributeName");
+	return kCTParagraphStyleAttributeName;
 }
 
 /* =================================================================================================

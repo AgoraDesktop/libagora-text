@@ -10,16 +10,17 @@
  * implementation the typesetter owns the runs and the line is a view of them; here the two are separate objects
  * that must agree, so they agree in a header instead of one file `extern`ing what the other defines.
  *
- * THE SECOND DECLARATION IS THE ATTRIBUTE KEY, and it is here for the same reason: the key that names the font
- * inside an attributed string (`kCTFontAttributeName`) belongs to `CTStringAttributes.h`, which is LATER in the
- * include order this repository writes the headers in, so `CTLine.c` carries its VALUE as a recorded boundary. A
- * typesetter has to read the same key to know what face it is measuring, and THE VALUE MUST NOT BE WRITTEN TWICE —
- * a second copy is a second thing to keep in step — so the one copy is handed out from where it lives.
+ * THE SECOND DECLARATION IS THE ATTRIBUTE KEY, and IT IS NO LONGER WHERE THE KEY'S VALUE LIVES: `CTStringAttributes.h`
+ * has landed, so `CTLine.c` reads `kCTFontAttributeName` from it rather than carrying `"NSFontAttributeName"` as a
+ * recorded boundary. What remains here is the seam's own door — a typesetter asks a LINE what key names a font,
+ * instead of naming it itself — and this header includes the one it now needs, because a declaration that returns a
+ * value is a declaration that depends on where that value is declared.
  */
 #ifndef CORE_TEXT_CTLINE_INTERNAL_H
 #define CORE_TEXT_CTLINE_INTERNAL_H
 
 #include <CoreText/CTLine.h>
+#include <CoreText/CTStringAttributes.h>
 
 /* A LINE OVER A RANGE OF AN ATTRIBUTED STRING, which is what a typesetter makes. `range` is IN THE STRING'S OWN
  * COORDINATES and is what the line reports as its string range; the glyphs are that range's, positioned from the
@@ -27,8 +28,9 @@
  * NULL. */
 CTLineRef CTLineCreateWithAttributedStringAndRange(CFAttributedStringRef string, CFRange range);
 
-/* THE FONT ATTRIBUTE'S NAME, AS THIS LIBRARY WRITES IT. A constant, borrowed, never released — see this file's head
- * and `CTLine.c`, where its value and its reason live. */
+/* THE FONT ATTRIBUTE'S KEY, AS THIS LIBRARY DECLARES IT — `kCTFontAttributeName`, whose value is PROVABLE now that
+ * `CTStringAttributes.h` exists (the AppKit declares `NSFontAttributeName`, and a dictionary crosses). A constant,
+ * borrowed, never released. */
 CFStringRef CTLineFontAttributeName(void);
 
 #endif /* CORE_TEXT_CTLINE_INTERNAL_H */
