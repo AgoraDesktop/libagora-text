@@ -164,9 +164,11 @@ extern const CFStringRef kCTFontManagerRegisteredFontsChangedNotification;
  * is not one the application is told about, so the matching tier's ONE walk skips it and every matching door inherits
  * the answer.
  *
- * AND THE ONE STILL OWED IS THE ONE THAT NEEDS SOMETHING THIS PROJECT DOES NOT HAVE: a FONT SERVER on the other end of
- * the port, with no process, no port and no request to answer. It stays DECLARED AND NOT DEFINED, so reaching for it is
- * a link error rather than a source that can never fire. `CTFontManager.c` carries that reason in full.
+ * AND THE ONE STILL OWED NOW WAITS ON ITS TRANSPORT RATHER THAN ON ITS SUBJECT: THE CONVERSATION IS BUILT — both halves
+ * of it, in `CTFontService.c`, answered by the matching tier and tested in-process — and WHAT IS MISSING IS THE PORT,
+ * THE NAME AND THE PROCESS that would carry it (FONT-SERVICE.md), plus the fact that the door's own signature takes a
+ * BLOCK and this target does not presently compile with `-fblocks`. It stays DECLARED AND NOT DEFINED, so reaching for it
+ * is a link error rather than a source that can never fire. `CTFontManager.c` carries that reason in full.
  * ------------------------------------------------------------------------------------- */
 void CTFontManagerEnableFontDescriptors(CFArrayRef descriptors, bool enable);
 

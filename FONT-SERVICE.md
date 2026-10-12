@@ -1,11 +1,15 @@
 # The Agora font service
 
-**DESIGNED, NOT BUILT.** This file records the decision to define an Agora font service — taken because
-`CTFontManagerCreateFontRequestRunLoopSource` is the last door this library owes and the thing it waits for is a
-system, not a tier — and the shape that service will have. **NOTHING DESCRIBED BELOW IS IMPLEMENTED.** The door is still
-declared and not defined, so reaching for it is still a link error, and the `owed` test still names it. This file is a
-PLAN, and it says so here because a document that reads like an implementation is the failure this tree records at
-length in `PROVENANCE.md`.
+**PARTLY BUILT, AND THIS FILE SAYS WHICH PART.** It records the decision to define an Agora font service — taken
+because `CTFontManagerCreateFontRequestRunLoopSource` is the last door this library owes and the thing it waits for is a
+system, not a tier — and the shape that service will have. **THE WIRE IS BUILT**: `CTFontService_internal.h` and
+`CTFontService.c` carry BOTH HALVES OF THE CONVERSATION — a requester's encode and a responder's answer, the latter
+produced by calling the matching tier — with no socket, no port and no daemon in them, and they are tested that way.
+**THE TRANSPORT IS NOT BUILT**: the socket, the name registry, the daemon and the discovery described below are still a
+plan. And THE DOOR ITSELF IS STILL DECLARED AND NOT DEFINED — reaching for it is still a link error, and the `owed`
+test still names it — for two checkable reasons: the transport above, and the door's BLOCK signature, since this target
+does not presently compile with `-fblocks`. A document that reads like an implementation is the failure this tree
+records at length, so the halves are named apart rather than blurred.
 
 ## What the door is
 

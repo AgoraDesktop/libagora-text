@@ -476,4 +476,12 @@ ctest --test-dir build
   and a name to derive from (`kCTFontManagerBundleIdentifier`) — while **`CFMessagePort` is absent** and
   **`window-server/` is an empty skeleton**, so this would be **Agora's first server**. The honest reason for a daemon is
   now stated rather than assumed: a responder registers a per-process port, and **only a system component can enumerate
-  processes to find one.**
+  processes to find one.**- **AND THE FONT SERVICE'S WIRE IS BUILT — AND ITS CASE FOUND FOUR REAL FAULTS BEFORE IT PASSED, ONE OF THEM A DESIGN
+  FAULT NO PROBE WOULD HAVE CAUGHT.** `CTFontService_internal.h` / `CTFontService.c` carry **both halves of the
+  conversation** — a requester's encode and a responder's answer, produced by calling the matching tier — with no socket,
+  no port and no daemon, so it is testable in-process. The faults, in the order they were found: the format was asked for
+  as **BINARY** and never measured; the version was **released although a `CFSTR` is a constant**; the decoded request
+  was **leaked on the reply path**; and the blocker — **A MATCHED FACE'S ATTRIBUTES CARRY `kCTFontURLAttribute`, A
+  `CFURL`, AND A PROPERTY LIST CANNOT HOLD ONE**, so the reply never encoded at all. The wire now carries
+  **property-list types and nothing else**, crossing a URL as its string. MEASURED: `100% tests passed, 0 tests failed out of 2` over `text: 30 of 30 cases passed, 0 failed`, **137 public doors**,
+  `owed` at **1** — the door itself, waiting on its transport and on one build flag.

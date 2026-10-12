@@ -754,3 +754,38 @@ read. The design says so where it depends on the answer, and names checking it a
 its process (Apple's error case is a DUPLICATE name, so the name is derived rather than supplied), and ONLY A SYSTEM
 COMPONENT CAN ENUMERATE PROCESSES to find another process's port — a random application cannot discover a random
 application. That is the daemon's entire job, and it is why the system's half and this library's half are separate.
+
+**The font service's WIRE, and the four faults its case found (2026-10-11).** `CTFontService_internal.h` and
+`CTFontService.c` are THE FRAMEWORK'S HALF OF THE CONVERSATION `FONT-SERVICE.md` describes: a requester's encode, a
+responder's answer (produced by calling the MATCHING TIER, which is why this lives in the library that owns matching),
+and no socket, no port, no run loop and no daemon anywhere — so both halves are tested IN-PROCESS and neither can drift
+from the other without the case failing.
+
+**AND THE CASE FAILED FOUR TIMES BEFORE IT PASSED, WHICH IS THE POINT OF IT.** FIRST: the format was asked for as
+BINARY, and BINARY SUPPORT BY THIS TREE'S PROPERTY-LIST LAYER WAS NEVER MEASURED — the first fix was to ask for XML
+explicitly, because the form a reader can also write is the one to ask for. SECOND: the version was written as the
+constant `CFSTR("1")` AND THEN RELEASED, which is a release of something not owned — a "CFSTR is a constant" bug that
+the first draft carried happily, and the wire now passes the constant itself with no copy to own. THIRD: the decode
+path RETURNED THE REPLY AND LEAKED THE PROPERTY LIST IT HAD DECODED; found by reading the code again rather than by any
+test, and fixed. FOURTH, AND THE REAL ONE: **A MATCHED FACE'S ATTRIBUTES CARRY `kCTFontURLAttribute`, WHICH IS A `CFURL`
+OBJECT, AND A PROPERTY LIST CANNOT HOLD ONE** — so the reply never encoded, and the case's very first assertion failed
+for a reason no part of the design mentioned.
+
+**AND THE FOURTH WAS FOUND BY ELIMINATION, WITH FIVE THROWAWAY PROBES OUTSIDE THE REPOSITORY**, which is the part worth
+recording: a plain dictionary round-tripped; a dictionary OF dictionaries round-tripped; a dictionary OF ARRAYS (a
+reply with one match and a reply with none) round-tripped; the version as a string was present after decoding; and the
+DECODED VALUES' type ids and `CFEqual` results were all correct — including `CFStringGetTypeID` and
+`CFDictionaryGetTypeID` matching, which is exactly the sort of thing a from-scratch Core Foundation gets wrong. Every
+link in the chain behaved, which LEFT THE ONE VALUE TYPE NOTHING HAD TRIED TO SERIALIZE: the URL. THE WIRE NOW CARRIES
+PROPERTY-LIST TYPES AND NOTHING ELSE, and a URL crosses it AS ITS STRING — which is a real asymmetry and is recorded as
+one: a client that rebuilds a descriptor from the reply converts the string back, and the encoding is lossless for
+every attribute EXCEPT that conversion. THE PROBES WERE SCRATCH AND ARE NOT IN THIS COMMIT; the code they produced is.
+
+**AND THE DOOR'S REASON IS NOW NARROWER THAN IT WAS.** `CTFontManagerCreateFontRequestRunLoopSource` is still declared
+and not defined, but what it waits for is no longer "a font server": the conversation exists. It waits on its TRANSPORT
+(the port, the name, the daemon — FONT-SERVICE.md, still a plan) and on one build fact, the door's BLOCK SIGNATURE and
+this target's lack of `-fblocks`. Two checkable things, neither of them a tier.
+
+MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with NO compiler diagnostic at all; a bare
+`ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over `text: 30 of 30 cases passed, 0 failed`; and the `owed` test still names 1 door. Two documents say which half of the
+service is built, and this commit changes both.

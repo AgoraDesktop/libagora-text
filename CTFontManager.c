@@ -520,12 +520,15 @@ CTFontManagerAutoActivationSetting CTFontManagerGetAutoActivationSetting(CFStrin
  *   APPLE'S OWN HEADER PROMISES THAT ALL OF ITS FUNCTIONS "ARE THREAD SAFE UNLESS OTHERWISE SPECIFIED". See
  *   `CTFontMatching.c`'s visibility section, and the `owed` test, which lost this name in the same commit.
  *
- *   CTFontManagerCreateFontRequestRunLoopSource   A FONT SERVER ON THE OTHER END: the source conveys font
- *                                                 requests FROM the manager, which in Apple's implementation is a
- *                                                 conversation with a separate process that serves fonts on
- *                                                 demand. This tier has no such process, no port to listen on and
- *                                                 no request to answer, so a run loop source would be a source
- *                                                 that can never fire.
+ *   CTFontManagerCreateFontRequestRunLoopSource   THE CONVERSATION NOW EXISTS AND ITS TRANSPORT DOES NOT, which is a
+ *                                                 much narrower reason than the one this entry used to carry. THE
+ *                                                 WIRE IS IMPLEMENTED: `CTFontService.c` carries both halves — a
+ *                                                 requester's encode and a responder's answer, produced by calling the
+ *                                                 matching tier — and its case passes. WHAT IS MISSING IS THE PORT,
+ *                                                 THE NAME AND THE PROCESS (FONT-SERVICE.md), plus one build fact:
+ *                                                 THE DOOR TAKES A BLOCK, its declaration is guarded by `__BLOCKS__`
+ *                                                 exactly as Apple's is, and this target does not presently compile
+ *                                                 with `-fblocks`. Two checkable things, neither of them a tier.
  *
  * AND ONE THING THAT IS *NOT* OWED BUT IS WORTH SAYING HERE, because a caller will otherwise ask: THE SCOPE.
  * `kCTFontManagerScopeUser` and `kCTFontManagerScopeSession` are not owed doors — they are VALUES of the scope

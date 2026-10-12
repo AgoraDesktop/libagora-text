@@ -19,6 +19,8 @@
  * framework offers is proved by this translation unit compiling, and it is included before the individual headers
  * rather than after them for that reason. */
 #include <CoreText/CoreText.h>
+#include <CoreFoundation/CFPropertyList.h>
+#include <CoreText/CTFontService_internal.h>
 #include <CoreText/CTFont.h>
 /* AND THE ENGINE'S INTERNAL HEADER, FOR THE DOORS CORE TEXT OWNS BUT DOES NOT IMPLEMENT: the Unicode
  * glyph step and the face registry. */
@@ -3053,6 +3055,110 @@ static int case_font_visibility(void)
 	return g_fail - before;
 }
 
+/* THE WIRE, WHICH IS THIS LIBRARY'S HALF OF THE FONT SERVICE — the conversation as bytes, with no socket, no port, no
+ * run loop and no daemon anywhere in it. Both ends are here, so a drift between what one side writes and what the other
+ * reads cannot happen without this case failing.
+ *
+ * AND IT HOLDS THE DISTINCTION THE FORMAT RESTS ON: BYTES THIS SERVICE CANNOT READ ARE REFUSED, WHILE A REQUEST IT
+ * UNDERSTANDS THAT DESCRIBES NO INSTALLED FACE IS ANSWERED, WITH AN EMPTY ARRAY. Collapsing those two would leave a
+ * client unable to tell a broken conversation from an empty one.
+ *
+ * AND IT HOLDS THE PROPERTY THE ENCODING RESTS ON: A MATCH'S ATTRIBUTES ARE THE MATCH — a descriptor here holds exactly
+ * what it was built with, so a reply of attribute dictionaries loses nothing. */
+static int case_font_service_wire(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(12.0);	/* registers the face, so the conversation has something to say */
+	CFMutableDictionaryRef attrs, nobody;
+	CFDataRef request, reply, empty_reply, bogus;
+	CFPropertyListRef decoded;
+	CFTypeRef version, matches, first;
+	CFIndex count = -1, nothing = -1;
+
+	check(font != NULL, "no font, so there is nothing for the service to answer with");
+	if (font == NULL) {
+		return g_fail - before;
+	}
+	attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					  &kCFTypeDictionaryValueCallBacks);
+	nobody = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					   &kCFTypeDictionaryValueCallBacks);
+	check(attrs != NULL && nobody != NULL, "the test could not make its dictionaries");
+	if (attrs == NULL || nobody == NULL) {
+		return g_fail - before;
+	}
+	CFDictionarySetValue(attrs, kCTFontNameAttribute, CFSTR("DejaVuSansMono-Bold"));
+	CFDictionarySetValue(nobody, kCTFontNameAttribute, CFSTR("NoSuchFace-At-All"));
+
+	/* A REQUESTER ASKS AND A RESPONDER ANSWERS, THROUGH THE TWO DOORS A DAEMON AND A PROCESS WOULD USE. */
+	request = CTFontServiceCopyRequestData(attrs);
+	check(request != NULL, "the requester's half produced nothing");
+	if (request == NULL) {
+		return g_fail - before;
+	}
+	reply = CTFontServiceCopyReplyData(request);
+	check(reply != NULL, "the responder could not answer a request it was handed");
+	CFRelease(request);
+	if (reply == NULL) {
+		return g_fail - before;
+	}
+	decoded = CFPropertyListCreateWithData(kCFAllocatorDefault, reply, 0, NULL, NULL);
+	check(decoded != NULL && CFGetTypeID(decoded) == CFDictionaryGetTypeID(), "the reply is not a dictionary");
+	if (decoded != NULL) {
+		/* THE VERSION TRAVELS IN BOTH DIRECTIONS, so a client that speaks something else can tell. */
+		version = CFDictionaryGetValue((CFDictionaryRef)decoded, CFSTR("version"));
+		check(version != NULL && CFGetTypeID(version) == CFStringGetTypeID()
+			      && CFEqual(version, kCTFontServiceWireVersionString),
+		      "the reply does not carry the version spoken here");
+		matches = CFDictionaryGetValue((CFDictionaryRef)decoded, CFSTR("matches"));
+		check(matches != NULL && CFGetTypeID(matches) == CFArrayGetTypeID(), "the reply carries no matches array");
+		if (matches != NULL && CFGetTypeID(matches) == CFArrayGetTypeID()) {
+			count = CFArrayGetCount((CFArrayRef)matches);
+			check(count >= 1, "a registered face came back as %ld matches", (long)count);
+			if (count >= 1) {
+				first = CFArrayGetValueAtIndex((CFArrayRef)matches, 0);
+				check(CFGetTypeID(first) == CFDictionaryGetTypeID(),
+				      "a match is not an attribute dictionary, so the encoding is not lossless");
+			}
+		}
+		CFRelease(decoded);
+	}
+	CFRelease(reply);
+
+	/* AND A QUESTION WITH NO ANSWER IS ANSWERED: a face nobody has comes back EMPTY, not refused. */
+	request = CTFontServiceCopyRequestData(nobody);
+	empty_reply = (request != NULL) ? CTFontServiceCopyReplyData(request) : NULL;
+	check(empty_reply != NULL, "a request describing no installed face was REFUSED, and it should be answered empty");
+	if (request != NULL) {
+		CFRelease(request);
+	}
+	if (empty_reply != NULL) {
+		decoded = CFPropertyListCreateWithData(kCFAllocatorDefault, empty_reply, 0, NULL, NULL);
+		if (decoded != NULL && CFGetTypeID(decoded) == CFDictionaryGetTypeID()) {
+			matches = CFDictionaryGetValue((CFDictionaryRef)decoded, CFSTR("matches"));
+			nothing = (matches != NULL && CFGetTypeID(matches) == CFArrayGetTypeID())
+					  ? CFArrayGetCount((CFArrayRef)matches)
+					  : -1;
+			CFRelease(decoded);
+		}
+		check(nothing == 0, "a question with no answer carried %ld matches rather than none", (long)nothing);
+		CFRelease(empty_reply);
+	}
+
+	/* AND WHAT CANNOT BE READ IS REFUSED AS SUCH. */
+	bogus = CFDataCreate(kCFAllocatorDefault, (const UInt8 *)"not a property list at all", 26);
+	check(bogus != NULL, "the test could not make its garbage bytes");
+	if (bogus != NULL) {
+		check(CTFontServiceCopyReplyData(bogus) == NULL, "the service answered bytes that are not a request");
+		CFRelease(bogus);
+	}
+	check(CTFontServiceCopyReplyData(NULL) == NULL, "the service answered a NULL request");
+	check(CTFontServiceCopyRequestData(NULL) == NULL, "the requester's half answered NULL attributes");
+	CFRelease(nobody);
+	CFRelease(attrs);
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -3083,6 +3189,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "A line justifies at the spaces, by the fraction it is given", case_line_justification },
 	{ "Matching finds the faces a query describes, in a stable order", case_font_matching },
 	{ "A disabled face leaves every matching answer, and comes back", case_font_visibility },
+	{ "The two halves of the font service speak the same wire", case_font_service_wire },
 };
 
 int main(void)
