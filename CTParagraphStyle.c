@@ -17,6 +17,8 @@
  */
 #include <CoreText/CTParagraphStyle.h>
 
+#include <CoreText/CTTextTab.h>
+
 #include <CoreFoundation/CFRuntime.h>
 
 #include <stdlib.h>
@@ -253,19 +255,37 @@ CTParagraphStyleRef CTParagraphStyleCreateCopy(CTParagraphStyleRef paragraphStyl
 /* =================================================================================================
  * ACCESS.
  * =============================================================================================== */
-/* THE DEFAULT FOR TabStops, WHICH IS THE ONE ROW THIS TIER CANNOT ANSWER AS APPLE DOES, AND THE REASON IS
- * STRUCTURAL RATHER THAN A SHORTAGE: Apple's default is "12 left-aligned tabs, spaced by 28.0 points", and a tab
- * is a `CTTextTabRef` — `CTTextTab.h` is LATER in Apple's include order than this header, so it does not exist
- * yet and neither does the door that would make one. AN EMPTY ARRAY IS RETURNED INSTEAD: it is the right TYPE,
- * it says "no tab stops are described", and it is a RECORDED DEVIATION with a landing point — the tabs arrive
- * with CTTextTab, and this function is where they will be built.
+/* THE DEFAULT FOR TabStops, WHICH IS APPLE'S TWELVE TABS, AND THE DEVIATION THIS ROW USED TO CARRY IS PAID. While
+ * `CTTextTab.h` was unwritten this row answered an EMPTY ARRAY — a recorded deviation that named its own landing
+ * point in this very comment ("the tabs arrive with CTTextTab, and this function is where they will be built").
+ * THEY HAVE ARRIVED: Apple's header prints the default as "12 left-aligned tabs, spaced by 28.0 points", so twelve
+ * tabs are built here, LEFT-ALIGNED at 28.0, 56.0 … 336.0 — the multiples of 28.0 that Apple's second number names.
  *
  * BUILT ONCE PER STYLE AND BORROWED OUT, because the accessor's contract for a CFArray value is a borrowed
  * reference: a fresh array per call would leak in the caller's hands. */
 static CFArrayRef ct_para_tab_fallback(struct __CTParagraphStyle *style)
 {
+	if (style->tab_fallback != NULL) {
+		return style->tab_fallback;
+	}
+	style->tab_fallback = CFArrayCreateMutable(kCFAllocatorDefault, 12, &kCFTypeArrayCallBacks);
 	if (style->tab_fallback == NULL) {
-		style->tab_fallback = CFArrayCreate(kCFAllocatorDefault, NULL, 0, &kCFTypeArrayCallBacks);
+		return NULL;
+	}
+	{
+		int i;
+
+		for (i = 1; i <= 12; i++) {
+			CTTextTabRef tab = CTTextTabCreate(kCTLeftTextAlignment, 28.0 * (double)i, NULL);
+
+			if (tab == NULL) {
+				/* A TAB THAT COULD NOT BE MADE LEAVES THE ROW SHORTER RATHER THAN LYING ABOUT ITS LENGTH: the
+				 * array is what was actually built, and twelve is the answer only when twelve exist. */
+				break;
+			}
+			CFArrayAppendValue((CFMutableArrayRef)style->tab_fallback, tab);
+			CFRelease(tab);
+		}
 	}
 	return style->tab_fallback;
 }

@@ -488,3 +488,21 @@ MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 wi
 their logs; `nm -D build/libagora-text.so` lists the fourteen keys; `grep` over the library's sources finds the two
 retired VALUES in exactly one file; and a bare `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2`
 over `text: 22 of 22 cases passed, 0 failed`.
+
+**`CTTextTab` — the tab type, and the third recorded deviation PAID (2026-10-11).** Five doors: a type id, a creator
+taking an alignment, a location and an options dictionary, and three getters. THE OPTIONS ARE KEPT AND NOT READ — Apple
+names no key for a per-tab options dictionary anywhere in the era's headers, so there is nothing to obey, and the door
+hands back the very dictionary it was given.
+
+**AND IT PAYS THE DEBT ITS OWN HEADER RECORDED.** `CTParagraphStyle`'s `kCTParagraphStyleSpecifierTabStops` default is
+printed in Apple's header as "12 left-aligned tabs, spaced by 28.0 points" — and a tab is a `CTTextTabRef` whose header
+was LATER in the documented include order, so that row could not be built and answered an EMPTY ARRAY instead, with a
+comment naming its own landing point: "the tabs arrive with CTTextTab, and this function is where they will be built".
+THEY HAVE ARRIVED: `ct_para_tab_fallback` builds twelve tabs — `kCTLeftTextAlignment` at 28.0, 56.0 … 336.0, the
+multiples of 28.0 Apple's second number names — and the paragraph style's case, WHICH HAD BEEN ASSERTING THE EMPTY
+ARRAY, now asserts the count, each tab's alignment and each location. THAT IS THE EVIDENCE THE RETIREMENT IS REAL: a
+change that altered behaviour would have FAILED the case that recorded the deviation rather than passing a new one.
+
+MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with no compiler diagnostic at all in
+their logs; a `grep` over the library's sources finds each of the two retired attribute-key values in exactly one file;
+and a bare `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over `text: 23 of 23 cases passed, 0 failed`.

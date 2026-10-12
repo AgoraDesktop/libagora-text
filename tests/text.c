@@ -31,6 +31,7 @@
 #include <CoreText/CTFrame.h>
 #include <CoreText/CTFramesetter.h>
 #include <CoreText/CTStringAttributes.h>
+#include <CoreText/CTTextTab.h>
 
 #include <CoreFoundation/CoreFoundation.h>
 
@@ -1060,6 +1061,7 @@ static int case_paragraph_style_object(void)
 {
 	int before = g_fail;
 	CTParagraphStyleSetting settings[4];
+	CFIndex i;
 	CTTextAlignment alignment = kCTCenterTextAlignment;
 	CTLineBreakMode mode = kCTLineBreakByTruncatingTail;
 	CTWritingDirection direction = kCTWritingDirectionRightToLeft;
@@ -1107,8 +1109,10 @@ static int case_paragraph_style_object(void)
 						   sizeof got_indent, &got_indent) && got_indent == 0.0,
 	      "the head indent default came back as %g, want 0", (double)got_indent);
 
-	/* THE TabStops DEFAULT IS THE RECORDED DEVIATION, and both halves of it are asserted: the TYPE a caller can
-	 * use, and the emptiness that says the twelve tabs have not arrived. */
+	/* THE TabStops DEFAULT IS APPLE'S TWELVE TABS, WHICH IS WHAT THIS ROW WAS OWED FOR AS LONG AS `CTTextTab` DID
+	 * NOT EXIST. Apple's header prints the default as "12 left-aligned tabs, spaced by 28.0 points", so the case
+	 * asserts the COUNT, the ALIGNMENT of each one, and the LOCATIONS — the multiples of 28.0 that the second number
+	 * names — rather than merely that the array is not empty. */
 	empty_tabs = NULL;
 	check(CTParagraphStyleGetValueForSpecifier(style, kCTParagraphStyleSpecifierTabStops,
 						   sizeof empty_tabs, &empty_tabs) && empty_tabs != NULL,
@@ -1116,10 +1120,23 @@ static int case_paragraph_style_object(void)
 	if (empty_tabs != NULL) {
 		check(CFGetTypeID((CFTypeRef)empty_tabs) == CFArrayGetTypeID(),
 		      "the TabStops default is not a CFArray");
-		check(CFArrayGetCount(empty_tabs) == 0,
-		      "the TabStops default holds %ld tabs: Apple's header names 12 left-aligned tabs 28.0 points "
-		      "apart, and this tier's recorded deviation is the EMPTY array until CTTextTab lands",
+		check(CFArrayGetCount(empty_tabs) == 12, "the TabStops default holds %ld tabs, want 12",
 		      (long)CFArrayGetCount(empty_tabs));
+		for (i = 0; i < CFArrayGetCount(empty_tabs); i++) {
+			CTTextTabRef tab = (CTTextTabRef)CFArrayGetValueAtIndex(empty_tabs, i);
+
+			check(tab != NULL && CFGetTypeID((CFTypeRef)tab) == CTTextTabGetTypeID(),
+			      "default tab %ld is not a CTTextTab", (long)i);
+			if (tab == NULL) {
+				continue;
+			}
+			check(CTTextTabGetAlignment(tab) == kCTLeftTextAlignment,
+			      "default tab %ld is aligned %d, want kCTLeftTextAlignment (%d)", (long)i,
+			      (int)CTTextTabGetAlignment(tab), (int)kCTLeftTextAlignment);
+			check(CTTextTabGetLocation(tab) == 28.0 * (double)(i + 1),
+			      "default tab %ld is at %g, want %g", (long)i, CTTextTabGetLocation(tab),
+			      28.0 * (double)(i + 1));
+		}
 	}
 
 	/* SETTINGS GO IN AND COME BACK OUT, each at its own type's width. */
@@ -2335,6 +2352,58 @@ static int case_string_attribute_keys(void)
 	return g_fail - before;
 }
 
+/* THE TAB TYPE ITSELF: the object the paragraph style's TabStops default is made of. Its five doors are a type id, a
+ * creator and three getters, and the case holds the ROUND TRIP — what goes in comes out — the OPTIONS this tier keeps
+ * without reading them, and the identity that comes from the runtime. */
+static int case_text_tab(void)
+{
+	int before = g_fail;
+	CFMutableDictionaryRef options;
+	CTTextTabRef tab, again, other;
+	CFDictionaryRef got_options;
+
+	options = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					    &kCFTypeDictionaryValueCallBacks);
+	check(options != NULL, "the test could not make its options dictionary");
+	if (options == NULL) {
+		return g_fail - before;
+	}
+	tab = CTTextTabCreate(kCTCenterTextAlignment, 144.0, options);
+	check(tab != NULL, "a tab could not be made");
+	if (tab == NULL) {
+		return g_fail - before;
+	}
+	check(CFGetTypeID((CFTypeRef)tab) == CTTextTabGetTypeID(),
+	      "CFGetTypeID(tab) is %lu and CTTextTabGetTypeID() is %lu",
+	      (unsigned long)CFGetTypeID((CFTypeRef)tab), (unsigned long)CTTextTabGetTypeID());
+	check(CTTextTabGetAlignment(tab) == kCTCenterTextAlignment, "the tab's alignment came back as %d, want %d",
+	      (int)CTTextTabGetAlignment(tab), (int)kCTCenterTextAlignment);
+	check(CTTextTabGetLocation(tab) == 144.0, "the tab's location came back as %g, want 144",
+	      CTTextTabGetLocation(tab));
+	/* THE OPTIONS ARE KEPT AND NOT READ — Apple names no key for them anywhere in the era's headers — so the door
+	 * hands back the very dictionary it was given, and the caller's release below is the retain's proof. */
+	got_options = CTTextTabGetOptions(tab);
+	check(got_options == options, "the tab did not hand back the options it was given");
+	CFRelease(options);
+	check(CTTextTabGetOptions(tab) == got_options, "the tab's options did not survive the caller's release");
+
+	/* EQUALITY IS BY ALIGNMENT AND LOCATION, so a tab made WITHOUT options equals one made with them — which is what
+	 * the comparison below says, and the reason it is worth asserting is that the options are not part of it. */
+	again = CTTextTabCreate(kCTCenterTextAlignment, 144.0, NULL);
+	other = CTTextTabCreate(kCTLeftTextAlignment, 144.0, NULL);
+	check(again != NULL && CFEqual(tab, again),
+	      "two tabs with the same alignment and location are not equal");
+	check(other != NULL && !CFEqual(tab, other), "two tabs with different alignments compare equal");
+
+	/* NULL SAFETY, AND ONE ANSWER WORTH NAMING: an invalid tab reports `kCTNaturalTextAlignment` rather than a zero,
+	 * which would read as LEFT and be a wrong answer rather than a missing one. */
+	check(CTTextTabGetAlignment(NULL) == kCTNaturalTextAlignment,
+	      "a NULL tab answered a left alignment rather than the natural one");
+	check(CTTextTabGetLocation(NULL) == 0.0, "a NULL tab answered a location");
+	check(CTTextTabGetOptions(NULL) == NULL, "a NULL tab answered options");
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -2358,6 +2427,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The typesetter breaks at the width, and the paragraph style says how", case_typesetter_breaking },
 	{ "A frame fills a path, and its lines tile what it showed", case_frame_object },
 	{ "The attribute keys, twelve proven and two inferred", case_string_attribute_keys },
+	{ "The tab, and the default it was owed for", case_text_tab },
 };
 
 int main(void)

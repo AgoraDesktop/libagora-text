@@ -17,8 +17,8 @@
  *
  * THE ONE DEFAULT THIS TIER CANNOT YET ANSWER IS NAMED WHERE IT IS, in `CTParagraphStyle.c`: the default for
  * `kCTParagraphStyleSpecifierTabStops` is "12 left-aligned tabs, spaced by 28.0 points", and a tab is a
- * `CTTextTabRef`, whose header is LATER in Apple's include order and therefore does not exist yet. The setting
- * is answered as an EMPTY ARRAY — a recorded deviation with a landing point, not a silence.
+ * `CTTextTabRef` — whose header was LATER in Apple's include order and has SINCE LANDED, so the setting is answered
+ * as Apple's twelve tabs and the deviation that row used to carry is paid (`CTParagraphStyle.c`).
  */
 #ifndef CORE_TEXT_CTPARAGRAPHSTYLE_H
 #define CORE_TEXT_CTPARAGRAPHSTYLE_H
@@ -91,8 +91,8 @@ enum {
 	kCTParagraphStyleSpecifierHeadIndent = 2,
 	/* CGFloat; default 0.0; positive counts from the LEADING margin, 0 or negative from the TRAILING one */
 	kCTParagraphStyleSpecifierTailIndent = 3,
-	/* CFArray of CTTextTabRef, sorted by location; default is 12 left-aligned tabs 28.0 points apart, which this
-	 * tier answers as an EMPTY ARRAY (see CTParagraphStyle.c); framesetter and typesetter */
+	/* CFArray of CTTextTabRef, sorted by location; the default is 12 left-aligned tabs 28.0 points apart, and that is
+	 * what this tier answers (see CTParagraphStyle.c); framesetter and typesetter */
 	kCTParagraphStyleSpecifierTabStops = 4,
 	/* CGFloat; default 0.0; tabs after the last one in TabStops go at multiples of this; framesetter, typesetter */
 	kCTParagraphStyleSpecifierDefaultTabInterval = 5,

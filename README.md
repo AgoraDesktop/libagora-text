@@ -366,3 +366,16 @@ ctest --test-dir build
   that COUNTED the members of that enum would put `Double` at 3 and be wrong from there on — and the patterns sit in
   the **high byte**, which is what lets a style and a pattern combine into the one number the attribute carries. The
   case asserts the gap, the byte, and `Single | Dash == 0x0201`.
+- **`CTTextTab` IS DECLARED AND IMPLEMENTED, AND IT PAYS THE THIRD RECORDED DEVIATION.** Five doors over three
+  values — an alignment in the PARAGRAPH's own vocabulary, a location in points, and an options dictionary this tier
+  **retains and does not read**, because Apple names no key for one anywhere in the era's headers. **AND
+  `kCTParagraphStyleSpecifierTabStops` NOW ANSWERS APPLE'S DEFAULT INSTEAD OF AN EMPTY ARRAY**: while this header did
+  not exist that row could not be built, so it answered an empty array and its comment named its own landing point —
+  *"the tabs arrive with CTTextTab, and this function is where they will be built"*. THEY HAVE ARRIVED: twelve
+  **left-aligned** tabs at **28.0, 56.0 … 336.0**, and the case asserts the count, the alignment of each one and those
+  locations rather than merely that the array is not empty. MEASURED: `text: 23 of 23 cases passed, 0 failed`.
+- **AND THE TAB IS PROOF THAT THIS LIBRARY'S DEVIATIONS ARE DEBTS RATHER THAN DECISIONS.** Three have now been paid in
+  the order they were recorded — the two attribute-key values, by `CTStringAttributes`, and this default, by
+  `CTTextTab` — each in the commit that brought the thing it was waiting for, and each checked by the cases that were
+  ALREADY asserting the deviation: a retirement that changed behaviour would have failed those cases rather than paid
+  them.
