@@ -50,8 +50,10 @@ rows are the AAT/SFNT structure vocabulary, which is a data port of two headers 
   **with Apple's published values rather than a guess at their order.** MEASURED: `cmake --build build`
   exits 0 with no errors from a clean directory, and `nm -D build/libagora-text.so` lists
   `kCTFontSymbolicTrait`, `kCTFontWeightTrait`, `kCTFontWidthTrait` and `kCTFontSlantTrait` as defined.
-- **No test suite yet**, and the values above are the first thing worth holding: the trait bits, the class
-  numbers and the four strings are all facts a case can assert, including that the strings are the AppKit's.
+- **The values above are held by the suite's first case**, which is what tells a published value apart from a
+  plausible one: the trait bits, the class numbers — the gaps at 6 and 11 included, which a library that
+  renumbered the classes would close up — and the four trait-key strings are all asserted, the strings
+  against the AppKit's own names.
 - **`CTFontDescriptor` is declared, and its keys are defined.** The header carries Apple's whole surface for
   it — the opaque `CTFontDescriptorRef`, `GetTypeID`, the twenty-two attribute keys **with the value type each
   carries**, `CTFontOrientation`, `CTFontFormat`, `CTFontPriority`, and the ten doors — and `CTFontDescriptor.c`
