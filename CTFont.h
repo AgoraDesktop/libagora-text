@@ -144,8 +144,10 @@ typedef uint32_t CTFontUIFontType;
 
 /* ---------------------------------------------------------------------------------------
  * CREATION. A font is a name and a size and a matrix, or a descriptor and the same two, and a copy varies one
- * of them. Every creator here answers a font for a face this tree can find; the ones that need a system to
- * choose a face are owed and named in CTFont.c.
+ * of them. Every creator here is DEFINED: the ones that ask a REGISTRY rather than a name answer from the
+ * faces the process has registered, and the one that asks for a ROLE answers by a recorded decision — see
+ * `CTFont.c`, where both are written down. The only creators left owed are the two that speak in ATS ids,
+ * which is a vocabulary Agora does not have.
  * ------------------------------------------------------------------------------------- */
 CTFontRef CTFontCreateWithName(CFStringRef name, CGFloat size, const CGAffineTransform *matrix);
 CTFontRef CTFontCreateWithFontDescriptor(CTFontDescriptorRef descriptor, CGFloat size,

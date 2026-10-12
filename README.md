@@ -619,4 +619,35 @@ fixed-pitch face asks for something no face in it can be. The case asserts the m
 dropping the mask makes the door answer NULL. FALSIFIED: with the mask removed, `FAIL: no face of "DejaVu Sans"
 answered the family door`; with the caller's cascade list bypassed, `FAIL: the door answered from somewhere other than
 the cascade list it was given` — `37 of 39` on both counts, `39 of 39` restored. MEASURED: `100% tests passed, 0 tests
-failed out of 2` over `text: 39 of 39 cases passed, 0 failed`, **152 `CT…` definitions**, `owed` **9**.
+  failed out of 2` over `text: 39 of 39 cases passed, 0 failed`, **152 `CT…` definitions**, `owed` **9**.
+- **AND THE LAST THREE METRICS ARE DEFINED, WITH EVERY CURVE THEY NEED WRITTEN DOWN AS A DEVIATION.** `CTFontCopyTraits`
+answers the four documented keys; `CTFontGetSlantAngle` and `CTFontGetVerticalTranslationsForGlyphs` are the two
+metrics whose owed reasons were "the GLYPH-SPACE slant, not the italic angle" and "the vertical metrics the advances
+door also lacks". **THE TRAITS ENTRY'S OWED REASON SAID "NO HEADER IN THE ERA PRINTS THE CURVE" — THE CURVE IS
+UNPRINTED AND THE ANCHORS ARE**: `CTFontTraits.h` states, for each of the three floats, what 0.0 means and (for the
+slant) that 1.0 is 30 degrees. So the three mappings honour every anchor Apple prints — the format's own
+`usWeightClass` 400/`usWidthClass` 5 at 0.0, distances scaled by the widest the format has on that side — and each is
+**recorded as a deviation with its landing point**. The case does TWO things: it recomputes the three floats from the
+raw `OS/2` and `post` bytes with its own copy of the mapping, and it asserts the anchors on real faces (a regular face
+is 0.0, an oblique face positive, a condensed one negative, a light one negative). The entries are also 64-bit integers
+for the symbolic word, because the class mask sits in the top four bits.
+- **AND THE SLANT IS TWO INGREDIENTS ADDED, WITH A UNIT APPLE NEVER STATES.** Apple's sentence names both — "the italic
+or caret angle WITH ANY SKEW FROM THE TRANSFORMATION MATRIX APPLIED" — so the door reads `post.italicAngle` (turning
+the sign over, since the format measures it counter-clockwise) and adds the angle the matrix gives the vertical,
+`atan2(c, d)`. **DEGREES IS A CHOICE, RECORDED**, and the case MEASURES it against the other door that speaks of
+slant: `kCTFontSlantTrait`'s 1.0-is-30-degrees must be exactly this door's answer divided by thirty, and a radians
+mistake would show up as a factor of fifty-seven. The case also measures the transform's own convention with
+`CGPointApplyAffineTransform` rather than trusting the sentence about `(c, d)`.
+- **AND THE VERTICAL ORIGIN IS A COMPOSITION OF THREE DOORS THAT ALREADY EXISTED** — half the advance minus the left
+side bearing, and the ascent — with the bearing taken from the ORIGIN OF THE BOUNDING BOX. **A SPACE IS THE CHECK THAT
+NEEDS NO ARITHMETIC**: it has no outline and therefore no bearing, so its offset must be exactly half its advance.
+The vertical metrics (`vhea`/`vmtx`/`VORG`) are **not read, and that is a recorded boundary**: no face installed here
+carries them (measured over every installed face), and what the door answers is the format's own fallback. Everything
+else is held against the doors it composes, and the array is asserted UNTOUCHED for a zero count, a negative count, a
+NULL font, a NULL glyph array and a NULL output — which is the only way to see "nothing was written".
+- **AND ONE DETAIL IS RECORDED BECAUSE IT PRINTED ITSELF IN A CASE'S NOTE: a negative zero.** An upright face's slant
+came out `-0.0` — equal to zero to every comparison, read as negative by `signbit` and printed as "-0" — so the door
+normalises it, and the case's own recomputation does too. MEASURED: `100% tests passed, 0 tests failed out of 2` over
+`text: 42 of 42 cases passed, 0 failed`, **155 `CT…` definitions**, and `owed` down to **6** — none of them waiting on
+work this library can do: `feat` (no face here carries one), the two language/encoding mappings (Apple's own tables,
+the user's decision is that they stay owed), the ATS pair (permanent), and the font service's transport (a system).

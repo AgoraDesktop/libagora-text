@@ -39,6 +39,10 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+/* FOR `atan2`, WHICH THE SLANT DOOR NEEDS AND WHICH IS THE ONLY THING THIS FILE ASKS OF THE C LIBRARY'S MATHS.
+ * The link is already there: `libagora-drawing` composes its own transforms and has needed the same library since
+ * it drew its first glyph, so this is a header and not a new dependency. */
+#include <math.h>
 
 /* =================================================================================================
  * THE NAME KEYS. EIGHT ARE PROVABLE: kCTFontVariationAxisIdentifierKey, ...MinimumValueKey,
@@ -1061,6 +1065,112 @@ CTFontSymbolicTraits CTFontGetSymbolicTraits(CTFontRef font)
 	return traits;
 }
 
+/* THE FONT'S TRAITS DICTIONARY, WHOSE FOUR KEYS THIS LIBRARY'S OWN HEADER PRINTS AND WHOSE VALUES IT DOES NOT.
+ *
+ * THE OWED REASON WAS "the weight, width and slant entries are floats normalised around zero, and NO HEADER IN THE
+ * ERA PRINTS THE CURVE that turns a `usWeightClass` into one". THE FIRST HALF WAS WRONG -- `CTFontTraits.h` prints
+ * an ANCHOR for each of the three, in its own words -- and the second half is TRUE, so the curve is a RECORDED
+ * DEVIATION rather than something worked around:
+ *
+ *   WEIGHT   "a float value between -1.0 and 1.0 ... The value of 0.0 corresponds to the regular or medium font
+ *            weight." THE TABLE'S OWN SCALE IS 100 TO 900 IN STEPS OF 100 WITH 400 THE REGULAR ONE, so the distance
+ *            from regular is divided by THE WIDEST DISTANCE THE FORMAT HAS ON THAT SIDE: 300 below it and 500 above
+ *            it. Thin is -1.0, Regular 0.0, Bold +0.6, Black +1.0.
+ *   WIDTH    "a float between -1.0 and 1.0 ... The value of 0.0 corresponds to regular glyph spacing while negative
+ *            values represent condensed glyph spacing." `usWidthClass` runs 1 to 9 WITH 5 THE NORMAL ONE -- the same
+ *            field `CTFontGetSymbolicTraits` reads for its two width bits -- so the distance from 5 is divided by 4.
+ *   SLANT    "0.0 corresponds to 0 degree clockwise rotation from the vertical and 1.0 corresponds to 30 degrees
+ *            clockwise rotation". So the degrees are divided by the thirty Apple states, AND THE SIGN IS TURNED OVER
+ *            because `post.italicAngle` is measured COUNTER-clockwise: an ordinary oblique face carries a negative
+ *            number there and a positive slant here.
+ *
+ * THESE THREE ARE THE MAPPINGS THAT HONOUR EVERY ANCHOR THE ERA'S OWN HEADER PRINTS, and Apple's real curves live in
+ * its binaries. THE DAY ONE IS FOUND, THIS FUNCTION IS WHERE IT GOES, and the cases that assert the anchors are what
+ * will hold it to them.
+ *
+ * AND ONE BOUNDARY SITS INSIDE THE WIDTH RATHER THAN BEING LEFT OUT: a `usWidthClass` of 0 says the table STATES
+ * NOTHING, which the symbolic door honours by leaving its bit unset -- but Apple defines this entry as a NUMBER, and
+ * a number cannot say "unknown". It is answered 0.0, the value that claims the least, and this paragraph is why. A
+ * weight outside the format's own 100..900 is the same kind of statement and is treated the same way.
+ *
+ * AND THE SYMBOLIC ENTRY IS THIS LIBRARY'S OWN DOOR, because Apple says so: `CTFontGetSymbolicTraits` "is equivalent
+ * to the kCTFontSymbolicTrait of traits dictionary". IT IS WRITTEN AS A 64-BIT NUMBER, which is a decision and not
+ * a habit: the trait word is a BITFIELD whose top four bits are the stylistic class, so a signed 32-bit entry could
+ * not carry `8 << 28` without changing it. */
+CFDictionaryRef CTFontCopyTraits(CTFontRef font)
+{
+	const struct __CTFont *f = (const struct __CTFont *)font;
+	CFMutableDictionaryRef traits;
+	CFDataRef os2, post;
+	CFNumberRef number;
+	CTFontSymbolicTraits symbolic;
+	int64_t symbolic64;
+	double weight = 0.0, width = 0.0, slant = 0.0, italic_angle = 0.0;
+	unsigned weight_class = 400, width_class = 5;
+
+	if (f == NULL) {
+		return NULL;
+	}
+	os2 = CTFontCopyTable(font, (CTFontTableTag)kCTFontTableOS2, kCTFontTableOptionNoOptions);
+	if (os2 != NULL) {
+		weight_class = fn_table_u16(os2, 4);
+		width_class = fn_table_u16(os2, 6);
+		CFRelease(os2);
+	}
+	post = CTFontCopyTable(font, (CTFontTableTag)kCTFontTablePost, kCTFontTableOptionNoOptions);
+	if (post != NULL) {
+		italic_angle = fn_table_fixed(post, 4);	/* `post`'s italic angle, counter-clockwise degrees */
+		CFRelease(post);
+	}
+	if (weight_class >= 100 && weight_class <= 900) {
+		weight = (weight_class > 400) ? ((double)weight_class - 400.0) / 500.0
+					      : -((400.0 - (double)weight_class) / 300.0);
+	}
+	if (width_class >= 1 && width_class <= 9) {
+		width = ((double)width_class - 5.0) / 4.0;
+	}
+	slant = -italic_angle / 30.0;
+	if (slant == 0.0) {
+		slant = 0.0;	/* NOT A NEGATIVE ZERO. An upright face has no lean, and `-0.0` is a value that
+				 * `signbit` reads as negative and a printer shows as "-0" -- so the entry says the zero
+				 * every reader expects rather than one that is only equal to it. */
+	}
+	if (slant > 1.0) {
+		slant = 1.0;	/* Apple's range is stated as closed, and a face CAN lean further than thirty degrees */
+	} else if (slant < -1.0) {
+		slant = -1.0;
+	}
+
+	traits = CFDictionaryCreateMutable(kCFAllocatorDefault, 4, &kCFTypeDictionaryKeyCallBacks,
+					   &kCFTypeDictionaryValueCallBacks);
+	if (traits == NULL) {
+		return NULL;
+	}
+	symbolic = CTFontGetSymbolicTraits(font);
+	symbolic64 = (int64_t)(uint32_t)symbolic;
+	number = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt64Type, &symbolic64);
+	if (number != NULL) {
+		CFDictionarySetValue(traits, kCTFontSymbolicTrait, number);
+		CFRelease(number);
+	}
+	number = CFNumberCreate(kCFAllocatorDefault, kCFNumberDoubleType, &weight);
+	if (number != NULL) {
+		CFDictionarySetValue(traits, kCTFontWeightTrait, number);
+		CFRelease(number);
+	}
+	number = CFNumberCreate(kCFAllocatorDefault, kCFNumberDoubleType, &width);
+	if (number != NULL) {
+		CFDictionarySetValue(traits, kCTFontWidthTrait, number);
+		CFRelease(number);
+	}
+	number = CFNumberCreate(kCFAllocatorDefault, kCFNumberDoubleType, &slant);
+	if (number != NULL) {
+		CFDictionarySetValue(traits, kCTFontSlantTrait, number);
+		CFRelease(number);
+	}
+	return traits;
+}
+
 CGFloat CTFontGetUnderlinePosition(CTFontRef font)
 {
 	const struct __CTFont *f = (const struct __CTFont *)font;
@@ -1095,6 +1205,49 @@ CGFloat CTFontGetUnderlineThickness(CTFontRef font)
 	value = fn_table_s16(post, 10);
 	CFRelease(post);
 	return (CGFloat)value * ct_font_scale(f);
+}
+
+/* THE SLANT ANGLE, AND WHAT APPLE PRINTS IS THE COMPOSITION RATHER THAN THE NUMBER: "Returns the transformed slant
+ * angle of the font. This is equivalent to the italic or caret angle WITH ANY SKEW FROM THE TRANSFORMATION MATRIX
+ * APPLIED." TWO INGREDIENTS, AND THE HEADER NAMES BOTH:
+ *
+ *   THE FACE'S OWN ANGLE is `post.italicAngle`, which the format measures in degrees COUNTER-CLOCKWISE from the
+ *   vertical -- so an ordinary oblique face carries a NEGATIVE number there, and this door turns it over.
+ *   THE MATRIX'S SKEW is the angle the transform gives the VERTICAL: the vertical direction (0,1) lands on
+ *   (c, d), so its angle clockwise from that vertical is atan2(c, d).
+ *
+ * AND THE TWO ARE ADDED, WHICH IS A DECISION RATHER THAN A DERIVATION: a matrix leaning the glyphs ten degrees to
+ * the right puts a face with an eleven-degree italic at twenty-one, and the case asserts THE SUM rather than either
+ * half, because a door that reported only one of them would pass a case that checked only that one.
+ *
+ * AND THE UNIT IS DEGREES, WHICH APPLE DOES NOT STATE ANYWHERE IN THE ERA'S HEADERS -- SO IT IS A CHOICE, RECORDED
+ * HERE. The reasons for it: every other angle in this surface is in degrees (`kCTFontSlantTrait`'s "1.0 corresponds
+ * to 30 degrees", and `post.italicAngle` itself, which is where the first ingredient is read from), and the
+ * alternative would make this door and that trait key disagree by a factor of fifty-seven while both claiming to be
+ * the font's slant.
+ *
+ * AND THE TRANSFORM'S CONVENTION IS USED RATHER THAN ASSUMED: `CGAffineTransform` is Apple's own six fields and
+ * (x,y) maps to (a*x + c*y + tx, b*x + d*y + ty), which is what makes (c, d) the image of the vertical direction.
+ * The case measures that with `CGPointApplyAffineTransform` instead of trusting this sentence. */
+CGFloat CTFontGetSlantAngle(CTFontRef font)
+{
+	const struct __CTFont *f = (const struct __CTFont *)font;
+	CFDataRef post;
+	double degrees = 0.0;
+
+	if (f == NULL) {
+		return 0.0;
+	}
+	post = CTFontCopyTable(font, (CTFontTableTag)kCTFontTablePost, kCTFontTableOptionNoOptions);
+	if (post != NULL) {
+		degrees = -fn_table_fixed(post, 4);
+		CFRelease(post);
+	}
+	/* THE SKEW THE MATRIX APPLIES, IN THE SAME UNIT AND THE SAME DIRECTION. The constant is written out rather
+	 * than taken from `math.h`: M_PI is not in the C standard, and a library whose includes are its dependencies
+	 * should not reach for one. */
+	degrees += atan2((double)f->matrix.c, (double)f->matrix.d) * (180.0 / 3.14159265358979323846);
+	return (CGFloat)degrees;
 }
 
 CGFloat CTFontGetXHeight(CTFontRef font)
@@ -1233,6 +1386,60 @@ CGRect CTFontGetBoundingRectsForGlyphs(CTFontRef font, CTFontOrientation orienta
 		return whole;
 	}
 	return overall;
+}
+
+/* THE OFFSET FROM THE HORIZONTAL ORIGIN TO THE VERTICAL ONE, WHICH IS THE WHOLE OF WHAT APPLE SAYS ABOUT IT:
+ * "Calculates the offset from the default (horizontal) origin to the vertical origin for an array of glyphs."
+ *
+ * AND THE OFFSET IS THE COMPOSITION OF THREE DOORS THIS LIBRARY ALREADY HAS. A horizontal origin sits on the
+ * BASELINE at the glyph's LEFT SIDE BEARING; a vertical origin sits at the TOP of the line, centred over the
+ * glyph's advance. So the offset for a glyph is
+ *
+ *     x = advance / 2 - left side bearing          y = the face's ascent
+ *
+ * AND EVERY INGREDIENT IS READ RATHER THAN ASSUMED: the advance from `CTFontGetAdvancesForGlyphs`, the bearing from
+ * the ORIGIN OF THE BOUNDING BOX `CTFontGetBoundingRectsForGlyphs` reports -- for the horizontal orientation that
+ * origin IS the left side bearing -- and the ascent from `CTFontGetAscent`. Nothing here is a table read, because
+ * nothing here needs one.
+ *
+ * AND THE VERTICAL METRICS ARE NOT READ, WHICH IS RECORDED AS A BOUNDARY RATHER THAN HIDDEN BY THE DOOR'S PRESENCE.
+ * A face MAY carry `vhea` and `vmtx` (or `VORG`), which state the vertical origin and advance itself -- and NO FACE
+ * INSTALLED HERE CARRIES THEM, which was measured by asking the installed faces for their table directories rather
+ * than assumed. WHAT THIS DOOR ANSWERS IS THE FORMAT'S OWN FALLBACK FOR A FACE WITHOUT THEM: vertical layout on the
+ * HORIZONTAL advances with the ascent above them, which is exactly where the two formulas above come from. THE DAY
+ * A VERTICAL FACE IS INSTALLED, the tables it carries are what this answer would have to consult.
+ *
+ * AND A SECOND BOUNDARY GOES WITH IT: what this door answers is SCALED BY THE POINT SIZE AND NOT BY THE MATRIX,
+ * which is this library's rule for every metric -- the matrix moves GLYPHS, and these are offsets in the boxes they
+ * sit in. An offset here is a translation in the font's own points, through whichever doors supply it. */
+void CTFontGetVerticalTranslationsForGlyphs(CTFontRef font, const CGGlyph glyphs[], CGSize translations[],
+					    CFIndex count)
+{
+	const struct __CTFont *f = (const struct __CTFont *)font;
+	CGSize *advances;
+	CGFloat ascent;
+	CFIndex i;
+
+	if (f == NULL || glyphs == NULL || translations == NULL || count <= 0) {
+		return;
+	}
+	if (count > (CFIndex)(SIZE_MAX / sizeof(CGSize))) {
+		return;
+	}
+	advances = (CGSize *)malloc((size_t)count * sizeof(CGSize));
+	if (advances == NULL) {
+		return;	/* NOTHING IS WRITTEN, which is the honest failure: a half-filled array would be worse */
+	}
+	(void)CTFontGetAdvancesForGlyphs(font, kCTFontHorizontalOrientation, glyphs, advances, count);
+	ascent = CTFontGetAscent(font);
+	for (i = 0; i < count; i++) {
+		CGRect box;
+
+		(void)CTFontGetBoundingRectsForGlyphs(font, kCTFontHorizontalOrientation, &glyphs[i], &box, 1);
+		translations[i].width = advances[i].width / 2.0 - box.origin.x;
+		translations[i].height = ascent;
+	}
+	free(advances);
 }
 
 /* =================================================================================================
@@ -1748,98 +1955,65 @@ CFCharacterSetRef CTFontCopyCharacterSet(CTFontRef font)
 }
 
 /* =================================================================================================
- * OWED DOORS, EACH WITH THE REASON IT CANNOT BE ANSWERED HERE. They are DECLARED in CTFont.h and NOT DEFINED,
- * so a caller who reaches for one gets a link error rather than a plausible wrong answer.
+ * WHAT IS STILL OWED, AND WHY. Every door below is DECLARED in a header and NOT DEFINED, so a caller who reaches for
+ * one gets a LINK ERROR rather than a plausible wrong answer -- and `tests/CMakeLists.txt` names every one of them,
+ * because a comment asserting an absence is worth little: the `owed` test reads `nm -D` and FAILS if a door on that
+ * list acquires a definition.
  *
- * AND `CTFontGetSymbolicTraits` HAS LEFT THIS LIST, BY TABLES RATHER THAN BY THE STRING THE REASON REFUSED: the guess
- * is still refused, and `OS/2.fsSelection`, `head.macStyle` and `post.isFixedPitch` carry the facts. See the door.
+ * TEN DOORS HAVE LEFT THIS LIST IN ONE NIGHT, AND THE LIST WAS WRONG ABOUT NINE OF THEM IN A WAY THAT IS WORTH
+ * READING AS ONE THING: THEIR REASONS WERE CONDITIONS THAT HAD GONE FALSE WITHOUT THE LIST BEING READ AGAIN.
  *
- *   CTFontCopyTraits                              ITS SYMBOLIC ENTRY IS ANSWERABLE NOW -- `CTFontGetSymbolicTraits` IS
- *                                                 that answer -- BUT THE OTHER THREE ARE APPLE'S NORMALISATION
- *                                                 CURVES: the weight, width and slant entries are floats normalised
- *                                                 around zero, and NO HEADER IN THE ERA PRINTS THE CURVE that turns a
- *                                                 `usWeightClass` into one. A dictionary missing three of its four
- *                                                 keys, or carrying three invented ones, would be worse than the link
- *                                                 error, so the door waits on a curve nobody has written down.
- *   CTFontCopySupportedLanguages,                 needs the OS/2 and name-table data that languages come from,
- *   CTFontGetStringEncoding                       which is DATA IN A TABLE and not a mapping -- see below.
+ *   CTFontCopyVariation           its reason named `fvar` and `avar`; Apple's own words say an INSTANCE is a CHOICE
+ *                                and an AXIS is a CAPABILITY, and the choice was already in the descriptor.
+ *   CTFontCopyVariationAxes       `avar` is not one of the five facts an axis dictionary carries, and the note that
+ *                                "no variable font is installed on this machine" was written WITHOUT LOOKING: one is.
+ *   CTFontCopyFeatureSettings     it was owed as half of "the `feat` table", and it is not that door at all -- it
+ *                                answers the settings the font was ASKED FOR.
+ *   CTFontDescriptorCreateCopyWithFeature   landed with `CTFont.h`, where its two keys live -- and found a REAL BUG
+ *                                in the descriptor's copy door on the way (see CTFontDescriptor.c).
+ *   CTFontCopyCharacterSet        the glyph step could be asked exhaustively instead of a cmap being read.
+ *   CTFontCopyTable, ...Tables    `libagora-drawing` grew the seam doors that read a table (another repository's work).
+ *   The `post` metrics,           the trait tables, and the three doors that ASK A REGISTRY rather than a name: the
+ *   GetSymbolicTraits,            matching tier's walk enumerates the faces, so "a face with those traits to exist
+ *   CopyTraits, SlantAngle,       and be found" stopped being a shortage. The trait and slant and vertical doors are
+ *   VerticalTranslations          the last of them, and each one's curve or formula is a RECORDED DEVIATION rather
+ *                                than a guess: see the doors themselves.
  *
- * AND TWO THAT USED TO BE HERE ARE GONE FROM IT. `CTFontCopyCharacterSet` IS DEFINED NOW, AND BY THE INVERSE OF THE
- * GLYPH STEP THIS LIBRARY ALREADY HAD: the face is asked which code units it maps, in sixteen calls, and the ones it
- * answers for are the set. IT IS A FACT AND NOT A GUESS -- the same fact `CTFontGetGlyphsForCharacters` reports, asked
- * exhaustively -- and the case holds the two doors to saying the same thing, code unit by code unit.
+ * AND WHAT REMAINS IS SIX, AND NOT ONE OF THEM IS WAITING ON WORK THIS LIBRARY CAN DO TONIGHT:
  *
- * AND ONE BOUNDARY IS RECORDED WHERE THE DOOR IS: the seam's mapping takes UTF-16 CODE UNITS, so the scan covers the
- * BASIC MULTILINGUAL PLANE and the faces' coverage of the planes above it is NOT reported. Apple reads a cmap, which
- * would include them. The condition that would close it is a seam door taking SCALAR VALUES rather than code units,
- * and nothing else about this door would change.
- * AND THE TABLE FAMILY'S REASON IS CORRECTED RATHER THAN LEFT STANDING, WHICH THIS COMMIT DOES BECAUSE IT MADE IT FALSE:
- * `CTFontCopyTable` and `CTFontCopyAvailableTables` ARE DEFINED NOW (above), and what the rest of the family waits for
- * was never the absence of a table -- it was THE ABSENCE OF A DOOR TO ONE, AND THAT DOOR EXISTS:
- * `libagora-drawing` grew `cg_font_copy_table` and `cg_font_table_tags`, which hand back the file's bytes and the
- * directory. WHAT EACH OF THESE STILL NEEDS IS THE FORMAT PARSING ON THIS SIDE, one table at a time:
- *
- * AND `CTFontCopyVariation` HAS LEFT THIS LIST BECAUSE ITS REASON WAS WRONG ABOUT IT, not because a table arrived:
- * Apple's own words are that it returns "the CURRENT VARIATION INSTANCE", while the AXES door returns "an array of
- * variation AXES" -- AN INSTANCE IS A CHOICE AND AN AXIS IS A CAPABILITY, and the choice has been stored in the font's
- * descriptor since this tier began holding one. See the door for the boundary that goes with it.
- *
- *   CTFontCopyVariationAxes                       LEFT THIS LIST with the `fvar` parse, AND ITS REASON WAS WRONG
- *                                                 TWICE OVER: `avar` is not one of the five facts an axis dictionary
- *                                                 carries (it maps a coordinate when one is SET), and the note that "no
- *                                                 variable font is installed on this machine" was written without
- *                                                 looking -- a case now exercises the REAL `fvar` path against an
- *                                                 installed variable face.
- *   CTFontCopyFeatureSettings                     LEFT THIS LIST BECAUSE IT IS NOT THE `feat` DOOR: `feat` lists what
- *                                                 a face OFFERS, and this door answers the settings the font was
- *                                                 ASKED FOR -- a choice, held in its descriptor since the font was
- *                                                 made. The pair was owed as one and it was two.
- *   CTFontCopyFeatures                            STILL OWED, and its reason is no longer that the seam cannot read a
- *                                                 table -- it can -- but that NO FACE INSTALLED HERE CARRIES ONE,
- *                                                 measured over every installed face: a case could not tell a right
- *                                                 parse from a wrong one, and a parser nothing holds is not shipped.
- * AND `CTFontGetUnderlinePosition` AND `...Thickness` HAVE LEFT THIS LIST TOO, as the first doors here to read a table
- * and interpret it. Their reason said "the `post` table; the seam reports no underline metrics" -- the seam reads the
- * table now, and the two fields sit at FIXED OFFSETS in every `post` version, so the parse is two big-endian int16s and
- * no version check. The sign is the table's, which is recorded where the doors are.
- *   CTFontGetSlantAngle                           Apple's slant is the GLYPH-SPACE slant, not the italic
- *                                                 angle Core Graphics reports; they are different numbers.
- *   CTFontGetVerticalTranslationsForGlyphs        needs the vertical metrics the advances door also lacks.
+ *   CTFontCopyFeatures                            the `feat` table -- and its reason is NOT "the seam cannot read a
+ *                                                table" (it can) but that NO FACE INSTALLED HERE CARRIES ONE, which
+ *                                                was measured by asking every installed face for its table directory.
+ *                                                A parser nothing can hold is not shipped, and the condition that
+ *                                                moves this door is a face that carries `feat`.
+ *   CTFontCopySupportedLanguages,                 A MAPPING NO ERA HEADER PRINTS: which BCP 47 languages a face
+ *   CTFontGetStringEncoding                       supports, and which legacy encoding is "best" for it, are Apple's
+ *                                                own tables rather than a field's value. `OS/2`'s code-page ranges are
+ *                                                the nearest data and they answer for WINDOWS code pages, not for
+ *                                                languages; the user's decision is that these two STAY OWED rather than
+ *                                                be answered by a mapping this library would have to invent.
  *   CTFontGetPlatformFont, ...WithPlatformFont    PERMANENT, AND THE DECISION IS RECORDED: these speak in ATSFontRef
- *                                                 and Agora HAS NO ATS, so they stay declared and owed. The
- *                                                 alternative -- an Agora id space standing in for ATS's -- would be
- *                                                 this library answering in a vocabulary the era's framework does
- *                                                 not have, which is the one thing it will not do.
- *   CTFontManagerCreateFontRequestRunLoopSource   the Agora font service: the WIRE is built (CTFontService.c) and the
- *                                                 TRANSPORT is not. See FONT-SERVICE.md for which half is which.
- *
- * AND FOUR DOORS LEFT THIS LIST BY THE SAME CONDITION, WHICH IS WORTH READING AS ONE THING: `CTFontCreateForString`,
- * `CTFontCreateCopyWithSymbolicTraits`, `CTFontCreateCopyWithFamily` and `CTFontCreateUIFontForLanguage` are DEFINED,
- * and the three that waited on a REGISTRY stopped waiting when the matching tier landed — the reasons said "needs a
- * cascade and a fallback search", "needs a face with those traits to exist and be found" and "needs the family's
- * faces to be enumerable", and the walk that enumerates them has been in `CTFontMatching.c` since. THE REASONS WERE
- * CONDITIONS AND THEY HAD GONE FALSE WITHOUT THE LIST BEING READ AGAIN, which is the failure mode this block exists
- * to avoid. THE FOURTH IS DIFFERENT AND IS NOT A FALSIFIED REASON AT ALL: "a ROLE is a request to a system that
- * chooses a face" is still TRUE, and that door is answered by a DECISION (recorded at the door) rather than by a
- * condition changing. AND ALL FOUR ANSWER FROM THE FACES **THIS PROCESS HAS REGISTERED**, which their own block
- * states: a fresh process here sees ZERO faces, so "the system" is a narrower thing than Apple's and the difference
- * is written where a caller reads it rather than left to be discovered from a NULL.
- *
- * AND ONE PARAGRAPH OF THIS BLOCK WAS WRONG ABOUT THE MATCHING DOORS, which is corrected here rather than deleted: it
- * said the two doors on CTFontDescriptorRef were owed "because the ordering it must impose is Apple's and not
- * something to invent", with a registry of installed faces as the missing piece. THE REGISTRY IS NOT MISSING AND THE
- * TWO DOORS ARE DEFINED -- `CTFontMatching.c` owns them, the set is the engine's own list (`cg_font_enumerate`) and
- * the ORDER is this tier's recorded decision. The paragraph stayed on this page after the tier landed, WHICH IS
- * EXACTLY THE KIND OF STALE SENTENCE THIS BLOCK EXISTS TO KEEP CORRECTED, and it was found by reading the owed list
- * against the library rather than by trusting the list.
+ *                                                and Agora HAS NO ATS. The alternative -- an Agora id space standing
+ *                                                in for ATS's -- would be this library answering in a vocabulary the
+ *                                                era's framework does not have, which is the one thing it will not do.
+ *   CTFontManagerCreateFontRequestRunLoopSource   the Agora font service: THE WIRE IS BUILT (`CTFontService.c` holds
+ *                                                both halves of the conversation and its case drives them in
+ *                                                process) and THE TRANSPORT IS NOT -- a socket, a port name derived
+ *                                                from the process, a name registry with a runtime behind it, and the
+ *                                                daemon that can find another process's port. `FONT-SERVICE.md` has
+ *                                                the survey and names which half is which. It is a SYSTEM and not a
+ *                                                door, which is why it is its own milestone.
  *
  * AND ONE DOOR OF APPLE'S IS NOT EVEN DECLARED HERE, WHICH IS THE ONLY ABSENCE OF THAT KIND: `CTFontCreateWithQuickdraw-
- * Instance`. Apple's 10.6 header declares it plainly, with no guard, and this library does not declare it at all --
- * so a caller does not get a link error, they get nothing to compile against, WHICH IS A LOUDER ABSENCE AND A WORSE ONE
- * TO LEAVE UNSAID. THE REASON IS A DRAWING SYSTEM AND NOT A TIER: QuickDraw is the Macintosh-era drawing system, Agora
- * is a desktop environment that does not have it, and the door speaks in its terms.
+ * Instance`. Apple's 10.6 header declares it plainly, with no guard, and this library does not declare it at all -- so
+ * a caller does not get a link error, they get nothing to compile against, WHICH IS A LOUDER ABSENCE AND A WORSE ONE TO
+ * LEAVE UNSAID. THE REASON IS A DRAWING SYSTEM AND NOT A TIER: QuickDraw is the Macintosh-era drawing system, Agora is
+ * a desktop environment that does not have it, and the door speaks in its terms.
  *
  * RECORDED HERE RATHER THAN LEFT OUT, because of what this tree's rules actually say: owed doors are DECLARED, with a
  * reason each, so that reaching for one gets a link error rather than a guess. A door that is not declared has left the
  * mechanism entirely, and an omission with no note is the one kind of absence that cannot be checked by anybody later.
+ * AND THE REASON ABOVE EACH DOOR IS A CONDITION, WHICH IS WHY THIS PAGE KEEPS BEING REWRITTEN: the rule that has held
+ * all night is that a reason which becomes false moves a door, and the only way to notice is to READ THIS LIST AGAINST
+ * THE LIBRARY rather than trusting it.
  * =============================================================================================== */

@@ -1132,3 +1132,76 @@ measures an empty range at the END of a string and on an EMPTY string, which are
 MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with NO compiler diagnostic at all; a bare
 `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over `text: 39 of 39 cases passed, 0 failed`; the
 library DEFINES **152** `CT…` names; and the `owed` guard is down to **9** — the four left in the commit that defined them.
+
+**The last three metrics, and the curves that had to be written down (2026-10-12).** `CTFontCopyTraits`,
+`CTFontGetSlantAngle` and `CTFontGetVerticalTranslationsForGlyphs` are DEFINED, and with them the `owed` list is down to
+six doors, none of which is waiting on work this library can do. THIS UNIT'S FINDING IS THE SAME SHAPE AS THE NIGHT'S
+OTHER TWO, and it is the one worth carrying: **AN OWED REASON CAN BE WRONG ABOUT THE SHAPE OF THE THING IT REFUSES.**
+
+**`CTFontCopyTraits`: "NO HEADER IN THE ERA PRINTS THE CURVE" — AND THE CURVE IS NOT WHAT IS UNPRINTED, THE ANCHORS
+ARE PRINTED.** The reason was a REFUSAL, and a good one: a dictionary missing three of its four keys, or carrying three
+invented ones, would be worse than a link error. But `CTFontTraits.h` states, in its own words for each key, WHAT ZERO
+MEANS — "0.0 corresponds to the regular or medium font weight" for the weight, "0.0 corresponds to regular glyph
+spacing while negative values represent condensed" for the width, and for the slant BOTH ends: "0.0 corresponds to 0
+degree clockwise rotation from the vertical and 1.0 corresponds to 30 degrees clockwise rotation". So the door is
+buildable on the era's own statements, and the three mappings ARE THE DEVIATION: the format's own scale
+(`usWeightClass` 100..900 with 400 regular, `usWidthClass` 1..9 with 5 normal) set at Apple's zero, and each distance
+divided by THE WIDEST DISTANCE THE FORMAT HAS ON THAT SIDE — 300 below regular, 500 above. EACH IS RECORDED WITH ITS
+LANDING POINT, which is the day a curve is found, and the case is what will hold that curve to the anchors.
+
+**AND THE CASE DOES TWO THINGS BECAUSE ONE OF THEM ALONE PROVES NOTHING.** It RECOMPUTES the three floats from the raw
+`OS/2` and `post` bytes with its own copy of the mapping — which holds the door to the deviation itself rather than to
+its own output — AND it asserts APPLE'S ANCHORS ON REAL FACES: `DejaVuSansMono` is 0.0 on all three, `DejaVuSansMono-Oblique`
+is positive on the slant, `DejaVuSansCondensed` is negative on the width, `DejaVuSans-ExtraLight` is negative on the
+weight. A case that only recomputed would pass if the mapping were wrong in the same way in both places; a case that
+only checked signs would pass on a door that rounded everything. AND THE SYMBOLIC ENTRY IS HELD AGAINST THE DOOR APPLE
+SAYS IT EQUALS — "this is equivalent to the `kCTFontSymbolicTrait` of traits dictionary" — which is this library's own
+`CTFontGetSymbolicTraits`. IT IS WRITTEN AS A 64-BIT INTEGER, which is a decision: the trait word is a bitfield whose
+top four bits are the stylistic class, so a signed 32-bit entry could not carry `8 << 28` without changing it.
+
+**AND THE SLANT'S SECOND INGREDIENT HAD NEVER BEEN READ BY ANYTHING IN THIS FILE.** Apple's sentence names both halves
+— "the italic or caret angle WITH ANY SKEW FROM THE TRANSFORMATION MATRIX APPLIED" — so the door reads
+`post.italicAngle` (the sign turned over, since the format measures it COUNTER-clockwise) and adds the angle the matrix
+gives the vertical, `atan2(c, d)`. **THE UNIT IS DEGREES AND APPLE NEVER STATES IT, SO IT IS A CHOICE, RECORDED**, with
+the reason written where the door is: every other angle in this surface is in degrees, and radians would make this door
+and `kCTFontSlantTrait` disagree by a factor of fifty-seven while both claimed to be the font's slant. THE CASE
+MEASURES THAT AGREEMENT rather than asserting it in prose — the trait times thirty must equal the angle — and it
+measures the transform's own convention with `CGPointApplyAffineTransform`, because "(c, d) is the image of the
+vertical" is the sentence the whole skew formula rests on.
+
+**AND THE VERTICAL ORIGIN TURNED OUT TO BE A COMPOSITION OF THREE DOORS THAT ALREADY EXISTED**, which is why it needed
+no table read and no new seam: half the advance minus the left side bearing, and the ascent. The bearing comes from the
+ORIGIN OF THE BOUNDING BOX the glyph door reports — for the horizontal orientation that origin IS the bearing — so the
+case holds the answer against the two doors it is built from, and adds ONE CHECK THAT NEEDS NO ARITHMETIC AT ALL: A
+SPACE HAS NO OUTLINE, therefore no bearing, so its offset must be EXACTLY half its advance. AND THE VERTICAL METRICS
+ARE NOT READ, WHICH IS RECORDED WHERE THE DOOR IS: a face may carry `vhea`/`vmtx`/`VORG`, NO FACE INSTALLED HERE
+CARRIES THEM (asked of every installed face's table directory rather than assumed), and what the door answers is the
+format's own fallback for a face without them. AND "NOTHING WAS WRITTEN" IS ASSERTED BY LOOKING: a sentinel is put in
+the caller's array and read back after a zero count, a negative count, a NULL font, a NULL glyph array and a NULL
+output — because a door that half-fills an array is the failure this kind of door actually has.
+
+**AND ONE DETAIL IS RECORDED BECAUSE A CASE'S OWN NOTE PRINTED IT: A NEGATIVE ZERO.** The upright face's slant trait
+came out `-0.0` — equal to zero to every comparison, read as negative by `signbit`, and printed as "-0" — so the door
+normalises it and the case's recomputation does the same. It is a small thing that is exactly the size of thing this
+tree writes down: a value that is only EQUAL to the one a reader expects.
+
+**AND FALSIFIED THREE WAYS AT ONCE, ONE CLAIM EACH:**
+
+    FAIL: the weight is 0.75 where the table's usWeightClass 700 maps to 0.6
+    FAIL: The traits dictionary: four keys and one anchor each: checks failed
+    FAIL: a ten-degree shear answered 0 degrees
+    FAIL: the sum is 11 where the face's 11 plus the matrix's ten is 21
+    FAIL: The slant angle is the face's plus the matrix's, in degrees: checks failed
+    FAIL: glyph 0's offset is 3.80566 where half its advance minus its bearing is 3.41895
+    FAIL: glyph 1's offset is 4.34473 where half its advance minus its bearing is 2.87988
+    FAIL: The vertical origin is half the advance and the ascent: checks failed
+    text: 39 of 42 cases passed, 3 failed
+
+— with the weight's divisor collapsed to one side, the matrix term dropped from the slant, and the bearing's sign turned
+over; restored, `42 of 42`.
+
+MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with NO compiler diagnostic at all; a bare
+`ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over `text: 42 of 42 cases passed, 0 failed`; the
+library DEFINES **155** `CT…` names; and the `owed` guard is down to **6** — `CTFontCopyFeatures` (no face here carries
+`feat`), `CTFontCopySupportedLanguages` and `CTFontGetStringEncoding` (Apple's own mappings, the user's decision is that
+they stay owed), the ATS pair (PERMANENT: Agora has no ATS) and the font service's transport (a system, not a door).

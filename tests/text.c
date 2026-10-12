@@ -4242,6 +4242,419 @@ static int case_font_cascade_and_roles(void)
 	return g_fail - before;
 }
 
+/* THE TRAITS DICTIONARY: FOUR KEYS, THREE RECORDED CURVES AND ONE ANCHOR EACH.
+ *
+ * AND THE CASE DOES TWO DIFFERENT THINGS, BECAUSE THE DOOR DOES. It RECOMPUTES the three floats from the raw `OS/2`
+ * and `post` bytes with its own arithmetic -- which holds the door to the MAPPING ITSELF, the recorded deviation,
+ * rather than to its own output -- and it asserts APPLE'S ANCHORS on real faces: a regular face is 0.0, an oblique
+ * face is positive and a condensed one negative, and all three sit inside the closed range the era's header states.
+ * A case that only did the first would pass if the mapping were wrong in the same way in both places; a case that
+ * only did the second would pass on a door that rounded everything to a sign.
+ *
+ * AND THE FACES ARE LOADED FROM THEIR FILES RATHER THAN BY NAME: this door reads TABLES and needs no descriptor, so
+ * naming them would only add a registry dependency to a case about arithmetic. */
+static int case_font_traits_dictionary(void)
+{
+	int before = g_fail;
+	const char *plain_path = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf";
+	const char *bold_path = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf";
+	const char *oblique_path = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Oblique.ttf";
+	const char *condensed_path = "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed.ttf";
+	const char *light_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-ExtraLight.ttf";
+	CTFontRef bold, plain, oblique, condensed, light;
+	CFDictionaryRef traits;
+	CFNumberRef number;
+	CFDataRef os2, post;
+	const UInt8 *bytes;
+	CFIndex length;
+	double want_weight, want_width, want_slant, got;
+	unsigned weight_class = 400, width_class = 5;
+
+	bold = test_font_from_path(bold_path);
+	check(bold != NULL, "the face at %s could not be loaded", bold_path);
+	if (bold == NULL) {
+		return g_fail - before;
+	}
+	traits = CTFontCopyTraits(bold);
+	check(traits != NULL, "the traits dictionary came back empty");
+	if (traits == NULL) {
+		CFRelease(bold);
+		return g_fail - before;
+	}
+	/* APPLE'S OWN COUNT OF THE KEYS, which is what its documentation describes: the symbolic value and the three
+	 * normalised floats. A dictionary missing three of its four entries would be worse than a link error, which is
+	 * what the owed reason said before this door was taken. */
+	check(CFDictionaryGetCount(traits) == 4, "the dictionary carries %ld keys where four are documented",
+	      (long)CFDictionaryGetCount(traits));
+	number = (CFNumberRef)CFDictionaryGetValue(traits, kCTFontWeightTrait);
+	check(number != NULL, "the weight entry is missing");
+	number = (CFNumberRef)CFDictionaryGetValue(traits, kCTFontWidthTrait);
+	check(number != NULL, "the width entry is missing");
+	number = (CFNumberRef)CFDictionaryGetValue(traits, kCTFontSlantTrait);
+	check(number != NULL, "the slant entry is missing");
+
+	/* THE SYMBOLIC ENTRY IS THE LIBRARY'S OWN DOOR, WHICH IS APPLE'S OWN SENTENCE ABOUT IT. */
+	{
+		CFNumberRef symbolic = (CFNumberRef)CFDictionaryGetValue(traits, kCTFontSymbolicTrait);
+		int64_t value = 0;
+
+		check(symbolic != NULL && CFNumberGetValue(symbolic, kCFNumberSInt64Type, &value),
+		      "the symbolic entry is missing or is not an integer");
+		check((CTFontSymbolicTraits)value == CTFontGetSymbolicTraits(bold),
+		      "the symbolic entry is 0x%llX where the traits door answers 0x%X",
+		      (unsigned long long)value, (unsigned)CTFontGetSymbolicTraits(bold));
+	}
+
+	/* AND THE THREE FLOATS, RECOMPUTED FROM THE RAW TABLES BY THE CASE. */
+	os2 = CTFontCopyTable(bold, (CTFontTableTag)kCTFontTableOS2, kCTFontTableOptionNoOptions);
+	post = CTFontCopyTable(bold, (CTFontTableTag)kCTFontTablePost, kCTFontTableOptionNoOptions);
+	check(os2 != NULL && post != NULL, "the face's `OS/2` or `post` table could not be read");
+	if (os2 != NULL && post != NULL) {
+		bytes = (const UInt8 *)CFDataGetBytePtr(os2);
+		length = CFDataGetLength(os2);
+		check(bytes != NULL && length >= 8, "`OS/2` came back as %ld bytes, and its first fields need eight",
+		      (long)length);
+		if (bytes != NULL && length >= 8) {
+			weight_class = case_be16(bytes + 4);
+			width_class = case_be16(bytes + 6);
+		}
+		bytes = (const UInt8 *)CFDataGetBytePtr(post);
+		length = CFDataGetLength(post);
+		check(bytes != NULL && length >= 8, "`post` came back as %ld bytes, and its first fields need eight",
+		      (long)length);
+		/* THE MAPPING, WRITTEN OUT IN THE CASE AS THE DEVIATION IT IS: the format's own scale, its own regular
+		 * value, and Apple's stated anchors at 0.0. */
+		want_weight = (weight_class > 400) ? ((double)weight_class - 400.0) / 500.0
+						   : -((400.0 - (double)weight_class) / 300.0);
+		want_width = ((double)width_class - 5.0) / 4.0;
+		want_slant = 0.0;
+		if (bytes != NULL && length >= 8) {
+			want_slant = -case_fixed(bytes + 4) / 30.0;
+			if (want_slant == 0.0) {
+				want_slant = 0.0;	/* the same negative-zero rule the door carries, so the note
+							 * below prints the door's value and not the case's */
+			}
+			if (want_slant > 1.0) {
+				want_slant = 1.0;
+			} else if (want_slant < -1.0) {
+				want_slant = -1.0;
+			}
+		}
+		number = (CFNumberRef)CFDictionaryGetValue(traits, kCTFontWeightTrait);
+		got = 99.0;
+		check(number != NULL && CFNumberGetValue(number, kCFNumberDoubleType, &got) &&
+		      fabs(got - want_weight) < 0.0001,
+		      "the weight is %g where the table's usWeightClass %u maps to %g", got, weight_class, want_weight);
+		number = (CFNumberRef)CFDictionaryGetValue(traits, kCTFontWidthTrait);
+		got = 99.0;
+		check(number != NULL && CFNumberGetValue(number, kCFNumberDoubleType, &got) &&
+		      fabs(got - want_width) < 0.0001,
+		      "the width is %g where the table's usWidthClass %u maps to %g", got, width_class, want_width);
+		number = (CFNumberRef)CFDictionaryGetValue(traits, kCTFontSlantTrait);
+		got = 99.0;
+		check(number != NULL && CFNumberGetValue(number, kCFNumberDoubleType, &got) &&
+		      fabs(got - want_slant) < 0.0001,
+		      "the slant is %g where the `post` italic angle maps to %g", got, want_slant);
+		printf("  (note: the bold face is usWeightClass %u, usWidthClass %u, and its traits are %g / %g / %g)\n",
+		       weight_class, width_class, want_weight, want_width, want_slant);
+		CFRelease(post);
+		CFRelease(os2);
+	}
+	CFRelease(traits);
+
+	/* AND APPLE'S ANCHORS ON FACES THAT STATE EACH ONE, which the last four checks are for: 0.0 IS REGULAR, AN
+	 * OBLIQUE FACE IS POSITIVE AND A CONDENSED ONE NEGATIVE, AND EVERY VALUE IS INSIDE THE CLOSED RANGE THE ERA'S
+	 * HEADER STATES. */
+	plain = test_font_from_path(plain_path);
+	oblique = test_font_from_path(oblique_path);
+	condensed = test_font_from_path(condensed_path);
+	light = test_font_from_path(light_path);
+	check(plain != NULL && oblique != NULL && condensed != NULL && light != NULL,
+	      "one of the four faces the anchors are measured on could not be loaded");
+
+	/* A HELPER WOULD HIDE THE THREE ASSERTIONS, SO THEY ARE WRITTEN OUT: each face is asked for one entry. */
+	if (plain != NULL) {
+		CFDictionaryRef t = CTFontCopyTraits(plain);
+
+		got = 99.0;
+		number = (t != NULL) ? (CFNumberRef)CFDictionaryGetValue(t, kCTFontWeightTrait) : NULL;
+		check(number != NULL && CFNumberGetValue(number, kCFNumberDoubleType, &got) && got == 0.0,
+		      "a REGULAR face's weight is %g, and Apple's anchor says 0.0 is regular or medium", got);
+		got = 99.0;
+		number = (t != NULL) ? (CFNumberRef)CFDictionaryGetValue(t, kCTFontWidthTrait) : NULL;
+		check(number != NULL && CFNumberGetValue(number, kCFNumberDoubleType, &got) && got == 0.0,
+		      "a face at the format's NORMAL width answers %g, and Apple's anchor says 0.0 is regular", got);
+		got = 99.0;
+		number = (t != NULL) ? (CFNumberRef)CFDictionaryGetValue(t, kCTFontSlantTrait) : NULL;
+		check(number != NULL && CFNumberGetValue(number, kCFNumberDoubleType, &got) && got == 0.0,
+		      "an upright face's slant is %g, and Apple's anchor says 0.0 is no rotation", got);
+		if (t != NULL) {
+			CFRelease(t);
+		}
+	}
+	if (oblique != NULL) {
+		CFDictionaryRef t = CTFontCopyTraits(oblique);
+
+		got = 0.0;
+		number = (t != NULL) ? (CFNumberRef)CFDictionaryGetValue(t, kCTFontSlantTrait) : NULL;
+		check(number != NULL && CFNumberGetValue(number, kCFNumberDoubleType, &got) && got > 0.0,
+		      "an OBLIQUE face's slant is %g, and the format writes its italic angle as a negative number", got);
+		check((CTFontGetSymbolicTraits(oblique) & kCTFontItalicTrait) != 0,
+		      "the oblique face has no italic trait, so the sign here would prove nothing");
+		if (t != NULL) {
+			printf("  (note: the oblique face's slant trait is %g, and its angle is %g degrees)\n",
+			       got, (double)CTFontGetSlantAngle(oblique));
+			CFRelease(t);
+		}
+	}
+	if (condensed != NULL) {
+		CFDictionaryRef t = CTFontCopyTraits(condensed);
+
+		got = 0.0;
+		number = (t != NULL) ? (CFNumberRef)CFDictionaryGetValue(t, kCTFontWidthTrait) : NULL;
+		check(number != NULL && CFNumberGetValue(number, kCFNumberDoubleType, &got) && got < 0.0,
+		      "a CONDENSED face's width is %g, and Apple's anchor says negative values are condensed", got);
+		if (t != NULL) {
+			CFRelease(t);
+		}
+	}
+	if (light != NULL) {
+		CFDictionaryRef t = CTFontCopyTraits(light);
+
+		got = 0.0;
+		number = (t != NULL) ? (CFNumberRef)CFDictionaryGetValue(t, kCTFontWeightTrait) : NULL;
+		check(number != NULL && CFNumberGetValue(number, kCFNumberDoubleType, &got) && got < 0.0,
+		      "a LIGHT face's weight is %g, and a face lighter than regular must be negative", got);
+		if (t != NULL) {
+			CFRelease(t);
+		}
+	}
+	if (plain != NULL) {
+		CFRelease(plain);
+	}
+	if (oblique != NULL) {
+		CFRelease(oblique);
+	}
+	if (condensed != NULL) {
+		CFRelease(condensed);
+	}
+	if (light != NULL) {
+		CFRelease(light);
+	}
+	CFRelease(bold);
+	check(CTFontCopyTraits(NULL) == NULL, "a NULL font produced a traits dictionary");
+	return g_fail - before;
+}
+
+/* THE SLANT ANGLE, WHICH IS TWO INGREDIENTS ADDED AND A UNIT APPLE NEVER STATES.
+ *
+ * THE CASE MEASURES ALL THREE THINGS RATHER THAN ONE. The face's own angle is held against the `post` table the case
+ * reads itself; THE MATRIX'S SKEW IS HELD AGAINST A MATRIX THE CASE BUILDS OUT OF A TANGENT IT KNOWS -- tan(10
+ * degrees) is a ten-degree lean, and no arithmetic in the door can make it something else; AND THE TRANSFORM'S
+ * CONVENTION IS MEASURED WITH THE PUBLIC DOOR rather than trusted, since "the image of the vertical is (c, d)" is
+ * the sentence the whole skew formula rests on. AND THE SUM IS ASSERTED, on a face that has BOTH ingredients, which
+ * is the only way to tell a door that adds them from one that reports whichever it finds.
+ *
+ * AND THE UNIT IS CROSS-CHECKED AGAINST THE OTHER DOOR THAT SPEAKS OF SLANT: `kCTFontSlantTrait` says 1.0 IS THIRTY
+ * DEGREES, so this door's answer must be thirty times that entry -- two doors, one fact, and a factor of fifty-seven
+ * would show up here as a failure rather than in a caller's layout. */
+static int case_font_slant_angle(void)
+{
+	int before = g_fail;
+	const char *upright_path = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf";
+	const char *oblique_path = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Oblique.ttf";
+	CTFontRef upright, oblique, skewed, skewed_oblique;
+	CGAffineTransform lean;
+	CFDataRef post;
+	const UInt8 *bytes;
+	double italic, want;
+	CGFloat got;
+	CGPoint vertical;
+
+	post = NULL;
+	lean = CGAffineTransformIdentity;
+	/* A TEN-DEGREE LEAN, EXPRESSED AS THE SHEAR THE TRANSFORM'S OWN `c` FIELD IS: x grows with y by its tangent. */
+	lean.c = (CGFloat)0.176326980708465;	/* tan(10 degrees) */
+
+	upright = test_font_from_path(upright_path);
+	oblique = test_font_from_path(oblique_path);
+	check(upright != NULL && oblique != NULL, "the two faces the slant is measured on could not be loaded");
+	if (upright == NULL || oblique == NULL) {
+		return g_fail - before;
+	}
+
+	/* THE TRANSFORM'S CONVENTION, MEASURED: the vertical direction's image IS (c, d), which is what makes
+	 * atan2(c, d) an angle anyone can check. */
+	vertical = CGPointApplyAffineTransform(CGPointMake(0.0, 1.0), lean);
+	check(fabs((double)vertical.x - (double)lean.c) < 0.000001 && fabs((double)vertical.y - (double)lean.d) < 0.000001,
+	      "the transform puts the vertical at (%g, %g) where the shear says (%g, %g)",
+	      (double)vertical.x, (double)vertical.y, (double)lean.c, (double)lean.d);
+
+	/* THE FACE'S OWN ANGLE, READ FROM THE TABLE BY THE CASE. */
+	post = CTFontCopyTable(oblique, (CTFontTableTag)kCTFontTablePost, kCTFontTableOptionNoOptions);
+	check(post != NULL, "the oblique face's `post` table could not be read");
+	if (post != NULL) {
+		bytes = (const UInt8 *)CFDataGetBytePtr(post);
+		check(bytes != NULL && CFDataGetLength(post) >= 8, "`post` is too short for its italic angle");
+		if (bytes != NULL && CFDataGetLength(post) >= 8) {
+			italic = case_fixed(bytes + 4);
+			check(italic != 0.0, "the oblique face's italic angle is 0, so the sign check would prove nothing");
+			want = -italic;	/* the table is counter-clockwise, this door is clockwise */
+			got = CTFontGetSlantAngle(oblique);
+			check(fabs((double)got - want) < 0.0001,
+			      "the oblique face's angle is %g where its `post` italic angle %g means %g",
+			      (double)got, italic, want);
+			printf("  (note: the oblique face's `post` italic angle is %g, and the door answers %g degrees)\n",
+			       italic, (double)got);
+		}
+		CFRelease(post);
+	}
+
+	/* AND AN UPRIGHT FACE WITH AN IDENTITY MATRIX IS ZERO -- Apple's own anchor, on the other side. */
+	check(CTFontGetSlantAngle(upright) == 0.0, "an upright face under the identity answers %g",
+	      (double)CTFontGetSlantAngle(upright));
+
+	/* THE MATRIX'S SKEW ALONE: ten degrees of shear on an upright face. */
+	skewed = CTFontCreateCopyWithSymbolicTraits(upright, 0.0, &lean, 0, 0);
+	check(skewed != NULL, "the copy under a leaning matrix could not be made");
+	if (skewed != NULL) {
+		got = CTFontGetSlantAngle(skewed);
+		check(fabs((double)got - 10.0) < 0.001, "a ten-degree shear answered %g degrees", (double)got);
+		CFRelease(skewed);
+	}
+
+	/* AND THE SUM, WHICH IS THE ASSERTION THE WHOLE CASE EXISTS FOR: the oblique face under the same shear carries
+	 * BOTH ingredients, and a door that reported one of them would fail here and pass everywhere above. */
+	skewed_oblique = CTFontCreateCopyWithSymbolicTraits(oblique, 0.0, &lean, 0, 0);
+	check(skewed_oblique != NULL, "the oblique face under a leaning matrix could not be copied");
+	if (skewed_oblique != NULL) {
+		double face_angle = (double)CTFontGetSlantAngle(oblique);
+
+		got = CTFontGetSlantAngle(skewed_oblique);
+		check(fabs((double)got - (face_angle + 10.0)) < 0.001,
+		      "the sum is %g where the face's %g plus the matrix's ten is %g",
+		      (double)got, face_angle, face_angle + 10.0);
+		CFRelease(skewed_oblique);
+	}
+
+	/* AND THE TWO DOORS THAT SPEAK OF SLANT AGREE: `kCTFontSlantTrait` states that 1.0 IS thirty degrees. */
+	{
+		CFDictionaryRef traits = CTFontCopyTraits(oblique);
+
+		if (traits != NULL) {
+			CFNumberRef entry = (CFNumberRef)CFDictionaryGetValue(traits, kCTFontSlantTrait);
+			double trait = 0.0;
+
+			check(entry != NULL && CFNumberGetValue(entry, kCFNumberDoubleType, &trait),
+			      "the oblique face has no slant trait to cross-check against");
+			check(fabs(trait * 30.0 - (double)CTFontGetSlantAngle(oblique)) < 0.0001,
+			      "the trait says %g (thirty to the degree) where the angle door says %g",
+			      trait, (double)CTFontGetSlantAngle(oblique));
+			CFRelease(traits);
+		}
+	}
+
+	check(CTFontGetSlantAngle(NULL) == 0.0, "a NULL font produced an angle");
+	CFRelease(upright);
+	CFRelease(oblique);
+	return g_fail - before;
+}
+
+/* THE VERTICAL TRANSLATIONS, WHICH ARE A COMPOSITION OF THREE DOORS AND ARE HELD AS ONE.
+ *
+ * EVERY INGREDIENT IS ASSERTED SEPARATELY AND THE COMPOSITION IS ASSERTED ON TOP, because a composition that agrees
+ * with its parts is the only kind worth having: the height IS the ascent (measured against the ascent door, not
+ * against a number), and the width IS half the advance minus the bearing -- both taken from the doors the answer is
+ * built from. AND ONE CASE CARRIES NO ARITHMETIC AT ALL: A SPACE HAS NO OUTLINE, so its bounding box has no left
+ * side bearing and its offset must be EXACTLY half its advance, which a door that confused the two origins would
+ * not manage.
+ *
+ * AND THE ARRAY IS WRITTEN ONLY WHEN IT IS ASKED FOR: a count of zero, or a NULL array, must leave the caller's
+ * memory alone -- asserted by putting a sentinel in and reading it back, which is the only way to see it. */
+static int case_font_vertical_origin(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(12.0);
+	UniChar characters[3];
+	CGGlyph glyphs[3];
+	CGSize translations[3];
+	CGSize advances[3];
+	CGRect boxes[3];
+	CGFloat ascent;
+	int i;
+
+	check(font != NULL, "no font, so there is no vertical origin");
+	if (font == NULL) {
+		return g_fail - before;
+	}
+	characters[0] = 'A';
+	characters[1] = 'B';
+	characters[2] = ' ';
+	check(CTFontGetGlyphsForCharacters(font, characters, glyphs, 3),
+	      "the face under test does not map A, B and a space, so the offsets cannot be read");
+	ascent = CTFontGetAscent(font);
+	check(ascent > 0.0, "the face reports an ascent of %g, and a positive one is what the door puts in the height",
+	      (double)ascent);
+
+	translations[0] = CGSizeMake(-1.0, -1.0);
+	translations[1] = CGSizeMake(-1.0, -1.0);
+	translations[2] = CGSizeMake(-1.0, -1.0);
+	CTFontGetVerticalTranslationsForGlyphs(font, glyphs, translations, 3);
+	(void)CTFontGetAdvancesForGlyphs(font, kCTFontHorizontalOrientation, glyphs, advances, 3);
+	(void)CTFontGetBoundingRectsForGlyphs(font, kCTFontHorizontalOrientation, glyphs, boxes, 3);
+
+	for (i = 0; i < 3; i++) {
+		double want = (double)advances[i].width / 2.0 - (double)boxes[i].origin.x;
+
+		check(fabs((double)translations[i].height - (double)ascent) < 0.0001,
+		      "glyph %d's height is %g where the ascent door says %g",
+		      i, (double)translations[i].height, (double)ascent);
+		check(fabs((double)translations[i].width - want) < 0.0001,
+		      "glyph %d's offset is %g where half its advance minus its bearing is %g",
+		      i, (double)translations[i].width, want);
+		check((double)translations[i].width > 0.0 && (double)translations[i].width <= (double)advances[i].width,
+		      "glyph %d's offset (%g) is not inside its own advance (%g)",
+		      i, (double)translations[i].width, (double)advances[i].width);
+	}
+	check(advances[2].width > 0.0, "the space has no advance, so the bearing half cannot be checked");
+	check(fabs((double)translations[2].width - (double)advances[2].width / 2.0) < 0.0001,
+	      "a SPACE has no outline and therefore no bearing, so its offset must be exactly half its advance: it is %g where half of %g is %g",
+	      (double)translations[2].width, (double)advances[2].width, (double)advances[2].width / 2.0);
+	printf("  (note: at 12 points the ascent is %g and 'A' sits %g points right of the horizontal origin)\n",
+	       (double)ascent, (double)translations[0].width);
+
+	/* AND ONE GLYPH AT A TIME AGREES WITH THREE AT ONCE, which is the range rule this door's neighbours all hold. */
+	{
+		CGSize one = CGSizeMake(-1.0, -1.0);
+
+		CTFontGetVerticalTranslationsForGlyphs(font, &glyphs[0], &one, 1);
+		check(one.width == translations[0].width && one.height == translations[0].height,
+		      "asking for one glyph answered (%g, %g) where asking for three answered (%g, %g)",
+		      (double)one.width, (double)one.height, (double)translations[0].width,
+		      (double)translations[0].height);
+	}
+
+	/* AND NOTHING IS WRITTEN WHEN THERE IS NOTHING TO WRITE. */
+	translations[0] = CGSizeMake(-7.5, -7.5);
+	CTFontGetVerticalTranslationsForGlyphs(font, glyphs, translations, 0);
+	check(translations[0].width == -7.5 && translations[0].height == -7.5,
+	      "a count of zero wrote to the caller's array");
+	CTFontGetVerticalTranslationsForGlyphs(font, glyphs, translations, -1);
+	check(translations[0].width == -7.5 && translations[0].height == -7.5,
+	      "a NEGATIVE count wrote to the caller's array");
+	CTFontGetVerticalTranslationsForGlyphs(NULL, glyphs, translations, 3);
+	check(translations[0].width == -7.5 && translations[0].height == -7.5,
+	      "a NULL font wrote to the caller's array");
+	CTFontGetVerticalTranslationsForGlyphs(font, NULL, translations, 3);
+	check(translations[0].width == -7.5 && translations[0].height == -7.5,
+	      "a NULL glyph array wrote to the caller's array");
+	CTFontGetVerticalTranslationsForGlyphs(font, glyphs, NULL, 3);
+	check(1, "a NULL output array is a no-op rather than a crash");
+
+	CFRelease(font);
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -4282,6 +4695,9 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "A feature setting is a tuple, and toggling one keeps the others", case_font_feature_settings },
 	{ "Same family and these traits, and the family a style cannot cross", case_font_family_and_traits },
 	{ "A cascade answers by list first, and a role answers by fact", case_font_cascade_and_roles },
+	{ "The traits dictionary: four keys and one anchor each", case_font_traits_dictionary },
+	{ "The slant angle is the face's plus the matrix's, in degrees", case_font_slant_angle },
+	{ "The vertical origin is half the advance and the ascent", case_font_vertical_origin },
 };
 
 int main(void)
