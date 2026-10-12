@@ -849,3 +849,35 @@ MEASURED, from a DELETED `build/` in the same command: configure and `cmake --bu
 diagnostic at all; a bare `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over `text: 31 of 31 cases passed, 0 failed`; and the `owed` guard — which now
 names every declared-but-undefined door — is down to **22** names, having dropped `CTFontCopyCharacterSet` IN THE
 SAME COMMIT THAT DEFINED IT, which is the discipline the previous commit established.
+**The raw table doors, and the first owed reason falsified by work in ANOTHER repository (2026-10-11).**
+`CTFontCopyTable` and `CTFontCopyAvailableTables` are DEFINED. They are the pair of the table family that needed no
+parsing at all, because Apple's answer for a table IS the file's bytes: the door asks the seam for the size, allocates,
+asks again, and wraps the result in a `CFDataRef` (the directory door builds an array of `CFNumber` tags, which is what
+Apple's door answers and the reason is that a tag IS four bytes rather than a name anybody chose).
+
+**AND THE REASON THEY WERE OWED HAD TO BE CORRECTED IN THE SAME COMMIT, WHICH IS THE POINT WORTH RECORDING.** The owed
+block said the table family waited because "no seam door reads a table". `libagora-drawing` grew `cg_font_copy_table`
+and `cg_font_table_tags` in its own commit, so THAT CONDITION BECAME FALSE — and an owed reason is a MEASURABLE
+CONDITION rather than a sentence, which is what makes a false one findable. THE BLOCK WAS REWRITTEN RATHER THAN QUIETLY
+REPAIRED, and what it says now is what is actually true: the family's reason was never the absence of a TABLE, it was
+THE ABSENCE OF A DOOR TO ONE, and THAT DOOR EXISTS. What remains for each is the FORMAT PARSING on this side, named one
+table at a time — `fvar` and `avar` with their axis records and normalised coordinates, `feat` with its versioned
+feature records, and `post` with `underlinePosition`, `underlineThickness` and the sign convention Apple's numbers
+follow. THIS IS THE FIRST TIME AN OWED REASON HAS BECOME FALSE BECAUSE OF WORK IN A DIFFERENT REPOSITORY, and the
+correction landed beside the code that made it false.
+
+**AND THE OPTION IS OBEYED TRIVIALLY, WHICH IS THE HONEST FORM OF "NOT OBEYED"**: `kCTFontTableOptionExcludeSynthetic`
+asks for tables that are not synthesised, and NOTHING THIS DOOR RETURNS IS SYNTHESISED — every table comes out of the
+file the face was opened from, so the flag has nothing to exclude and there is nothing to record as missing. A door
+that answered `NULL` for the flag, or dropped tables for it, would be inventing a distinction the data does not have.
+
+**AND THE CASE HOLDS THE PART THAT IS NOT NOTHING: THE DIRECTORY AND THE TABLE DOOR MUST AGREE.** Every tag the face
+lists must be one the table door can produce with a non-empty answer, a tag no face carries must answer `NULL` rather
+than invent a table, a NULL font must answer `NULL` from both doors, and the bytes must be THAT TABLE'S — `head`
+BEGINS WITH ITS OWN VERSION, 0x00010000 for TrueType, which is a fact about the FORMAT and not about this library. And
+the directory's elements must be NUMBERS, because a caller who cannot read a tag from the array cannot ask for the
+table it names.
+
+MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with NO compiler diagnostic at all; a
+bare `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over `text: 32 of 32 cases passed, 0 failed`; and the `owed` guard — which names every declared-but-undefined door —
+is down to **20** names, having dropped BOTH table doors in the commit that defined them.

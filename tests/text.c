@@ -20,6 +20,8 @@
  * rather than after them for that reason. */
 #include <CoreText/CoreText.h>
 #include <CoreFoundation/CFPropertyList.h>
+#include <CoreFoundation/CFNumber.h>
+#include <CoreFoundation/CFData.h>
 #include <CoreText/CTFontService_internal.h>
 #include <CoreText/CTFont.h>
 /* AND THE ENGINE'S INTERNAL HEADER, FOR THE DOORS CORE TEXT OWNS BUT DOES NOT IMPLEMENT: the Unicode
@@ -3215,6 +3217,81 @@ static int case_font_character_set(void)
 	return g_fail - before;
 }
 
+/* THE RAW TABLE DOORS, WHICH ARE THE PAIR OF THE OWED FAMILY THAT NEEDED NO PARSING: Apple's answer for a table IS the
+ * file's bytes, so there is nothing to interpret and the door is a copy.
+ *
+ * AND WHAT THE CASE HOLDS IS THE PART THAT IS NOT NOTHING: THE DIRECTORY AND THE TABLE DOOR MUST AGREE. Every tag the
+ * face lists must be one the table door can actually produce, a tag no face carries must answer NULL rather than invent
+ * a table, and the bytes that come back must be THAT TABLE'S -- `head` begins with its own version, 0x00010000 for
+ * TrueType, which is a fact about the format rather than about this library. */
+static int case_font_tables(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(12.0);
+	CFArrayRef tables;
+	CFDataRef head, absent;
+	CFIndex i, count = -1;
+	int listed_head = 0, readable = 1, numbered = 1;
+
+	check(font != NULL, "no font, so there are no tables to copy");
+	if (font == NULL) {
+		return g_fail - before;
+	}
+	tables = CTFontCopyAvailableTables(font, kCTFontTableOptionNoOptions);
+	check(tables != NULL, "the face's table directory came back NULL");
+	if (tables == NULL) {
+		return g_fail - before;
+	}
+	count = CFArrayGetCount(tables);
+	check(count > 0, "the face lists %ld tables, and a TrueType face cannot list none", (long)count);
+	for (i = 0; i < count; i++) {
+		CFTypeRef element = CFArrayGetValueAtIndex(tables, i);
+		int tag = 0;
+		CFDataRef table;
+
+		if (element == NULL || CFGetTypeID(element) != CFNumberGetTypeID()
+		    || !CFNumberGetValue((CFNumberRef)element, kCFNumberSInt32Type, &tag)) {
+			numbered = 0;
+			continue;
+		}
+		if ((uint32_t)tag == (uint32_t)kCTFontTableHead) {
+			listed_head = 1;
+		}
+		table = CTFontCopyTable(font, (CTFontTableTag)tag, kCTFontTableOptionNoOptions);
+		if (table == NULL || CFDataGetLength(table) == 0) {
+			readable = 0;
+		}
+		if (table != NULL) {
+			CFRelease(table);
+		}
+	}
+	check(numbered, "a tag in the directory is not a number, so a caller cannot read it");
+	check(listed_head, "the directory does not list `head`");
+	check(readable, "the directory lists a table the table door cannot produce");
+
+	/* AND THE BYTES ARE THAT TABLE'S. */
+	head = CTFontCopyTable(font, (CTFontTableTag)kCTFontTableHead, kCTFontTableOptionNoOptions);
+	check(head != NULL, "the `head` table could not be copied");
+	if (head != NULL) {
+		const UInt8 *bytes = CFDataGetBytePtr(head);
+
+		check(CFDataGetLength(head) >= 4, "`head` came back as %ld bytes", (long)CFDataGetLength(head));
+		check(bytes != NULL && bytes[0] == 0x00 && bytes[1] == 0x01 && bytes[2] == 0x00 && bytes[3] == 0x00,
+		      "`head` does not begin with version 1.0, so these are not that table's bytes");
+		CFRelease(head);
+	}
+	/* AND A TABLE NO FACE HAS IS NOT INVENTED. */
+	absent = CTFontCopyTable(font, (CTFontTableTag)0x7A7A7A7Au, kCTFontTableOptionNoOptions);
+	check(absent == NULL, "a tag no face carries produced a table");
+	if (absent != NULL) {
+		CFRelease(absent);
+	}
+	check(CTFontCopyTable(NULL, (CTFontTableTag)kCTFontTableHead, 0) == NULL, "a NULL font produced a table");
+	check(CTFontCopyAvailableTables(NULL, 0) == NULL, "a NULL font produced a directory");
+	CFRelease(tables);
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -3247,6 +3324,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "A disabled face leaves every matching answer, and comes back", case_font_visibility },
 	{ "The two halves of the font service speak the same wire", case_font_service_wire },
 	{ "The character set agrees with the mapping, code unit by code unit", case_font_character_set },
+	{ "A table copies as the file holds it, and the directory agrees", case_font_tables },
 };
 
 int main(void)

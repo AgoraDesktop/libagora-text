@@ -25,6 +25,9 @@
 #include <CoreText/CTFont.h>
 
 #include <CoreFoundation/CFRuntime.h>
+#include <CoreFoundation/CFNumber.h>
+#include <CoreFoundation/CFArray.h>
+#include <CoreFoundation/CFData.h>
 #include <CoreFoundation/CFCharacterSet.h>
 #include <CoreGraphics/CGFont_internal.h>
 
@@ -709,6 +712,84 @@ CGPathRef CTFontCreatePathForGlyph(CTFontRef font, CGGlyph glyph, const CGAffine
 	return (CGPathRef)ctx.path;
 }
 
+/* THE RAW TABLE DOORS -- THE PAIR OF THE OWED FAMILY THAT NEEDED NO PARSING AT ALL, BECAUSE APPLE'S ANSWER FOR A TABLE
+ * IS THE FILE'S BYTES. They were owed with the reason that NO SEAM DOOR READS A TABLE, and that reason is now FALSE
+ * rather than lifted: `libagora-drawing` grew `cg_font_copy_table` and `cg_font_table_tags` in its own commit, and what
+ * those two answer is exactly what these two owe. The owed block below is corrected in the same commit, which is this
+ * tree's rule -- an owed reason is a CONDITION, and a condition that becomes true moves a door. */
+CFDataRef CTFontCopyTable(CTFontRef font, CTFontTableTag table, CTFontTableOptions options)
+{
+	const struct __CTFont *f = (const struct __CTFont *)font;
+	unsigned char *bytes;
+	CFDataRef data;
+	int size;
+
+	/* THE OPTION IS OBEYED TRIVIALLY, WHICH IS THE HONEST FORM OF "NOT OBEYED": `kCTFontTableOptionExcludeSynthetic`
+	 * asks for tables that are not synthesised, and NOTHING THIS DOOR RETURNS IS SYNTHESISED -- every table comes out of
+	 * the file the face was opened from. There is nothing for the flag to exclude, so there is nothing to record as
+	 * missing either. */
+	(void)options;
+	if (f == NULL) {
+		return NULL;
+	}
+	/* THE SEAM'S TWO-CALL CONTRACT, USED AS THE SEAM DOCUMENTS IT: the size first, then the bytes. */
+	size = cg_font_copy_table(f->graphics, (uint32_t)table, NULL, 0);
+	if (size <= 0) {
+		return NULL;
+	}
+	bytes = (unsigned char *)malloc((size_t)size);
+	if (bytes == NULL) {
+		return NULL;
+	}
+	if (cg_font_copy_table(f->graphics, (uint32_t)table, bytes, (size_t)size) <= 0) {
+		free(bytes);
+		return NULL;
+	}
+	data = CFDataCreate(kCFAllocatorDefault, bytes, (CFIndex)size);
+	free(bytes);
+	return data;
+}
+
+/* AND THE DIRECTORY, AS AN ARRAY OF NUMBERS EACH HOLDING A TAG -- which is what Apple's door answers, and the reason it
+ * is numbers rather than strings is that a table tag IS four bytes and not a name anybody chose. */
+CFArrayRef CTFontCopyAvailableTables(CTFontRef font, CTFontTableOptions options)
+{
+	const struct __CTFont *f = (const struct __CTFont *)font;
+	CFMutableArrayRef array;
+	uint32_t *tags;
+	int count, i;
+
+	(void)options;	/* as above: nothing this face carries is synthesised. */
+	if (f == NULL) {
+		return NULL;
+	}
+	array = CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks);
+	if (array == NULL) {
+		return NULL;
+	}
+	count = cg_font_table_tags(f->graphics, NULL, 0);
+	/* A FACE WITH NO TABLE DIRECTORY ANSWERS WITH AN EMPTY ARRAY RATHER THAN NULL: "this face has no tables" is an
+	 * ANSWER, and the door that could not be asked at all is the one that answers NULL. */
+	if (count > 0) {
+		tags = (uint32_t *)malloc((size_t)count * sizeof(uint32_t));
+		if (tags == NULL || cg_font_table_tags(f->graphics, tags, (size_t)count) <= 0) {
+			free(tags);
+			CFRelease(array);
+			return NULL;
+		}
+		for (i = 0; i < count; i++) {
+			CFNumberRef number = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &tags[i]);
+
+			if (number != NULL) {
+				CFArrayAppendValue(array, number);
+				CFRelease(number);
+			}
+		}
+		free(tags);
+	}
+	return array;
+}
+
 /* THE FACE'S CHARACTER SET: EVERY CODE UNIT THE FACE MAPS TO A GLYPH, AND IT IS ANSWERED BY THE SAME STEP
  * `CTFontGetGlyphsForCharacters` USES, ASKED EXHAUSTIVELY RATHER THAN ONE CHARACTER AT A TIME. The seam maps a BATCH
  * of code units in one call, so the whole basic multilingual plane is SIXTEEN calls and no table access is needed --
@@ -782,10 +863,18 @@ CFCharacterSetRef CTFontCopyCharacterSet(CTFontRef font)
  * BASIC MULTILINGUAL PLANE and the faces' coverage of the planes above it is NOT reported. Apple reads a cmap, which
  * would include them. The condition that would close it is a seam door taking SCALAR VALUES rather than code units,
  * and nothing else about this door would change.
- *   CTFontCopyVariationAxes, CTFontCopyVariation  these are the `fvar` and `avar` tables -- font variation.
- *   CTFontCopyFeatures, CTFontCopyFeatureSettings  These are the `feat` table. No seam door reads a table.
- *   CTFontCopyAvailableTables, CTFontCopyTable    the same, and a raw table needs a table-access door.
- *   CTFontGetUnderlinePosition, ...Thickness      the `post` table; the seam reports no underline metrics.
+ * AND THE TABLE FAMILY'S REASON IS CORRECTED RATHER THAN LEFT STANDING, WHICH THIS COMMIT DOES BECAUSE IT MADE IT FALSE:
+ * `CTFontCopyTable` and `CTFontCopyAvailableTables` ARE DEFINED NOW (above), and what the rest of the family waits for
+ * was never the absence of a table -- it was THE ABSENCE OF A DOOR TO ONE, AND THAT DOOR EXISTS:
+ * `libagora-drawing` grew `cg_font_copy_table` and `cg_font_table_tags`, which hand back the file's bytes and the
+ * directory. WHAT EACH OF THESE STILL NEEDS IS THE FORMAT PARSING ON THIS SIDE, one table at a time:
+ *
+ *   CTFontCopyVariationAxes, CTFontCopyVariation  the `fvar` and `avar` tables: the axis records with their names,
+ *                                                 ranges and default values, and the normalised coordinates.
+ *   CTFontCopyFeatures, CTFontCopyFeatureSettings  the `feat` table: the feature records and their exclusive
+ *                                                 settings, versioned like the rest.
+ *   CTFontGetUnderlinePosition, ...Thickness      the `post` table: `underlinePosition` and `underlineThickness`,
+ *                                                 and the SIGN CONVENTION Apple's numbers follow.
  *   CTFontGetSlantAngle                           Apple's slant is the GLYPH-SPACE slant, not the italic
  *                                                 angle Core Graphics reports; they are different numbers.
  *   CTFontGetVerticalTranslationsForGlyphs        needs the vertical metrics the advances door also lacks.

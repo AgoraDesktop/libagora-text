@@ -508,4 +508,20 @@ ctest --test-dir build
   away, and with it `fvar`/`avar` (variation), `feat` (features), `post` (underline metrics), and `OS/2`+`head`
   (traits, whose current reason is that guessing them from a subfamily STRING *"would be a guess wearing a fact's
   clothes"* — a table read is the fact). **That door belongs to another repository**, so the family is a cross-repo unit
-  rather than a gate. MEASURED: `100% tests passed, 0 tests failed out of 2` over `text: 31 of 31 cases passed, 0 failed`, and `owed` down to **22**.
+  rather than a gate. MEASURED: `100% tests passed, 0 tests failed out of 2` over `text: 31 of 31 cases passed, 0 failed`, and `owed` down to **22**.- **AND TWO MORE OWED DOORS ARE DEFINED: `CTFontCopyTable` and `CTFontCopyAvailableTables` — the pair of the table family
+  that needed NO PARSING AT ALL**, because Apple's answer for a table *is* the file's bytes. They were owed with the
+  reason that **no seam door reads a table**, and that reason is now **false rather than lifted**: `libagora-drawing`
+  grew `cg_font_copy_table` and `cg_font_table_tags` in its own commit, and **the owed block was corrected in the SAME
+  commit that used them** — which is this tree's rule, since an owed reason is a *condition* and a condition that
+  becomes true moves a door. This is the first time a reason changed **because of work in another repo**.
+- **AND THE CASE HOLDS THE PART THAT IS NOT NOTHING**: **the directory and the table door must agree** — every tag the
+  face lists is one the door can produce, a tag no face carries answers `NULL` rather than inventing a table, and the
+  bytes are **that table's** (`head` begins with its own version, `0x00010000`, which is a fact about the format and not
+  about this library). The **option is obeyed trivially**, and that is the honest form of "not obeyed":
+  `kCTFontTableOptionExcludeSynthetic` asks for tables that are not synthesised, and **nothing this door returns is
+  synthesised** — every table comes out of the file the face was opened from, so there is nothing to exclude.
+- **AND WHAT IS LEFT OF THE FAMILY IS NOW PARSING AND NOT ACCESS**: `fvar`/`avar` (variation, `CTFontCopyVariationAxes`
+  and `CTFontCopyVariation`), `feat` (features), `post` (the underline metrics) and `OS/2`+`head` (traits) all read
+  through the same two seam doors and each needs the table's **versioned binary layout** understood on this side. The
+  owed block now says exactly that, one table at a time. MEASURED: `100% tests passed, 0 tests failed out of 2` over `text: 32 of 32 cases passed, 0 failed`, **140 public doors**, `owed` down to
+  **20**.
