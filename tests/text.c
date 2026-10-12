@@ -3363,6 +3363,60 @@ static int case_font_post_metrics(void)
 	return g_fail - before;
 }
 
+/* THE SYMBOLIC TRAITS, WHICH THIS LIBRARY USED TO REFUSE TO GUESS AT AND CAN NOW READ.
+ *
+ * THE CASE HOLDS THREE THINGS AND THE THIRD IS THE ONE THAT KEEPS THE OTHER TWO HONEST: the face at hand is
+ * `DejaVuSansMono-Bold`, so BOLD must be set and it must be set for a MONOSPACED face too; AND THE DOOR MUST AGREE WITH
+ * THE TABLES IT READS, which the case computes for itself out of the raw `OS/2` and `head` bytes; AND THE TABLES MUST
+ * ACTUALLY STATE IT, because a check that passes with both sides silent proves nothing at all. */
+static int case_font_symbolic_traits(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(12.0);
+	CTFontSymbolicTraits traits;
+	CFDataRef os2, head;
+	unsigned fs_selection = 0, mac_style = 0;
+	int states_bold;
+
+	check(font != NULL, "no font, so there are no traits to read");
+	if (font == NULL) {
+		return g_fail - before;
+	}
+	traits = CTFontGetSymbolicTraits(font);
+	check((traits & kCTFontBoldTrait) != 0,
+	      "the face this suite loads is named `-Bold` and does not report bold (mask 0x%x)", (unsigned)traits);
+	check((traits & kCTFontMonoSpaceTrait) != 0,
+	      "a fixed-pitch face does not report monospace (mask 0x%x)", (unsigned)traits);
+
+	/* THE DOOR AGAINST THE TABLES, computed here from the bytes the table door hands back. */
+	os2 = CTFontCopyTable(font, (CTFontTableTag)kCTFontTableOS2, kCTFontTableOptionNoOptions);
+	if (os2 != NULL) {
+		const UInt8 *bytes = (const UInt8 *)CFDataGetBytePtr(os2);
+
+		if (bytes != NULL && CFDataGetLength(os2) >= 64) {
+			fs_selection = ((unsigned)bytes[62] << 8) | (unsigned)bytes[63];
+		}
+		CFRelease(os2);
+	}
+	head = CTFontCopyTable(font, (CTFontTableTag)kCTFontTableHead, kCTFontTableOptionNoOptions);
+	if (head != NULL) {
+		const UInt8 *bytes = (const UInt8 *)CFDataGetBytePtr(head);
+
+		if (bytes != NULL && CFDataGetLength(head) >= 46) {
+			mac_style = ((unsigned)bytes[44] << 8) | (unsigned)bytes[45];
+		}
+		CFRelease(head);
+	}
+	states_bold = ((fs_selection & 0x20u) != 0) || ((mac_style & 0x0001u) != 0);
+	check(states_bold, "neither `OS/2` nor `head` marks this face bold, so the agreement below would prove nothing");
+	check(((traits & kCTFontBoldTrait) != 0) == states_bold,
+	      "the bold trait disagrees with the tables (fsSelection 0x%x, macStyle 0x%x, mask 0x%x)",
+	      fs_selection, mac_style, (unsigned)traits);
+
+	check(CTFontGetSymbolicTraits(NULL) == 0, "a NULL font produced traits");
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -3397,6 +3451,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The character set agrees with the mapping, code unit by code unit", case_font_character_set },
 	{ "A table copies as the file holds it, and the directory agrees", case_font_tables },
 	{ "The underline metrics come out of `post`, scaled to the point size", case_font_post_metrics },
+	{ "The symbolic traits come out of OS/2, head and post", case_font_symbolic_traits },
 };
 
 int main(void)

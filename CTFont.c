@@ -23,6 +23,7 @@
  * anywhere. See CTFont.h's head and PROVENANCE.md; they are the first thing to check when something can.
  */
 #include <CoreText/CTFont.h>
+#include <CoreText/CTFontTraits.h>
 
 #include <CoreFoundation/CFRuntime.h>
 #include <CoreFoundation/CFNumber.h>
@@ -524,6 +525,109 @@ static int fn_table_s16(CFDataRef table, CFIndex offset)
  * away. AND "SCALED" IS THE POINT SIZE, WHICH IS THIS LIBRARY'S RULE FOR EVERY METRIC: the matrix moves GLYPHS and not
  * metrics (see the font object's own fields), so these are the font units times `ct_font_scale`, like every other
  * metric here. */
+/* AN UNSIGNED 16-BIT VALUE AND AN UNSIGNED 32-BIT ONE, the two widths the trait tables need, in the same BIG-ENDIAN
+ * order `fn_table_s16` explains. Two readers rather than one fiddly one: C has no template, and a variadic reader would
+ * move a width mistake from here to a call site. */
+static unsigned fn_table_u16(CFDataRef table, CFIndex offset)
+{
+	const UInt8 *bytes = (table != NULL) ? CFDataGetBytePtr(table) : NULL;
+
+	if (bytes == NULL || offset < 0 || offset + 2 > CFDataGetLength(table)) {
+		return 0;
+	}
+	return ((unsigned)bytes[offset] << 8) | (unsigned)bytes[offset + 1];
+}
+
+static unsigned fn_table_u32(CFDataRef table, CFIndex offset)
+{
+	const UInt8 *bytes = (table != NULL) ? CFDataGetBytePtr(table) : NULL;
+
+	if (bytes == NULL || offset < 0 || offset + 4 > CFDataGetLength(table)) {
+		return 0;
+	}
+	return ((unsigned)bytes[offset] << 24) | ((unsigned)bytes[offset + 1] << 16)
+	     | ((unsigned)bytes[offset + 2] << 8) | (unsigned)bytes[offset + 3];
+}
+
+/* THE BITS THIS DOOR READS, NAMED FROM THE FORMAT AND NOT FROM A CONVENTION: `fsSelection` and `macStyle` have carried
+ * weight and slope in these positions since the format began. */
+#define fn_os2_fs_italic      0x0001u
+#define fn_os2_fs_bold        0x0020u
+#define fn_head_mac_bold      0x0001u
+#define fn_head_mac_italic    0x0002u
+#define fn_head_mac_condensed 0x0020u
+#define fn_head_mac_expanded  0x0040u
+
+/* THE SYMBOLIC TRAITS, WHICH THIS LIBRARY PREVIOUSLY REFUSED TO ANSWER AT ALL.
+ *
+ * THE OWED REASON WAS "the seam reports no style flags, and deriving traits from a subfamily STRING would be a guess
+ * wearing a fact's clothes" -- AND THE SECOND HALF WAS A REFUSAL RATHER THAN A SHORTAGE: the guess is still refused, and
+ * THE FACT WAS IN THREE TABLES THE WHOLE TIME. This door reads them -- `OS/2.fsSelection`, `head.macStyle` and
+ * `post.isFixedPitch` -- each at a fixed offset, and each present in every version of its own table for the fields read
+ * here, so there is no version check to get wrong.
+ *
+ * AND WHERE THE FORMAT STATES THE SAME THING TWICE, EITHER SOURCE SETTING IT SETS THE TRAIT: `fsSelection` and
+ * `macStyle` both mark bold and italic, and a face that says so in either is saying so. THE TWO WIDTH SOURCES ARE
+ * HANDLED THE SAME WAY, AND `usWidthClass` IS CONSULTED FOR THE FIRST TIME HERE: 1 to 4 is condensed, 6 to 9 is
+ * expanded, and 5 IS THE MIDDLE AND SAYS NEITHER -- which is the field's OWN meaning rather than a threshold anybody
+ * picked. A `usWidthClass` of 0 means the table says nothing, which is not the same as saying "medium".
+ *
+ * AND FOUR TRAITS ARE DELIBERATELY NOT SET, WHICH IS RECORDED RATHER THAN LEFT TO BE ASSUMED. THE CLASS MASK is a
+ * mapping from `sFamilyClass` that no header in the era prints and no table states directly -- the header even says the
+ * classes "correspond CLOSELY to the font class values in the OpenType 'OS/2' table", which is a correspondence and not
+ * a table; VERTICAL needs the font's own direction, which no door here reports; and `UIOptimized` -- and the traits the
+ * MODERN headers add for colour and composite glyphs, which this era does not have -- have no source in these tables at
+ * all. A TRAIT THIS DOOR DOES NOT KNOW IS LEFT OUT RATHER THAN GUESSED, because a caller who checks one bit can survive
+ * silence where a plausible wrong bit would be believed.
+ *
+ * AND THE SPELLING IS THE ERA'S: this header's constants are `kCTFontBoldTrait` and `kCTFontItalicTrait`, which the
+ * modern headers RENAMED to `kCTFontTraitBold` and `kCTFontTraitItalic`. The old names are the ones in `CTFontTraits.h`
+ * here, and they are used rather than the new ones because a library that declared the era's surface should answer in
+ * it. */
+CTFontSymbolicTraits CTFontGetSymbolicTraits(CTFontRef font)
+{
+	const struct __CTFont *f = (const struct __CTFont *)font;
+	CTFontSymbolicTraits traits = 0;
+	CFDataRef os2, head, post;
+	unsigned fs_selection = 0, width_class = 0, mac_style = 0, fixed_pitch = 0;
+
+	if (f == NULL) {
+		return 0;
+	}
+	os2 = CTFontCopyTable(font, (CTFontTableTag)kCTFontTableOS2, kCTFontTableOptionNoOptions);
+	if (os2 != NULL) {
+		fs_selection = fn_table_u16(os2, 62);
+		width_class = fn_table_u16(os2, 6);
+		CFRelease(os2);
+	}
+	head = CTFontCopyTable(font, (CTFontTableTag)kCTFontTableHead, kCTFontTableOptionNoOptions);
+	if (head != NULL) {
+		mac_style = fn_table_u16(head, 44);
+		CFRelease(head);
+	}
+	post = CTFontCopyTable(font, (CTFontTableTag)kCTFontTablePost, kCTFontTableOptionNoOptions);
+	if (post != NULL) {
+		fixed_pitch = fn_table_u32(post, 12);
+		CFRelease(post);
+	}
+	if ((fs_selection & fn_os2_fs_italic) != 0 || (mac_style & fn_head_mac_italic) != 0) {
+		traits |= kCTFontItalicTrait;
+	}
+	if ((fs_selection & fn_os2_fs_bold) != 0 || (mac_style & fn_head_mac_bold) != 0) {
+		traits |= kCTFontBoldTrait;
+	}
+	if ((mac_style & fn_head_mac_condensed) != 0 || (width_class >= 1 && width_class <= 4)) {
+		traits |= kCTFontCondensedTrait;
+	}
+	if ((mac_style & fn_head_mac_expanded) != 0 || width_class >= 6) {
+		traits |= kCTFontExpandedTrait;
+	}
+	if (fixed_pitch != 0) {
+		traits |= kCTFontMonoSpaceTrait;
+	}
+	return traits;
+}
+
 CGFloat CTFontGetUnderlinePosition(CTFontRef font)
 {
 	const struct __CTFont *f = (const struct __CTFont *)font;
@@ -917,8 +1021,16 @@ CFCharacterSetRef CTFontCopyCharacterSet(CTFontRef font)
  * OWED DOORS, EACH WITH THE REASON IT CANNOT BE ANSWERED HERE. They are DECLARED in CTFont.h and NOT DEFINED,
  * so a caller who reaches for one gets a link error rather than a plausible wrong answer.
  *
- *   CTFontGetSymbolicTraits, CTFontCopyTraits     the seam reports no style flags, and deriving traits from a
- *                                                 subfamily STRING would be a guess wearing a fact's clothes.
+ * AND `CTFontGetSymbolicTraits` HAS LEFT THIS LIST, BY TABLES RATHER THAN BY THE STRING THE REASON REFUSED: the guess
+ * is still refused, and `OS/2.fsSelection`, `head.macStyle` and `post.isFixedPitch` carry the facts. See the door.
+ *
+ *   CTFontCopyTraits                              ITS SYMBOLIC ENTRY IS ANSWERABLE NOW -- `CTFontGetSymbolicTraits` IS
+ *                                                 that answer -- BUT THE OTHER THREE ARE APPLE'S NORMALISATION
+ *                                                 CURVES: the weight, width and slant entries are floats normalised
+ *                                                 around zero, and NO HEADER IN THE ERA PRINTS THE CURVE that turns a
+ *                                                 `usWeightClass` into one. A dictionary missing three of its four
+ *                                                 keys, or carrying three invented ones, would be worse than the link
+ *                                                 error, so the door waits on a curve nobody has written down.
  *   CTFontCopySupportedLanguages,                 needs the OS/2 and name-table data that languages come from,
  *   CTFontGetStringEncoding                       which is DATA IN A TABLE and not a mapping -- see below.
  *

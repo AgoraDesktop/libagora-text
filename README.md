@@ -539,4 +539,21 @@ ctest --test-dir build
   places the line **below the baseline**, which is `post`'s own convention and how the value is written down. Apple's
   header says the door returns *"the scaled underline position"* and says nothing about a sign — so inverting it would be
   a guess about a convention neither document states, and a caller who wants the other sign is one subtraction away.
-  MEASURED: `100% tests passed, 0 tests failed out of 2` over `text: 33 of 33 cases passed, 0 failed`, **142 public doors**, `owed` down to **18**.
+  MEASURED: `100% tests passed, 0 tests failed out of 2` over `text: 33 of 33 cases passed, 0 failed`, **142 public doors**, `owed` down to **18**.- **AND THE SYMBOLIC TRAITS ARE READ RATHER THAN GUESSED: `CTFontGetSymbolicTraits`, out of `OS/2.fsSelection`,
+  `head.macStyle` and `post.isFixedPitch`.** The reason it was owed was a **REFUSAL, not a shortage** — *"deriving traits
+  from a subfamily STRING would be a guess wearing a fact's clothes"* — and **the fact was in three tables the whole
+  time.** Where the format states the same thing twice, **either source setting it sets the trait**; and
+  **`usWidthClass` is consulted for the first time**: 1–4 condensed, 6–9 expanded, **5 is the middle and says neither**
+  (the field's *own* meaning, not a threshold anybody picked), while **0 means the table says nothing** — not "medium".
+- **AND FOUR TRAITS ARE DELIBERATELY NOT SET, RECORDED RATHER THAN ASSUMED**: the **class mask** is a mapping from
+  `sFamilyClass` that no era header prints (the header itself says the classes *"correspond closely"*, which is a
+  correspondence and not a table); **vertical** needs the font's direction, which no door here reports; `UIOptimized`
+  and the modern colour/composite traits have no source in these tables at all. **A trait this door does not know is left
+  out rather than guessed** — a caller who checks one bit can survive silence where a plausible wrong bit is believed.
+- **AND THE SPELLING IS THE ERA'S, which cost one attempt**: this header declares `kCTFontBoldTrait`, not the modern
+  `kCTFontTraitBold`, and the first draft assumed the modern names — **an assert against `CTFontTraits.h` stopped it
+  before a line was written**, which is the whole argument for checking a name instead of remembering it. The case holds
+  three things, and the third keeps the other two honest: the loaded face is named `-Bold` so bold **must** be set; the
+  door **must** agree with `OS/2` and `head` recomputed from their raw bytes; and **the tables must actually state it**,
+  since a check that passes with both sides silent proves nothing. MEASURED: `100% tests passed, 0 tests failed out of 2` over `text: 34 of 34 cases passed, 0 failed`, **143 public doors**, `owed`
+  **17**.

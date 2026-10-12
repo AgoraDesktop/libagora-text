@@ -914,3 +914,42 @@ metric.
 MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with NO compiler diagnostic at all; a bare
 `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over `text: 33 of 33 cases passed, 0 failed`; and the `owed` guard is down to **18** names, having dropped both `post`
 doors in the commit that defined them.
+**The symbolic traits, read from three tables rather than guessed from a string (2026-10-11).**
+`CTFontGetSymbolicTraits` is DEFINED. Its owed reason was the sharpest in the library because it was A REFUSAL RATHER
+THAN A SHORTAGE: "the seam reports no style flags, and deriving traits from a subfamily STRING would be a guess wearing a
+fact's clothes". THE REFUSAL STANDS AND ALWAYS DID — what changed is that the FACT was in three tables the whole time,
+and the seam has been able to hand them over since it grew a table door. `OS/2.fsSelection` (offset 62), `head.macStyle`
+(offset 44) and `post.isFixedPitch` (offset 12) each sit at a fixed offset and are present in every version of their own
+table for the fields read here, so there is no version check to get wrong.
+
+**AND THE RULE FOR A FORMAT THAT STATES THINGS TWICE IS THAT EITHER STATEMENT COUNTS**: `fsSelection` and `macStyle`
+both mark bold and italic, and a face that says so in either is saying so. The two width sources work the same way, and
+`usWidthClass` IS CONSULTED HERE FOR THE FIRST TIME — 1 to 4 condensed, 6 to 9 expanded, 5 THE MIDDLE AND NEITHER, which
+is the field's OWN meaning rather than a threshold anybody picked, while 0 means the table says nothing rather than
+saying "medium".
+
+**AND FOUR TRAITS ARE DELIBERATELY NOT SET, RECORDED IN THE DOOR RATHER THAN LEFT TO BE ASSUMED.** The CLASS MASK is a
+mapping from `sFamilyClass` that no header in the era prints — the header itself says the classes "correspond CLOSELY to
+the font class values in the OpenType 'OS/2' table", and "closely" is a correspondence rather than a table. VERTICAL
+needs the font's own direction, which no door here reports. `UIOptimized` has no source in these tables, and neither do
+the traits the MODERN headers add for colour and composite glyphs, which this era does not have at all. A TRAIT THIS DOOR
+DOES NOT KNOW IS LEFT OUT RATHER THAN GUESSED: a caller who checks one bit can survive silence where a plausible wrong
+bit would be believed.
+
+**AND THE ERA'S SPELLING COST ONE ATTEMPT, WHICH IS WHY IT IS RECORDED**: this header declares `kCTFontBoldTrait`,
+`kCTFontItalicTrait` and their siblings — the MODERN headers RENAMED them to `kCTFontTraitBold` and `kCTFontTraitItalic`
+— and the first draft wrote the modern names. AN ASSERT AGAINST `CTFontTraits.h` STOPPED THE EDIT BEFORE A LINE WAS
+WRITTEN, which is the argument for checking a name rather than remembering it; the door now uses the era's names,
+because a library that declared the era's surface should answer in it.
+
+**AND THE CASE HOLDS THREE THINGS, THE THIRD OF WHICH KEEPS THE OTHER TWO HONEST**: the face this suite loads is
+`DejaVuSansMono-Bold`, so BOLD MUST be set — and MONOSPACE, since it is fixed-pitch; THE DOOR MUST AGREE WITH THE TABLES
+IT READS, which the case computes for itself out of the raw `OS/2` and `head` bytes rather than asking the door twice;
+AND THE TABLES MUST ACTUALLY STATE IT, because a check that passes with both sides silent proves nothing at all. A NULL
+font answers 0.
+
+MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with NO compiler diagnostic at all; a bare
+`ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over `text: 34 of 34 cases passed, 0 failed`; and the `owed` guard is down to **17** names, having dropped
+`CTFontGetSymbolicTraits` in the commit that defined it — and NOT BEFORE, which this unit had to learn: an earlier
+attempt in the same session removed the guard entry while the door was still undefined, and put it back before anything
+was built. THE DOOR AND THE GUARD MOVE IN ONE COMMIT, DOOR FIRST.
