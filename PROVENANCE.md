@@ -986,3 +986,85 @@ step noticed. THE RULE IS NOW MECHANICAL RATHER THAN REMEMBERED: door first, gua
 
 MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with NO compiler diagnostic at all; a bare
 `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over `text: 35 of 35 cases passed, 0 failed`; and the `owed` guard is down to **16** names.
+
+**The variation axes, the feature settings, and a real bug in the descriptor's copy door (2026-10-12).** Three doors,
+DEFINED, and TWO OF THE THREE HAD REASONS THAT WERE FALSE RATHER THAN UNMET — which is the finding, not the doors.
+
+**`CTFontCopyVariationAxes` — AND THE NOTE THE LAST UNIT WROTE ABOUT IT WAS WRITTEN WITHOUT LOOKING.** That unit
+recorded, for whoever took this door: *"no variable font is installed on this machine, so a case here could only
+exercise the NO-`fvar` PATH."* A VARIABLE FACE IS INSTALLED —
+`/usr/share/fonts/opentype/cantarell/Cantarell-VF.otf`, `fvar` version 1.0, one axis, `wght`, 100 to 800, default 400 —
+and it was found by asking every installed face what tables it carries rather than by assuming the machine had none.
+THE DOOR IS THEREFORE HELD BY A CASE THAT EXERCISES THE REAL PATH, and the case reads `fvar` ITSELF through the public
+table door and recomputes every number, which is this tree's rule for holding a parser: A PARSER CHECKED AGAINST ITS OWN
+OUTPUT CHECKS NOTHING. `avar` IS ALSO NOT OWED BY THIS DOOR, which is the SECOND time this file has corrected a reason
+instead of quietly implementing a door (`CTFontCopyVariation`'s named the same pair): `avar` maps a NORMALISED USER
+coordinate onto a NORMALISED DESIGN coordinate when one is SET, and it is not one of the five facts an axis dictionary
+carries. It is owed by the seam door that would apply a coordinate, which is the boundary `CTFontCopyVariation` already
+records.
+
+**AND THE LAYOUT IS READ FROM THE TABLE RATHER THAN FROM A VERSION**, which is what makes the parse robust rather than
+lucky: `fvar`'s header carries `offsetToData` and `axisSize`, and both are used instead of the 16 and 20 that a 1.0 file
+happens to have. The VERSION IS CHECKED ANYWAY — 1.0 and 1.1 are what the era's format defines — and a face carrying
+something else is answered with NULL, because "a version this parser does not know" is a different statement from "no
+axes". A FACE WITH NO `fvar` ANSWERS AN EMPTY ARRAY, a CHOICE recorded as one: "this face has no axes" IS an answer, and
+NULL is kept for the door that could not be asked, which is the rule `CTFontCopyAvailableTables` already applies. THE
+CASE HOLDS APPLE'S OWN COUNT — *"each variation axis dictionary contains the five variation axis keys above"* — so a key
+quietly dropped would fail rather than pass.
+
+**`CTFontCopyFeatureSettings` WAS OWED AS ONE HALF OF A PAIR AND IS NOT THE `feat` DOOR AT ALL.** It was listed with
+`CTFontCopyFeatures` as "the `feat` table: the feature records and their exclusive settings". Apple's two sentences
+separate them: `CTFontCopyFeatures` returns "an array of font feature dictionaries FOR THE FONT REFERENCE" — what a face
+OFFERS — while this door returns "the NON-DEFAULT settings that should be applied to the font, or NULL if the default
+settings should be used" — WHAT THE FONT WAS ASKED FOR. That is a CHOICE, and a choice has been held in the font's
+descriptor since the font was made, which is the same shape of correction `CTFontCopyVariation` needed one unit ago and
+for the same reason: a door was owed for a table it does not read. NULL for a font asked for no setting is Apple's own
+second half, asserted rather than assumed. AND ONE HALF IS RECORDED AS A BOUNDARY RATHER THAN CLAIMED: the FILTER that
+would drop a setting equal to the face's own default needs `feat`'s per-selector default flags, which belong to the door
+that is still owed.
+
+**AND `CTFontDescriptorCreateCopyWithFeature` FOUND A REAL BUG IN THE DOOR IT IS A SPELLING OF, WHICH IS THE PART TO
+CARRY FORWARD.** The descriptor's copy door states Apple's merge exception in its own comment — the new attributes
+replace the old *"except for `kCTFontVariationAttribute` and `kCTFontFeatureSettingsAttribute` WHICH WILL BE MERGED"* —
+AND ITS MERGE BRANCH MERGED DICTIONARIES ONLY, so an ARRAY was replaced. A caller who toggled one feature silently
+dropped every other setting it had asked for. **IT WAS UNREACHABLE UNTIL TONIGHT**: there was no supported way to build
+a settings array with two entries in it, which is why a bug three units old waited for this door, and why the case was
+written WITH the door rather than after it. The merge is now BY (TYPE, SELECTOR) — a setting for a pair already present
+REPLACES it, a setting for a new pair is APPENDED — which is what makes Apple's own description of the door, *"to more
+easily toggle the state of individual features"*, do what it says. AND FALSIFIED, because a case that cannot fail is
+worth nothing: with the array branch forced out (`else if (0 && …)`) EXACTLY THIS CASE FAILS —
+
+    FAIL: toggling a second feature left 1 settings, so the copy REPLACED the array it was told to MERGE
+    FAIL: the first setting was dropped by the second copy
+    FAIL: re-sending a setting that is already there changed the number of settings
+    FAIL: the font answered 1 settings, and it was asked for two
+    text: 36 of 37 cases passed, 1 failed
+
+— and restored it is `37 of 37`.
+
+**AND THE FIX NEEDED A SEAM, BECAUSE APPLE'S INCLUDE GRAPH DOES NOT ALLOW THE OBVIOUS PLACE FOR IT.** A setting is
+identified by `kCTFontFeatureTypeIdentifierKey` and `kCTFontFeatureSelectorIdentifierKey`, BOTH OF WHICH BELONG TO
+`CTFont.h`, WHICH INCLUDES `CTFontDescriptor.h` AND SO CANNOT BE INCLUDED BACK — and the first draft proved it the loud
+way, with four `use of undeclared identifier` errors from the compiler. The remedy is this tree's own stated one rather
+than a local `extern`: `CTFontDescriptor_internal.h` carries the seam (*"so that the two files agree about how a thing is
+built instead of one of them `extern`ing what the other defines"*) and the merge is DEFINED IN `CTFont.c`, beside
+`CTFontDescriptorCreateCopyWithFeature`, which is defined there for exactly the same reason. IT IS NOT PART OF APPLE'S
+SURFACE and is named beside the other internal headers.
+
+**AND THE CASE ITSELF FAILED FIRST FOR A REASON WORTH RECORDING**: it built its descriptor from a name, and
+`CTFontCreateWithFontDescriptor` answered NULL — because A CASE RUNS IN ITS OWN CHILD PROCESS, so the face must be
+REGISTERED inside that child before a name resolves to it. That is what `test_font` does and why its registration check is
+the suite's first act in every case needing a face; the case now takes its descriptor from a font. The failure was in the
+CASE and not in the door, and the difference is only visible because the door's own checks passed either side of it.
+
+**AND ONE STALE PARAGRAPH IN THE OWED BLOCK WAS CORRECTED RATHER THAN DELETED.** `CTFont.c` still said the two matching
+doors on `CTFontDescriptorRef` were owed for want of *"a registry of INSTALLED faces with a registration scope"*. THE
+REGISTRY IS NOT MISSING AND THE DOORS ARE DEFINED — `CTFontMatching.c` owns them, the set is the engine's own list and
+the order is this tier's recorded decision. **A sentence like that is only findable by reading the owed list against the
+library rather than trusting the list**, which is what the unit did.
+
+MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with NO compiler diagnostic at all; a bare
+`ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over `text: 37 of 37 cases passed, 0 failed`; the
+library DEFINES **148** `CT…` names; and the `owed` guard is down to **13** names — `CTFontCopyVariationAxes`,
+`CTFontCopyFeatureSettings` and `CTFontDescriptorCreateCopyWithFeature` LEFT IT IN THE COMMIT THAT DEFINED THEM, which is
+the rule the last unit had to learn the hard way: DOOR FIRST, GUARD SECOND, ONE COMMIT.

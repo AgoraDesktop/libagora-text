@@ -11,6 +11,7 @@
  * (`dec-4795696b09d362f6`), recorded here where the values are rather than asserted as a fact.
  */
 #include <CoreText/CTFontDescriptor.h>
+#include <CoreText/CTFontDescriptor_internal.h>
 
 #include <CoreFoundation/CFRuntime.h>
 
@@ -159,6 +160,21 @@ CTFontDescriptorRef CTFontDescriptorCreateWithNameAndSize(CFStringRef name, CGFl
 	return (CTFontDescriptorRef)descriptor;
 }
 
+/* THE SECOND MERGE IS AN ARRAY'S, AND IT IS A FIX RATHER THAN A TIDY-UP -- AND IT IS DEFINED IN `CTFont.c` RATHER
+ * THAN HERE, which is the include graph again. Apple's sentence for the copy door names
+ * `kCTFontFeatureSettingsAttribute` among the keys that are MERGED, and that key's value is an ARRAY of setting
+ * dictionaries (the descriptor's own header says so beside the key). The dictionary branch below merged only
+ * dictionaries and REPLACED everything else, so a caller who toggled ONE feature silently dropped every other
+ * setting it had asked for. IT WAS INVISIBLE UNTIL NOW BECAUSE THIS IS THE DOOR THAT MAKES A SECOND SETTING EXIST:
+ * before `CTFontDescriptorCreateCopyWithFeature` there was no supported way to build one, and the case that caught
+ * it was written with the door rather than after it.
+ *
+ * AND THE MERGE NEEDS TWO KEYS THIS FILE CANNOT NAME. A setting is identified by the pair
+ * `kCTFontFeatureTypeIdentifierKey` / `kCTFontFeatureSelectorIdentifierKey`, and both belong to `CTFont.h`, which
+ * INCLUDES THIS DESCRIPTOR'S HEADER and so cannot be included back. `CTFontDescriptor_internal.h` carries the seam
+ * and `CTFont.c` carries the merge, beside the door whose arrival made it reachable — the same arrangement the
+ * matching doors have with `CTFontMatching.c`, and the one this tree's internal headers exist for. */
+
 /* THE MERGE EXCEPTION IS PART OF THIS DOOR RATHER THAN A DETAIL: Apple says the new attributes replace the
  * old "except for kCTFontVariationAttribute and kCTFontFeatureSettingsAttribute WHICH WILL BE MERGED", and a
  * descriptor that quietly replaced those two would be wrong in a way nothing else would notice. */
@@ -220,6 +236,16 @@ static CFDictionaryRef ct_descriptor_merged(CFDictionaryRef original, CFDictiona
 			}
 			CFDictionarySetValue(merged, keys[i], both);
 			CFRelease(both);
+		} else if (CFEqual(keys[i], kCTFontFeatureSettingsAttribute) && existing != NULL &&
+			   CFGetTypeID(existing) == CFArrayGetTypeID() &&
+			   CFGetTypeID(addition) == CFArrayGetTypeID()) {
+			/* THE ARRAY'S MERGE, whose definition is in `CTFont.c` and whose seam is this file's internal header. */
+			CFArrayRef both = CTFontDescriptorMergeFeatureSettings((CFArrayRef)existing, (CFArrayRef)addition);
+
+			if (both != NULL) {
+				CFDictionarySetValue(merged, keys[i], both);
+				CFRelease(both);
+			}
 		} else {
 			CFDictionarySetValue(merged, keys[i], values[i]);
 		}

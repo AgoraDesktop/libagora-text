@@ -3481,6 +3481,334 @@ static int case_font_variation(void)
 	return g_fail - before;
 }
 
+/* TWO READERS THE CASES BELOW NEED AND THE LIBRARY KEEPS TO ITSELF: the cases decode the tables THEY ask the door
+ * to copy, which is this tree's rule for holding a parser -- a parser checked against its own output checks
+ * nothing. Written here rather than shared, because a case that used the library's arithmetic would agree with the
+ * library's mistakes. */
+static unsigned case_be16(const UInt8 *bytes)
+{
+	return ((unsigned)bytes[0] << 8) | (unsigned)bytes[1];
+}
+
+static double case_fixed(const UInt8 *bytes)
+{
+	unsigned raw = ((unsigned)bytes[0] << 24) | ((unsigned)bytes[1] << 16)
+		     | ((unsigned)bytes[2] << 8) | (unsigned)bytes[3];
+	double whole = (raw >= 0x80000000u) ? ((double)raw - 4294967296.0) : (double)raw;
+
+	return whole / 65536.0;
+}
+
+/* THE VARIATION AXES, AND THE CASE READS `fvar` ITSELF THROUGH THE PUBLIC TABLE DOOR AND RECOMPUTES EVERY NUMBER
+ * THE AXES DOOR REPORTS. Apple's own sentence is what the shape is held against -- "this function returns an array
+ * of variation axis dictionaries. Each variation axis dictionary contains THE FIVE variation axis keys above" --
+ * so the count of keys is asserted as well as the values, and the values are asserted twice: against what the table
+ * SAYS, and against each other (min <= default <= max).
+ *
+ * AND THE OWED NOTE THIS DOOR CARRIED IS NOW FALSE RATHER THAN STALE, which is why the door is taken tonight: it
+ * read "no variable font is installed on this machine, so a case could only exercise the NO-`fvar` path". A
+ * variable face IS installed, the note was written without looking for one, and this case is what falsified it.
+ * THE FACE IS PRINTED, because which face answered is a fact about this machine rather than about the library. */
+static int case_font_variation_axes(void)
+{
+	int before = g_fail;
+	const char *path = "/usr/share/fonts/opentype/cantarell/Cantarell-VF.otf";
+	CGDataProviderRef provider;
+	CGFontRef face;
+	CTFontRef font, plain;
+	CFArrayRef axes;
+	CFDataRef fvar;
+	const UInt8 *bytes;
+	CFIndex length, count, i;
+	unsigned axis_count, axis_size, offset_to_data;
+
+	provider = CGDataProviderCreateWithFilename(path);
+	check(provider != NULL, "the suite could not open the variable face %s", path);
+	if (provider == NULL) {
+		return g_fail - before;
+	}
+	face = CGFontCreateWithDataProvider(provider);
+	check(face != NULL, "the engine would not load the variable face %s", path);
+	if (face == NULL) {
+		return g_fail - before;
+	}
+	font = CTFontCreateWithGraphicsFont(face, 12.0, NULL, NULL);
+	check(font != NULL, "no font could be made from the variable face");
+	if (font == NULL) {
+		return g_fail - before;
+	}
+	printf("  (note: the variable face answering the `fvar` path is %s)\n", path);
+
+	fvar = CTFontCopyTable(font, (CTFontTableTag)kCTFontTableFvar, kCTFontTableOptionNoOptions);
+	check(fvar != NULL, "the variable face reports no `fvar` table, so nothing can be held against the door");
+	if (fvar == NULL) {
+		return g_fail - before;
+	}
+	length = CFDataGetLength(fvar);
+	bytes = (const UInt8 *)CFDataGetBytePtr(fvar);
+	check(bytes != NULL && length >= 16, "`fvar` came back as %ld bytes, and its header needs sixteen", (long)length);
+	if (bytes == NULL || length < 16) {
+		CFRelease(fvar);
+		return g_fail - before;
+	}
+	offset_to_data = case_be16(bytes + 4);
+	axis_count = case_be16(bytes + 8);
+	axis_size = case_be16(bytes + 10);
+	check(axis_count > 0, "the variable face states no axis, so an empty array would hold nothing");
+	check(axis_size >= 20, "the face states an axis record of %u bytes, and the format's is at least twenty",
+	      axis_size);
+	check((CFIndex)(offset_to_data + axis_count * axis_size) <= length,
+	      "the axis records run past the table: %u at %u in %ld bytes", axis_count, offset_to_data, (long)length);
+
+	axes = CTFontCopyVariationAxes(font);
+	check(axes != NULL, "the axes door answered NULL for a face that carries `fvar`");
+	if (axes == NULL) {
+		CFRelease(fvar);
+		return g_fail - before;
+	}
+	count = CFArrayGetCount(axes);
+	check(count == (CFIndex)axis_count, "the door answered %ld axes where the table states %u",
+	      (long)count, axis_count);
+	for (i = 0; i < count && i < (CFIndex)axis_count; i++) {
+		CFDictionaryRef axis = (CFDictionaryRef)CFArrayGetValueAtIndex(axes, i);
+		const UInt8 *record = bytes + (CFIndex)offset_to_data + i * (CFIndex)axis_size;
+		CFNumberRef number;
+		CFTypeRef name;
+		double minimum, maximum, deflt, got;
+		int tag, got_tag = 0;
+
+		check(CFGetTypeID(axis) == CFDictionaryGetTypeID(), "axis %ld is not a dictionary", (long)i);
+		/* APPLE'S OWN COUNT: "each variation axis dictionary contains the five variation axis keys above". */
+		check(CFDictionaryGetCount(axis) == 5,
+		      "axis %ld carries %ld keys where Apple's sentence says five", (long)i,
+		      (long)CFDictionaryGetCount(axis));
+		minimum = case_fixed(record + 4);
+		deflt = case_fixed(record + 8);
+		maximum = case_fixed(record + 12);
+		tag = (int)((unsigned)record[0] << 24 | (unsigned)record[1] << 16 |
+			    (unsigned)record[2] << 8 | (unsigned)record[3]);
+		check(minimum <= deflt && deflt <= maximum,
+		      "the table's own bounds are not ordered: %g, %g, %g", minimum, deflt, maximum);
+		printf("  (note: axis %ld is '%c%c%c%c', %g to %g, default %g)\n", (long)i,
+		       (char)record[0], (char)record[1], (char)record[2], (char)record[3],
+		       minimum, maximum, deflt);
+
+		number = (CFNumberRef)CFDictionaryGetValue(axis, kCTFontVariationAxisIdentifierKey);
+		check(number != NULL && CFGetTypeID(number) == CFNumberGetTypeID(),
+		      "axis %ld carries no numeric identifier", (long)i);
+		if (number != NULL && CFGetTypeID(number) == CFNumberGetTypeID()) {
+			check(CFNumberGetValue(number, kCFNumberSInt32Type, &got_tag),
+			      "axis %ld's identifier is not an integer", (long)i);
+			check(got_tag == tag,
+			      "axis %ld identifies itself as 0x%08X where the table writes the four-character code 0x%08X",
+			      (long)i, (unsigned)got_tag, (unsigned)tag);
+		}
+		number = (CFNumberRef)CFDictionaryGetValue(axis, kCTFontVariationAxisMinimumValueKey);
+		got = 0.0;
+		check(number != NULL && CFNumberGetValue(number, kCFNumberDoubleType, &got) &&
+		      fabs(got - minimum) < 0.0001,
+		      "axis %ld's minimum is %g where the table writes %g", (long)i, got, minimum);
+		number = (CFNumberRef)CFDictionaryGetValue(axis, kCTFontVariationAxisMaximumValueKey);
+		got = 0.0;
+		check(number != NULL && CFNumberGetValue(number, kCFNumberDoubleType, &got) &&
+		      fabs(got - maximum) < 0.0001,
+		      "axis %ld's maximum is %g where the table writes %g", (long)i, got, maximum);
+		number = (CFNumberRef)CFDictionaryGetValue(axis, kCTFontVariationAxisDefaultValueKey);
+		got = 0.0;
+		check(number != NULL && CFNumberGetValue(number, kCFNumberDoubleType, &got) &&
+		      fabs(got - deflt) < 0.0001,
+		      "axis %ld's default is %g where the table writes %g", (long)i, got, deflt);
+		name = CFDictionaryGetValue(axis, kCTFontVariationAxisNameKey);
+		check(name != NULL && CFGetTypeID(name) == CFStringGetTypeID(),
+		      "axis %ld has no name, and the face's `name` table has an entry for the index it states", (long)i);
+	}
+	CFRelease(axes);
+	CFRelease(fvar);
+
+	/* AND A FACE WITH NO `fvar` ANSWERS AN EMPTY ARRAY RATHER THAN NULL, which is this door's recorded choice: "this
+	 * face has no variation axes" is an ANSWER, and NULL is kept for the door that could not be asked. */
+	plain = test_font(12.0);
+	if (plain != NULL) {
+		CFArrayRef none = CTFontCopyVariationAxes(plain);
+
+		check(none != NULL, "a face with no `fvar` answered NULL, and \"no axes\" is this door's empty array");
+		if (none != NULL) {
+			check(CFArrayGetCount(none) == 0, "a face with no `fvar` answered %ld axes",
+			      (long)CFArrayGetCount(none));
+			CFRelease(none);
+		}
+	}
+	check(CTFontCopyVariationAxes(NULL) == NULL, "a NULL font produced axes");
+	return g_fail - before;
+}
+
+/* A FEATURE SETTING IS A TUPLE, AND TOGGLING ONE KEEPS THE OTHERS -- WHICH IS A BUG THIS CASE CAUGHT RATHER THAN A
+ * PROPERTY IT DECORATES. Apple names `kCTFontFeatureSettingsAttribute` among the keys a descriptor copy MERGES, and
+ * its value is an array of setting dictionaries; the copy door merged only DICTIONARIES and replaced everything
+ * else, so the second setting silently took the first one's place. IT WAS UNREACHABLE BEFORE THIS DOOR: there was
+ * no supported way to build a settings array with two entries in it, which is why the bug waited for the door and
+ * why the case was written WITH the door rather than after it.
+ *
+ * THE FACE IS THE SUITE'S OWN AND NO FEATURE IS APPLIED BY IT: this door is about what a font was ASKED FOR, so
+ * nothing here needs a `feat` table -- and no face installed here carries one, which is why CTFontCopyFeatures is
+ * still owed while this door is not. */
+static int case_font_feature_settings(void)
+{
+	int before = g_fail;
+	int type_value = 1, first_value = 1, second_value = 2;
+	CFNumberRef type, first, second;
+	CTFontDescriptorRef plain, one, two, again;
+	CFTypeRef settings, tuple;
+	CTFontRef plain_font, font;
+	CFArrayRef back;
+
+	type = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &type_value);
+	first = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &first_value);
+	second = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &second_value);
+	/* THE DESCRIPTOR COMES FROM A FONT RATHER THAN FROM A NAME, AND THAT IS NECESSARY RATHER THAN TIDY: a case runs in
+	 * its own CHILD PROCESS, so the face has to be REGISTERED here before a name can resolve to it -- which is what
+	 * `test_font` does, and why its registration check is the suite's first act in every case that needs a face. A
+	 * descriptor built from the name alone finds nothing the first time and makes this case fail for a reason that has
+	 * nothing to do with the door. */
+	font = test_font(12.0);
+	plain_font = font;
+	check(plain_font != NULL, "no font, so there is no descriptor to copy features onto");
+	if (plain_font == NULL) {
+		return g_fail - before;
+	}
+	plain = CTFontCopyFontDescriptor(font);
+	check(plain != NULL && CTFontDescriptorCopyAttribute(plain, kCTFontNameAttribute) != NULL,
+	      "the descriptor taken from the font does not carry the name, so no font can be made from a copy of it");
+	if (plain == NULL) {
+		return g_fail - before;
+	}
+
+	/* THE FIRST SETTING IS A TUPLE, and it carries the SETTING and not merely the pair: a tuple that named a
+	 * selector without saying what state it is in would say nothing about the thing it exists to carry. */
+	one = CTFontDescriptorCreateCopyWithFeature(plain, type, first);
+	check(one != NULL, "the feature copy answered nothing");
+	if (one == NULL) {
+		return g_fail - before;
+	}
+	settings = CTFontDescriptorCopyAttribute(one, kCTFontFeatureSettingsAttribute);
+	check(settings != NULL && CFGetTypeID(settings) == CFArrayGetTypeID(),
+	      "the copy carries no feature-settings array");
+	if (settings != NULL && CFGetTypeID(settings) == CFArrayGetTypeID()) {
+		check(CFArrayGetCount((CFArrayRef)settings) == 1,
+		      "one setting produced %ld of them", (long)CFArrayGetCount((CFArrayRef)settings));
+		tuple = CFArrayGetValueAtIndex((CFArrayRef)settings, 0);
+		check(tuple != NULL && CFGetTypeID(tuple) == CFDictionaryGetTypeID(), "the setting is not a dictionary");
+		if (tuple != NULL && CFGetTypeID(tuple) == CFDictionaryGetTypeID()) {
+			check(CFEqual(CFDictionaryGetValue((CFDictionaryRef)tuple,
+							   kCTFontFeatureTypeIdentifierKey), type),
+			      "the setting does not carry the type identifier it was given");
+			check(CFEqual(CFDictionaryGetValue((CFDictionaryRef)tuple,
+							   kCTFontFeatureSelectorIdentifierKey), first),
+			      "the setting does not carry the selector identifier it was given");
+			check(CFDictionaryGetValue((CFDictionaryRef)tuple,
+						   kCTFontFeatureSelectorSettingKey) == kCFBooleanTrue,
+			      "the setting does not say ON, and a door handed a selector to toggle is asked for it enabled");
+		}
+		CFRelease(settings);
+	}
+
+	/* AND THE SECOND SETTING IS WHERE THE BUG WAS: the array must GROW rather than be replaced. */
+	two = CTFontDescriptorCreateCopyWithFeature(one, type, second);
+	check(two != NULL, "the second feature copy answered nothing");
+	if (two != NULL) {
+		settings = CTFontDescriptorCopyAttribute(two, kCTFontFeatureSettingsAttribute);
+		check(settings != NULL && CFGetTypeID(settings) == CFArrayGetTypeID(),
+		      "the second copy carries no feature-settings array");
+		if (settings != NULL && CFGetTypeID(settings) == CFArrayGetTypeID()) {
+			CFIndex i, found_first = -1, found_second = -1;
+
+			check(CFArrayGetCount((CFArrayRef)settings) == 2,
+			      "toggling a second feature left %ld settings, so the copy REPLACED the array it was told to MERGE",
+			      (long)CFArrayGetCount((CFArrayRef)settings));
+			for (i = 0; i < CFArrayGetCount((CFArrayRef)settings); i++) {
+				CFDictionaryRef each = (CFDictionaryRef)CFArrayGetValueAtIndex((CFArrayRef)settings, i);
+
+				if (CFEqual(CFDictionaryGetValue(each, kCTFontFeatureSelectorIdentifierKey), first)) {
+					found_first = i;
+				}
+				if (CFEqual(CFDictionaryGetValue(each, kCTFontFeatureSelectorIdentifierKey), second)) {
+					found_second = i;
+				}
+			}
+			check(found_first >= 0, "the first setting was dropped by the second copy");
+			check(found_second >= 0, "the second setting never arrived");
+		}
+		CFRelease(settings);
+	}
+
+	/* AND THE SAME PAIR AGAIN REPLACES RATHER THAN APPENDS, which is the other half of "merge by (type, selector)". */
+	again = (two != NULL) ? CTFontDescriptorCreateCopyWithFeature(two, type, first) : NULL;
+	if (again != NULL) {
+		settings = CTFontDescriptorCopyAttribute(again, kCTFontFeatureSettingsAttribute);
+		check(settings != NULL && CFGetTypeID(settings) == CFArrayGetTypeID() &&
+		      CFArrayGetCount((CFArrayRef)settings) == 2,
+		      "re-sending a setting that is already there changed the number of settings");
+		if (settings != NULL) {
+			CFRelease(settings);
+		}
+	}
+
+	/* AND THE FONT MADE FROM SUCH A DESCRIPTOR ANSWERS THEM, WHICH IS `CTFontCopyFeatureSettings`' WHOLE DOOR. */
+	font = (two != NULL) ? CTFontCreateWithFontDescriptor(two, 12.0, NULL) : NULL;
+	check(font != NULL, "no font could be made from a descriptor carrying feature settings");
+	if (font != NULL) {
+		back = CTFontCopyFeatureSettings(font);
+		check(back != NULL, "a font asked for two settings answered none");
+		if (back != NULL) {
+			CFTypeRef asked = CTFontDescriptorCopyAttribute(two, kCTFontFeatureSettingsAttribute);
+
+			check(CFArrayGetCount(back) == 2, "the font answered %ld settings, and it was asked for two",
+			      (long)CFArrayGetCount(back));
+			check(asked != NULL && CFEqual(back, asked),
+			      "the settings that came back are not the ones that went in");
+			if (asked != NULL) {
+				CFRelease(asked);
+			}
+			CFRelease(back);
+		}
+		CFRelease(font);
+	}
+
+	/* AND A FONT ASKED FOR NOTHING ANSWERS NULL, WHICH IS APPLE'S OWN SECOND HALF: "or NULL if the default
+	 * settings should be used". */
+	font = CTFontCreateWithFontDescriptor(plain, 12.0, NULL);
+	if (font != NULL) {
+		check(CTFontCopyFeatureSettings(font) == NULL,
+		      "a font asked for no setting answered something other than NULL");
+		CFRelease(font);
+	}
+	check(CTFontCopyFeatureSettings(NULL) == NULL, "a NULL font produced settings");
+	check(CTFontDescriptorCreateCopyWithFeature(NULL, type, first) == NULL,
+	      "a NULL descriptor produced a copy");
+	check(CTFontDescriptorCreateCopyWithFeature(plain, NULL, first) == NULL,
+	      "a copy was made with no type identifier");
+	check(CTFontDescriptorCreateCopyWithFeature(plain, type, NULL) == NULL,
+	      "a copy was made with no selector identifier");
+
+	CFRelease(plain);
+	if (plain_font != NULL) {
+		CFRelease(plain_font);
+	}
+	if (one != NULL) {
+		CFRelease(one);
+	}
+	if (two != NULL) {
+		CFRelease(two);
+	}
+	if (again != NULL) {
+		CFRelease(again);
+	}
+	CFRelease(type);
+	CFRelease(first);
+	CFRelease(second);
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -3517,6 +3845,8 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The underline metrics come out of `post`, scaled to the point size", case_font_post_metrics },
 	{ "The symbolic traits come out of OS/2, head and post", case_font_symbolic_traits },
 	{ "A variation instance is the choice the font was asked for", case_font_variation },
+	{ "The variation axes come out of `fvar`, and the case reads it too", case_font_variation_axes },
+	{ "A feature setting is a tuple, and toggling one keeps the others", case_font_feature_settings },
 };
 
 int main(void)

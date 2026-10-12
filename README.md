@@ -573,3 +573,31 @@ ctest --test-dir build
   feature setting, a trait request. The font now keeps **the caller's attributes merged with the size it actually
   resolved** (from the font, not the parameter, because the parameter is allowed to be `0.0`). MEASURED: `100% tests passed, 0 tests failed out of 2` over `text: 35 of 35 cases passed, 0 failed`,
   **144 public doors**, `owed` **16**.
+- **AND THREE MORE DOORS ARE DEFINED, OF WHICH TWO HAD REASONS THAT WERE FALSE RATHER THAN UNMET.** `CTFontCopyVariationAxes`
+is the `fvar` parse — AND THE NOTE THAT SAID "NO VARIABLE FONT IS INSTALLED ON THIS MACHINE, SO A CASE HERE COULD ONLY
+EXERCISE THE NO-`fvar` PATH" WAS WRITTEN WITHOUT LOOKING: `/usr/share/fonts/opentype/cantarell/Cantarell-VF.otf` is a
+variable face (`wght`, 100–800, default 400), so the case now exercises the REAL path, reads `fvar` itself through the
+public table door and recomputes every number. **`avar` is not owed by this door either** — it maps a coordinate when one
+is SET and is not one of the five facts an axis dictionary carries — making this the SECOND reason in this file corrected
+rather than quietly implemented. THE LAYOUT IS READ FROM THE TABLE (`offsetToData`, `axisSize`) rather than from a
+version's offsets, the version is checked anyway, a face with no `fvar` answers an EMPTY ARRAY (a recorded choice) and a
+version this parser does not know answers NULL.
+- **`CTFontCopyFeatureSettings` IS NOT THE `feat` DOOR IT WAS OWED AS.** `CTFontCopyFeatures` answers what a face OFFERS;
+this door answers "the NON-DEFAULT settings that should be applied to the font, or NULL if the default settings should be
+used" — WHAT THE FONT WAS ASKED FOR, which is a choice its descriptor has held all along. Same shape of correction
+`CTFontCopyVariation` needed, one unit earlier. The FILTER that would drop a setting equal to the face's own default is
+recorded as a boundary: it needs `feat`'s default flags, and `feat` is still owed (NO FACE INSTALLED HERE CARRIES ONE,
+measured over every installed face — so a parse could not be held by a case).
+- **AND `CTFontDescriptorCreateCopyWithFeature` FOUND A REAL BUG IN THE DESCRIPTOR'S COPY DOOR — one that had been
+unreachable for three units.** Apple names `kCTFontFeatureSettingsAttribute` among the keys a copy MERGES, its value is an
+ARRAY of setting dictionaries, and the merge branch merged DICTIONARIES ONLY: a caller toggling a second feature silently
+dropped the first. There was no supported way to build a two-entry settings array before this door, which is why the bug
+waited for it and why the case was written WITH it. The merge is now BY (TYPE, SELECTOR). FALSIFIED: with the array branch
+forced out, exactly that case fails on four lines and the suite is `36 of 37`; restored, `37 of 37`. The fix needed a
+SEAM, because the two keys identifying a setting belong to `CTFont.h`, which includes the descriptor's header and cannot
+be included back — `CTFontDescriptor_internal.h` carries it and the merge is defined in `CTFont.c`, the tree's own rule
+for this ("so that the two files agree … instead of one of them `extern`ing what the other defines").
+- **AND ONE STALE PARAGRAPH OF THE OWED BLOCK WAS CORRECTED, WHICH IS WHAT THE OWED LIST IS FOR.** `CTFont.c` still said the
+descriptor's two matching doors were owed for want of a registry of installed faces; the registry exists and the doors are
+defined. MEASURED: `100% tests passed, 0 tests failed out of 2` over `text: 37 of 37 cases passed, 0 failed`,
+**148 `CT…` definitions**, and `owed` down to **13**.

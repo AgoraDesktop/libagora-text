@@ -24,6 +24,7 @@
  */
 #include <CoreText/CTFont.h>
 #include <CoreText/CTFontTraits.h>
+#include <CoreText/CTFontDescriptor_internal.h>
 
 #include <CoreFoundation/CFRuntime.h>
 #include <CoreFoundation/CFNumber.h>
@@ -590,6 +591,19 @@ static unsigned fn_table_u32(CFDataRef table, CFIndex offset)
 	     | ((unsigned)bytes[offset + 2] << 8) | (unsigned)bytes[offset + 3];
 }
 
+/* AND A 16.16 FIXED-POINT NUMBER, WHICH IS HOW THE `fvar` TABLE STATES AN AXIS BOUND AND WHICH IS NOT A WIDTH OF
+ * INTEGER: the two halves are a SIGNED integer part and an UNSIGNED fraction, so the sign belongs to the whole
+ * number and not to the second half -- -1.5 is 0xFFFF8000. THE SIGN IS EXTENDED BEFORE THE SCALING, because
+ * dividing the unsigned word by 65536 would turn every negative bound into a large positive one, which is the same
+ * class of mistake `fn_table_s16` exists to avoid and a louder one to notice. */
+static double fn_table_fixed(CFDataRef table, CFIndex offset)
+{
+	unsigned raw = fn_table_u32(table, offset);
+	double whole = (raw >= 0x80000000u) ? ((double)raw - 4294967296.0) : (double)raw;
+
+	return whole / 65536.0;
+}
+
 /* THE BITS THIS DOOR READS, NAMED FROM THE FORMAT AND NOT FROM A CONVENTION: `fsSelection` and `macStyle` have carried
  * weight and slope in these positions since the format began. */
 #define fn_os2_fs_italic      0x0001u
@@ -1003,6 +1017,265 @@ CFArrayRef CTFontCopyAvailableTables(CTFontRef font, CTFontTableOptions options)
 	return array;
 }
 
+/* =================================================================================================
+ * THE FEATURE AND VARIATION VOCABULARY. Three doors, and each one's reason had to be corrected before it
+ * could be built -- which is this tree's rule rather than a coincidence: an owed reason is a CONDITION, and
+ * a condition that turns out to be false does not move a door until it is said out loud.
+ * =============================================================================================== */
+
+/* AN ARRAY OF VARIATION AXES, WHICH IS THE `fvar` TABLE -- AND THE OWED REASON NAMED TWO TABLES WHERE ONE IS
+ * NEEDED, WHICH IS THE SECOND TIME THIS FILE CORRECTS A REASON RATHER THAN QUIETLY IMPLEMENTING THE DOOR
+ * (`CTFontCopyVariation`'s named the same pair). Apple's five axis keys are the axis record and nothing else:
+ * `avar` MAPS A NORMALISED USER COORDINATE ONTO A NORMALISED DESIGN COORDINATE, and that mapping is applied when a
+ * coordinate is SET. It is not one of the five facts an axis dictionary carries, so it is not owed BY THIS DOOR --
+ * it is owed by the seam door that would apply a coordinate, which is the same door `CTFontCopyVariation` names as
+ * the boundary on its own answer. THE DOOR IS THEREFORE `fvar` ALONE, and no case here needed a second table.
+ *
+ * AND THE LAYOUT IS READ FROM THE TABLE RATHER THAN FROM A VERSION: the header carries `offsetToData` and
+ * `axisSize`, and both are used instead of the 16 and the 20 that a 1.0 file happens to have. THE VERSION IS
+ * CHECKED ANYWAY, because 1.0 and 1.1 are the two the era's format defines and a face carrying something else must
+ * be answered rather than read at offsets a guess would place -- and what it is answered with is NULL, since "a
+ * version this parser does not know" is not the same statement as "no axes".
+ *
+ * A FACE WITH NO `fvar` ANSWERS AN EMPTY ARRAY, WHICH IS A CHOICE AND IS RECORDED AS ONE: "this face has no
+ * variation axes" IS an answer about the face, and NULL is kept for the door that could not be asked at all --
+ * exactly the rule `CTFontCopyAvailableTables` applies to a face with no table directory.
+ *
+ * AND THE NAME IS THE FACE'S OWN, READ THROUGH THE SEAM'S NAME DOOR: an axis record names itself by `name` table
+ * index and not by a string, so `kCTFontVariationAxisNameKey` is answered from there and is OMITTED rather than
+ * invented when the face has no such entry. Apple calls it the localized name; a localized name needs a language,
+ * which this tier has no list of, and the face's own entry is the only source there is. */
+CFArrayRef CTFontCopyVariationAxes(CTFontRef font)
+{
+	const struct __CTFont *f = (const struct __CTFont *)font;
+	CFMutableArrayRef axes;
+	CFDataRef fvar;
+	unsigned version, offset_to_data, axis_count, axis_size, i;
+
+	if (f == NULL) {
+		return NULL;
+	}
+	axes = CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks);
+	if (axes == NULL) {
+		return NULL;
+	}
+	fvar = CTFontCopyTable(font, (CTFontTableTag)kCTFontTableFvar, kCTFontTableOptionNoOptions);
+	if (fvar == NULL) {
+		return axes;
+	}
+	version = fn_table_u32(fvar, 0);
+	offset_to_data = fn_table_u16(fvar, 4);
+	axis_count = fn_table_u16(fvar, 8);
+	axis_size = fn_table_u16(fvar, 10);
+	if ((version != 0x00010000u && version != 0x00010001u) || axis_size < 20 ||
+	    (CFIndex)(offset_to_data + (unsigned)axis_count * axis_size) > CFDataGetLength(fvar)) {
+		CFRelease(fvar);	/* a version, a stride or a count this parse cannot hold: answered, not invented */
+		CFRelease(axes);
+		return NULL;
+	}
+	for (i = 0; i < axis_count; i++) {
+		CFIndex at = (CFIndex)offset_to_data + (CFIndex)i * (CFIndex)axis_size;
+		CFMutableDictionaryRef axis;
+		CFNumberRef number;
+		CFStringRef name;
+		int32_t tag = (int32_t)fn_table_u32(fvar, at);
+		double minimum = fn_table_fixed(fvar, at + 4);
+		double deflt = fn_table_fixed(fvar, at + 8);
+		double maximum = fn_table_fixed(fvar, at + 12);
+		unsigned name_id = fn_table_u16(fvar, at + 18);
+		char buffer[512];
+		int written;
+
+		axis = CFDictionaryCreateMutable(kCFAllocatorDefault, 5, &kCFTypeDictionaryKeyCallBacks,
+						 &kCFTypeDictionaryValueCallBacks);
+		if (axis == NULL) {
+			continue;
+		}
+		/* THE IDENTIFIER IS THE FOUR-CHARACTER TAG AS A NUMBER, which is Apple's own description of it. */
+		number = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &tag);
+		if (number != NULL) {
+			CFDictionarySetValue(axis, kCTFontVariationAxisIdentifierKey, number);
+			CFRelease(number);
+		}
+		number = CFNumberCreate(kCFAllocatorDefault, kCFNumberDoubleType, &minimum);
+		if (number != NULL) {
+			CFDictionarySetValue(axis, kCTFontVariationAxisMinimumValueKey, number);
+			CFRelease(number);
+		}
+		number = CFNumberCreate(kCFAllocatorDefault, kCFNumberDoubleType, &maximum);
+		if (number != NULL) {
+			CFDictionarySetValue(axis, kCTFontVariationAxisMaximumValueKey, number);
+			CFRelease(number);
+		}
+		number = CFNumberCreate(kCFAllocatorDefault, kCFNumberDoubleType, &deflt);
+		if (number != NULL) {
+			CFDictionarySetValue(axis, kCTFontVariationAxisDefaultValueKey, number);
+			CFRelease(number);
+		}
+		written = cg_font_name_entry(f->graphics, (int)name_id, buffer, sizeof buffer);
+		if (written > 0) {
+			name = CFStringCreateWithBytes(kCFAllocatorDefault, (const UInt8 *)buffer, (CFIndex)written,
+						       kCFStringEncodingUTF8, false);
+			if (name != NULL) {
+				CFDictionarySetValue(axis, kCTFontVariationAxisNameKey, name);
+				CFRelease(name);
+			}
+		}
+		CFArrayAppendValue(axes, axis);
+		CFRelease(axis);
+	}
+	CFRelease(fvar);
+	return axes;
+}
+
+/* THE FEATURE SETTINGS THE FONT WAS ASKED FOR, WHICH IS THE SAME SHAPE OF ANSWER `CTFontCopyVariation` GIVES: a
+ * settings array is a CHOICE, and it has been held in the font's own descriptor since the font was created. Apple's
+ * sentence names both halves -- "only the non-default settings that should be applied to the font, or NULL if the
+ * default settings should be used" -- AND THE SECOND HALF IS THE ONE THIS DOOR HOLDS EXACTLY: a font asked for no
+ * setting answers NULL rather than an empty array, because "the default settings should be used" is precisely what
+ * NULL means.
+ *
+ * AND THE HALF THAT IS A BOUNDARY IS RECORDED RATHER THAN CLAIMED: the FILTER that would drop a setting equal to
+ * the face's own default needs `feat`'s per-selector default flags, which are `CTFontCopyFeatures`' business and
+ * not this door's -- and no face installed here carries a `feat` table at all. What is answered is the settings the
+ * font REPRESENTS, each naming a type and a selector and carrying the setting the caller wrote down; a setting that
+ * states the default value is a caller's mistake rather than a door's invention. */
+CFArrayRef CTFontCopyFeatureSettings(CTFontRef font)
+{
+	const struct __CTFont *f = (const struct __CTFont *)font;
+	CFTypeRef settings;
+
+	if (f == NULL || f->descriptor == NULL) {
+		return NULL;
+	}
+	settings = CTFontDescriptorCopyAttribute(f->descriptor, kCTFontFeatureSettingsAttribute);
+	if (settings == NULL) {
+		return NULL;
+	}
+	if (CFGetTypeID(settings) != CFArrayGetTypeID() || CFArrayGetCount((CFArrayRef)settings) == 0) {
+		CFRelease(settings);	/* a value that is not settings, or an empty one, is the default answer */
+		return NULL;
+	}
+	return (CFArrayRef)settings;	/* +1, from the descriptor's own copy door. */
+}
+
+/* THE SETTINGS MERGE, WHICH IS THE DESCRIPTOR'S COPY DOOR'S RULE AND IS DEFINED HERE BECAUSE OF THE INCLUDE GRAPH
+ * (`CTFontDescriptor_internal.h` carries the seam and says why). It is the fix this commit's door exposed rather
+ * than a tidy-up: Apple names `kCTFontFeatureSettingsAttribute` among the keys a copy MERGES, its value is an ARRAY
+ * of setting dictionaries, and the descriptor's copy door merged only DICTIONARIES and replaced everything else --
+ * so a caller who toggled one feature dropped every other setting it had asked for.
+ *
+ * AND THE MERGE IS BY (TYPE, SELECTOR), which is what makes Apple's own description of the door -- "toggle the
+ * state of individual features" -- do what it says: a setting for a pair already present REPLACES it, and a setting
+ * for a new pair is APPENDED. A dictionary that names neither is APPENDED rather than dropped, because dropping a
+ * caller's value is the failure this function exists to avoid.
+ *
+ * IT ANSWERS A NEW ARRAY THE CALLER OWNS, never the array it was given: the caller is a copy door that will store
+ * the result in a dictionary and then release it, and a function that sometimes answered its argument would make
+ * two files disagree about who releases what. */
+CFArrayRef CTFontDescriptorMergeFeatureSettings(CFArrayRef original, CFArrayRef additions)
+{
+	CFMutableArrayRef merged;
+	CFIndex i, j, count;
+
+	if (original == NULL || additions == NULL) {
+		return NULL;
+	}
+	merged = CFArrayCreateMutableCopy(kCFAllocatorDefault, 0, original);
+	if (merged == NULL) {
+		return NULL;
+	}
+	count = CFArrayGetCount(additions);
+	for (i = 0; i < count; i++) {
+		CFDictionaryRef addition = (CFDictionaryRef)CFArrayGetValueAtIndex(additions, i);
+		CFNumberRef type, selector;
+		CFIndex found = -1;
+
+		if (CFGetTypeID(addition) != CFDictionaryGetTypeID()) {
+			continue;
+		}
+		type = (CFNumberRef)CFDictionaryGetValue(addition, kCTFontFeatureTypeIdentifierKey);
+		selector = (CFNumberRef)CFDictionaryGetValue(addition, kCTFontFeatureSelectorIdentifierKey);
+		if (type != NULL && selector != NULL) {
+			for (j = 0; j < CFArrayGetCount(merged); j++) {
+				CFDictionaryRef candidate = (CFDictionaryRef)CFArrayGetValueAtIndex(merged, j);
+				CFNumberRef have_type, have_selector;
+
+				if (CFGetTypeID(candidate) != CFDictionaryGetTypeID()) {
+					continue;
+				}
+				have_type = (CFNumberRef)CFDictionaryGetValue(candidate,
+									      kCTFontFeatureTypeIdentifierKey);
+				have_selector = (CFNumberRef)CFDictionaryGetValue(candidate,
+										  kCTFontFeatureSelectorIdentifierKey);
+				if (have_type != NULL && have_selector != NULL && CFEqual(have_type, type) &&
+				    CFEqual(have_selector, selector)) {
+					found = j;
+					break;
+				}
+			}
+		}
+		if (found >= 0) {
+			CFArraySetValueAtIndex(merged, found, addition);
+		} else {
+			CFArrayAppendValue(merged, addition);
+		}
+	}
+	return merged;
+}
+
+/* THE FEATURE COPY IS DEFINED HERE RATHER THAN IN `CTFontDescriptor.c`, AND THE REASON IS THE INCLUDE GRAPH: the
+ * door is declared in that header and is a spelling of a feature-SETTINGS dictionary, whose two keys belong to
+ * `CTFont.h`, which INCLUDES `CTFontDescriptor.h` and so cannot be included back. The precedent is the matching
+ * tier's -- those doors are defined in `CTFontMatching.c` because that is where the tier that answers them lives --
+ * and the same reasoning applies: the definition sits where its keys are visible. `CTFontDescriptor.c`'s owed
+ * comment said this door "lands with CTFont.h"; CTFont.h has landed, so the door has.
+ *
+ * AND WHAT IT SPELLS IS A TUPLE, which is Apple's own word for a feature setting: a dictionary carrying the type,
+ * the selector, and the SETTING -- which this door states as ON, because a door whose purpose is "to more easily
+ * toggle the state of individual features" and which is handed a selector to toggle is being asked for that
+ * selector enabled. The alternative, a tuple with no setting at all, would be a tuple that says nothing about the
+ * state it exists to carry. It is handed to the attributes copy door, so the MERGE rule -- where this same commit
+ * found a real bug -- is stated once rather than twice. */
+CTFontDescriptorRef CTFontDescriptorCreateCopyWithFeature(CTFontDescriptorRef original,
+							  CFNumberRef featureTypeIdentifier,
+							  CFNumberRef featureSelectorIdentifier)
+{
+	CFMutableDictionaryRef setting, wrapper;
+	CFArrayRef settings;
+	CFDictionaryRef additions;
+	CTFontDescriptorRef copy;
+
+	if (original == NULL || featureTypeIdentifier == NULL || featureSelectorIdentifier == NULL) {
+		return NULL;
+	}
+	setting = CFDictionaryCreateMutable(kCFAllocatorDefault, 3, &kCFTypeDictionaryKeyCallBacks,
+					    &kCFTypeDictionaryValueCallBacks);
+	if (setting == NULL) {
+		return NULL;
+	}
+	CFDictionarySetValue(setting, kCTFontFeatureTypeIdentifierKey, featureTypeIdentifier);
+	CFDictionarySetValue(setting, kCTFontFeatureSelectorIdentifierKey, featureSelectorIdentifier);
+	CFDictionarySetValue(setting, kCTFontFeatureSelectorSettingKey, kCFBooleanTrue);
+	settings = CFArrayCreate(kCFAllocatorDefault, (const void **)&setting, 1, &kCFTypeArrayCallBacks);
+	CFRelease(setting);
+	if (settings == NULL) {
+		return NULL;
+	}
+	wrapper = CFDictionaryCreateMutable(kCFAllocatorDefault, 1, &kCFTypeDictionaryKeyCallBacks,
+					    &kCFTypeDictionaryValueCallBacks);
+	if (wrapper == NULL) {
+		CFRelease(settings);
+		return NULL;
+	}
+	CFDictionarySetValue(wrapper, kCTFontFeatureSettingsAttribute, settings);
+	CFRelease(settings);
+	additions = wrapper;
+	copy = CTFontDescriptorCreateCopyWithAttributes(original, additions);
+	CFRelease(additions);
+	return copy;
+}
+
 /* THE CURRENT VARIATION INSTANCE, WHICH NEEDS NO TABLE AT ALL -- AND THE OWED REASON NAMED TWO OF THEM, WHICH IS WHY
  * THIS COMMIT CORRECTS IT RATHER THAN QUIETLY IMPLEMENTING THE DOOR.
  *
@@ -1133,12 +1406,20 @@ CFCharacterSetRef CTFontCopyCharacterSet(CTFontRef font)
  * variation AXES" -- AN INSTANCE IS A CHOICE AND AN AXIS IS A CAPABILITY, and the choice has been stored in the font's
  * descriptor since this tier began holding one. See the door for the boundary that goes with it.
  *
- *   CTFontCopyVariationAxes                       the `fvar` table: the axis records with their names, ranges and
- *                                                 default values, and the `avar` table's normalised coordinates.
- *                                                 NOTE FOR WHOEVER TAKES IT: no variable font is installed on this
- *                                                 machine, so a case here could only exercise the NO-`fvar` path.
- *   CTFontCopyFeatures, CTFontCopyFeatureSettings  the `feat` table: the feature records and their exclusive
- *                                                 settings, versioned like the rest.
+ *   CTFontCopyVariationAxes                       LEFT THIS LIST with the `fvar` parse, AND ITS REASON WAS WRONG
+ *                                                 TWICE OVER: `avar` is not one of the five facts an axis dictionary
+ *                                                 carries (it maps a coordinate when one is SET), and the note that "no
+ *                                                 variable font is installed on this machine" was written without
+ *                                                 looking -- a case now exercises the REAL `fvar` path against an
+ *                                                 installed variable face.
+ *   CTFontCopyFeatureSettings                     LEFT THIS LIST BECAUSE IT IS NOT THE `feat` DOOR: `feat` lists what
+ *                                                 a face OFFERS, and this door answers the settings the font was
+ *                                                 ASKED FOR -- a choice, held in its descriptor since the font was
+ *                                                 made. The pair was owed as one and it was two.
+ *   CTFontCopyFeatures                            STILL OWED, and its reason is no longer that the seam cannot read a
+ *                                                 table -- it can -- but that NO FACE INSTALLED HERE CARRIES ONE,
+ *                                                 measured over every installed face: a case could not tell a right
+ *                                                 parse from a wrong one, and a parser nothing holds is not shipped.
  * AND `CTFontGetUnderlinePosition` AND `...Thickness` HAVE LEFT THIS LIST TOO, as the first doors here to read a table
  * and interpret it. Their reason said "the `post` table; the seam reports no underline metrics" -- the seam reads the
  * table now, and the two fields sit at FIXED OFFSETS in every `post` version, so the parse is two big-endian int16s and
@@ -1152,11 +1433,13 @@ CFCharacterSetRef CTFontCopyCharacterSet(CTFontRef font)
  *   CTFontCreateCopyWithFamily                    needs the family's faces to be enumerable.
  *   CTFontGetPlatformFont, ...WithPlatformFont    these speak in ATS ids, and this tree has no ATS.
  *
- * AND THE TWO MATCHING DOORS ON CTFontDescriptorRef ARE OWED FOR A RELATED REASON: Apple defines their answer
- * as "based on the original descriptor and SYSTEM PRECEDENCE", and precedence is a property of a registry of
- * INSTALLED faces with a registration scope. The engine behind CGFont can enumerate and register faces
- * (cg_font_enumerate, cg_font_register, cg_font_is_registered), so the tier that answers them is buildable --
- * it is just not this one, because the ordering it must impose is Apple's and not something to invent.
+ * AND ONE PARAGRAPH OF THIS BLOCK WAS WRONG ABOUT THE MATCHING DOORS, which is corrected here rather than deleted: it
+ * said the two doors on CTFontDescriptorRef were owed "because the ordering it must impose is Apple's and not
+ * something to invent", with a registry of installed faces as the missing piece. THE REGISTRY IS NOT MISSING AND THE
+ * TWO DOORS ARE DEFINED -- `CTFontMatching.c` owns them, the set is the engine's own list (`cg_font_enumerate`) and
+ * the ORDER is this tier's recorded decision. The paragraph stayed on this page after the tier landed, WHICH IS
+ * EXACTLY THE KIND OF STALE SENTENCE THIS BLOCK EXISTS TO KEEP CORRECTED, and it was found by reading the owed list
+ * against the library rather than by trusting the list.
  *
  * AND ONE DOOR OF APPLE'S IS NOT EVEN DECLARED HERE, WHICH IS THE ONLY ABSENCE OF THAT KIND: `CTFontCreateWithQuickdraw-
  * Instance`. Apple's 10.6 header declares it plainly, with no guard, and this library does not declare it at all --
