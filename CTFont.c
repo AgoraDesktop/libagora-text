@@ -615,17 +615,151 @@ struct ct_role_request {
 	bool fixed_pitch;
 };
 
+/* **THE UI FAMILIES, IN THE ORDER THIS TIER WOULD LIKE THEM — AND THE THEME ROW THAT WAS RECORDED AS OWED.**
+ * The role matcher used to take the first regular face in FAMILY-NAME order, which on this host is `C059-Roman`:
+ * a URW SERIF, correct and plainly not a user interface. What it said in its own defence was that "which regular
+ * family a UI uses is genuinely a theme, and this tier has no such setting" — which was true, and is no longer the
+ * answer, because a theme has to be SOMEWHERE and this is the only tier that knows what a UI font is for.
+ *
+ * `Inter` first, by request. The rest are the faces a Linux or BSD desktop actually has, in the order a person
+ * would pick them, so that a machine without Inter still gets a SANS face rather than a serif one. */
+static const char *const ct_ui_families[] = {
+	"Inter",
+	"Noto Sans",
+	"Cantarell",
+	"Lato",
+	"DejaVu Sans",
+	"Liberation Sans",
+	"FreeSans",
+};
+
+/* **AND IT IS OVERRIDABLE WITHOUT A REBUILD**, because a preference list nobody can argue with is a hardcoded
+ * answer wearing a longer name. `AGORA_UI_FONT` is a colon-separated list, tried in order, and it REPLACES the
+ * default rather than adding to it — a caller that names a family wants that family, not that family and then
+ * whatever this file happens to like. */
+static bool ct_ui_name_is_in(CFStringRef family, const char *list)
+{
+	char name[256];
+	char wanted[512];
+	char *one;
+	size_t i;
+
+	if (family == NULL) {
+		return false;
+	}
+	if (!CFStringGetCString(family, name, (CFIndex)sizeof name, kCFStringEncodingUTF8) || name[0] == '\0') {
+		return false;
+	}
+	if (list != NULL) {
+		snprintf(wanted, sizeof wanted, "%s", list);
+		for (one = strtok(wanted, ":"); one != NULL; one = strtok(NULL, ":")) {
+			if (strcasecmp(one, name) == 0) {
+				return true;
+			}
+		}
+		return false;
+	}
+	for (i = 0; i < sizeof ct_ui_families / sizeof ct_ui_families[0]; i++) {
+		if (strcasecmp(ct_ui_families[i], name) == 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/* **THE Nth FAMILY TO TRY: THE CALLER'S LIST FIRST, AND THEN THIS FILE'S.** They are one sequence rather than
+ * two alternatives, and the reason is what a caller means by naming a family: "this one, please" — not "this one,
+ * and if it is not installed then anything at all". MEASURED with the lists kept apart: `AGORA_UI_FONT=Nonexistent`
+ * fell past this file's whole preference list and answered `C059-Roman`, a URW SERIF, which is the one outcome the
+ * list exists to prevent. A caller who names a family that is not here gets what a caller who names nothing gets. */
+static bool ct_ui_family_at(int index, char *out, size_t size)
+{
+	const char *env = getenv("AGORA_UI_FONT");
+	const int defaults = (int)(sizeof ct_ui_families / sizeof ct_ui_families[0]);
+	const char *p;
+	size_t len;
+
+	if (env != NULL && env[0] != '\0') {
+		int count = 1;		/* a non-empty list has one more field than it has separators */
+		const char *q;
+
+		for (q = env; *q != '\0'; q++) {
+			if (*q == ':') {
+				count++;
+			}
+		}
+		if (index < count) {
+			p = env;
+			/* **ADVANCE exactly `index` SEPARATORS — NO MORE, NO FEWER, AND THE FIRST VERSION OF THIS GOT IT
+			 * BACKWARDS.** It stepped `count - index - 1` times, which for a two-entry list and index 0 landed on
+			 * the SECOND entry and for a three-entry list landed on the last; the results only looked right
+			 * because the lists this was tried with happened to be short. This is a loop that must run `index`
+			 * times, and writing it as a `while` that decrements its own counter is how it came to run another
+			 * number instead. */
+			while (index-- > 0 && (p = strchr(p, ':')) != NULL) {
+				p++;
+			}
+			len = strcspn(p, ":");
+			if (len >= size) {
+				len = size - 1;
+			}
+			memcpy(out, p, len);
+			out[len] = '\0';
+			return out[0] != '\0';
+		}
+		index -= count;
+	}
+	if (index >= defaults) {
+		return false;
+	}
+	snprintf(out, size, "%s", ct_ui_families[index]);
+	return true;
+}
+
+/* **THE FIRST REGULAR FACE OF A NAMED FAMILY, ASKED OF THE DESCRIPTORS RATHER THAN OF THE FONTS.** Every candidate
+ * carries its family as an ATTRIBUTE, so a family nobody wants costs a dictionary lookup instead of opening a font
+ * file off the disk — WHICH IS WHAT MAKES TRYING A LIST OF FAMILIES AFFORDABLE rather than seven walks through every
+ * font on the host. That distinction is the whole reason this function exists instead of a loop around
+ * `ct_font_search`: the acceptance predicate there is handed a FONT, and by then the file has already been read. */
+static CTFontRef ct_font_search_family(CFArrayRef candidates, CGFloat size, const CGAffineTransform *matrix,
+				       const char *family)
+{
+	CFIndex i, count = (candidates != NULL) ? CFArrayGetCount(candidates) : 0;
+
+	for (i = 0; i < count; i++) {
+		CTFontDescriptorRef descriptor = (CTFontDescriptorRef)CFArrayGetValueAtIndex(candidates, i);
+		CFStringRef got = (CFStringRef)CTFontDescriptorCopyAttribute(descriptor, kCTFontFamilyNameAttribute);
+		char name[256];
+		bool matches = false;
+		CTFontRef font;
+
+		if (got != NULL) {
+			matches = CFStringGetCString(got, name, (CFIndex)sizeof name, kCFStringEncodingUTF8) &&
+				  strcasecmp(name, family) == 0;
+			CFRelease(got);
+		}
+		if (!matches) {
+			continue;
+		}
+		font = ct_font_from_descriptor(descriptor, size, matrix);
+		if (font == NULL) {
+			continue;
+		}
+		if ((CTFontGetSymbolicTraits(font) & (kCTFontBoldTrait | kCTFontItalicTrait)) == 0) {
+			return font;
+		}
+		CFRelease(font);
+	}
+	return NULL;
+}
+
 static bool ct_accept_role(CTFontRef candidate, void *info)
 {
 	const struct ct_role_request *want = (const struct ct_role_request *)info;
 
 	/* THE ONE ROLE THAT CARRIES A REQUEST RATHER THAN A PLACE: the fixed-pitch role asks for a fact about the
-	 * face, which `CTFontGetSymbolicTraits` reads out of the tables. Every other role asks for "the face the
-	 * system would use", and in a tier with no theme the first face in the tier's order IS that answer. */
-	CTFontSymbolicTraits traits;
-
-	/* THE ONE ROLE THAT CARRIES A REQUEST RATHER THAN A PLACE: the fixed-pitch role asks for a fact about the
 	 * face, which `CTFontGetSymbolicTraits` reads out of the tables. */
+	CTFontSymbolicTraits traits;
 	if (want->fixed_pitch) {
 		return (CTFontGetSymbolicTraits(candidate) & kCTFontMonoSpaceTrait) != 0;
 	}
@@ -638,7 +772,16 @@ static bool ct_accept_role(CTFontRef candidate, void *info)
 	 * WHAT REMAINS IS GENUINELY A THEME AND IS NOT INVENTED HERE: WHICH regular family a UI uses. This tier has no
 	 * such setting, and a hardcoded `DejaVu Sans` would be this library choosing a distribution's fonts. */
 	traits = CTFontGetSymbolicTraits(candidate);
-	return (traits & (kCTFontBoldTrait | kCTFontItalicTrait)) == 0;
+	if ((traits & (kCTFontBoldTrait | kCTFontItalicTrait)) != 0) {
+		return false;
+	}
+	/* **AND THE FIRST PASS ASKS FOR A FAMILY THIS TIER WOULD CHOOSE, THE SECOND FOR ANY REGULAR FACE.** A
+	 * preference that could not be declined would not be a preference — a host with none of these families still
+	 * gets a UI font, and it gets the first regular one rather than none at all. */
+	/* **AND ANY REGULAR FACE IS THE ANSWER ONCE THE LIST HAS BEEN WALKED AND CAME BACK EMPTY.** The walk lives in
+	 * `CTFontCreateUIFontForLanguage`, which is the only place that knows the ORDER; what is left here is the one
+	 * fact this door can decide alone, and a preference it cannot see is not one it may invent. */
+	return true;
 }
 
 /* A ROLE, WHICH IS A REQUEST TO A SYSTEM THAT CHOOSES A FACE -- AND THE DECISION IS RECORDED RATHER THAN PRETENDED
@@ -685,7 +828,24 @@ CTFontRef CTFontCreateUIFontForLanguage(CTFontUIFontType uiType, CGFloat size, C
 		     (uiType == kCTFontEmphasizedSystemDetailFontType);
 	want.fixed_pitch = (uiType == kCTFontUserFixedPitchFontType);
 	candidates = CTFontMatchingCopyAvailableDescriptors();
-	base = ct_font_search(candidates, size, NULL, ct_accept_role, &want);
+	base = NULL;
+	if (!want.fixed_pitch) {
+		/* **THE LIST IS WALKED IN ORDER, WHICH IS THE ONLY THING THAT MAKES IT A PREFERENCE.** MEASURED with a
+		 * two-pass search that asked "is this family one of ours": the system font came back as `Cantarell`
+		 * while `Inter` was installed and first in the list — because the candidate list is sorted by FAMILY NAME
+		 * and `Cantarell` sorts first. A set has no order; a list does, and this is why the door takes one. */
+		char family[256];
+		int i;
+
+		for (i = 0; base == NULL && ct_ui_family_at(i, family, sizeof family); i++) {
+			base = ct_font_search_family(candidates, size, NULL, family);
+		}
+	}
+	if (base == NULL) {
+		/* AND ONLY THEN ANY REGULAR FACE AT ALL, so that a host with none of these families still gets a UI font
+		 * rather than none — the preference being declined rather than enforced. */
+		base = ct_font_search(candidates, size, NULL, ct_accept_role, &want);
+	}
 	if (candidates != NULL) {
 		CFRelease(candidates);
 	}

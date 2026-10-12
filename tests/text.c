@@ -4140,32 +4140,58 @@ static int case_font_cascade_and_roles(void)
 	check(CTFontCreateForString(mono, CFSTR(""), CFRangeMake(0, 0)) == NULL,
 	      "an empty string produced a font, and no range asks for nothing");
 
-	/* THE ROLES. THE FIRST FACE IN THE TIER'S ORDER IS WHAT MOST OF THEM ASK FOR, and the case reads that order
-	 * through the same internal seam the door uses rather than assuming which family comes first. */
+	/* **THE ROLES, AND THE PREFERENCE THAT ANSWERS THEM.**
+	 *
+	 * This block used to assert "the first face in the tier's order" — WHICH WAS THE ABSENCE OF A THEME RATHER THAN
+	 * A RULE. It held while this tier had no opinion about which family a user interface uses, and what that
+	 * produced was a bold italic, and then a URW serif, as the face a whole desktop is drawn in.
+	 *
+	 * THE OPINION IS THE USER'S NOW, IT IS A LIST, AND THE LIST IS WALKED IN ORDER. So the thing to assert is the
+	 * PREFERENCE, and `AGORA_UI_FONT` is what makes that decidable on any machine instead of a fact about this one:
+	 * naming an installed family must answer THAT family, whatever sorts first in the registry. DejaVu is used
+	 * because this suite already depends on it — the registration cases above register its Bold face by path. */
+	/* **AND THE WALK IS READ THROUGH THE SAME SEAM THE DOOR USES**, which is why the assignment is here: the
+	 * emphasised role's case below reads it too, and a block that only CHECKED it left the rest of the case
+	 * holding whatever `candidates` had been — MEASURED as a signal 11 in the child, from a pointer nobody had
+	 * set. */
 	candidates = CTFontMatchingCopyAvailableDescriptors();
 	check(candidates != NULL && CFArrayGetCount(candidates) > 0,
 	      "the registry is empty, so no role can be answered");
-	if (candidates != NULL && CFArrayGetCount(candidates) > 0) {
-		CTFontDescriptorRef first = (CTFontDescriptorRef)CFArrayGetValueAtIndex(candidates, 0);
-
-		system_family = (CFStringRef)CTFontDescriptorCopyAttribute(first, kCTFontFamilyNameAttribute);
-	}
+	setenv("AGORA_UI_FONT", "DejaVu Sans", 1);
 	role = CTFontCreateUIFontForLanguage(kCTFontSystemFontType, 12.0, NULL);
 	check(role != NULL, "the system role was not answered");
 	if (role != NULL) {
 		CFStringRef got = CTFontCopyFamilyName(role);
-		char buffer[256];
 
-		check(system_family != NULL && got != NULL && CFEqual(got, system_family),
-		      "the system role did not answer the first face in the tier's order");
-		if (got != NULL && CFStringGetCString(got, buffer, (CFIndex)sizeof buffer, kCFStringEncodingUTF8)) {
-			printf("  (note: the system role is answered by \"%s\")\n", buffer);
-		}
-		check(CTFontGetSize(role) == 12.0, "the system role answered %g points where 12 were asked",
-		      (double)CTFontGetSize(role));
+		check(got != NULL && CFStringCompare(got, CFSTR("DejaVu Sans"), 0) == kCFCompareEqualTo,
+		      "a role asked for DejaVu Sans by preference did not answer it");
 		if (got != NULL) {
 			CFRelease(got);
 		}
+		CFRelease(role);
+	}
+	unsetenv("AGORA_UI_FONT");
+
+	/* AND WITH NOTHING NAMED, THE ANSWER IS THIS TIER'S OWN LIST — whose contents are a matter of taste and whose
+	 * FIRST PROPERTY is not: it is a REGULAR face. That is what the list exists to guarantee, and it is what the
+	 * tier did not guarantee before it had one. */
+	role = CTFontCreateUIFontForLanguage(kCTFontSystemFontType, 12.0, NULL);
+	check(role != NULL, "the system role was not answered");
+	if (role != NULL) {
+		CTFontSymbolicTraits traits = CTFontGetSymbolicTraits(role);
+
+		check((traits & (kCTFontBoldTrait | kCTFontItalicTrait)) == 0,
+		      "the system role answered a BOLD or ITALIC face, which a plain role must never do");
+		system_family = CTFontCopyFamilyName(role);
+		if (system_family != NULL) {
+			char buffer[256];
+
+			if (CFStringGetCString(system_family, buffer, (CFIndex)sizeof buffer, kCFStringEncodingUTF8)) {
+				printf("  (note: the system role is answered by \"%s\")\n", buffer);
+			}
+		}
+		check(CTFontGetSize(role) == 12.0, "the system role answered %g points where 12 were asked",
+		      (double)CTFontGetSize(role));
 		CFRelease(role);
 	}
 
