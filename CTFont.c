@@ -622,7 +622,23 @@ static bool ct_accept_role(CTFontRef candidate, void *info)
 	/* THE ONE ROLE THAT CARRIES A REQUEST RATHER THAN A PLACE: the fixed-pitch role asks for a fact about the
 	 * face, which `CTFontGetSymbolicTraits` reads out of the tables. Every other role asks for "the face the
 	 * system would use", and in a tier with no theme the first face in the tier's order IS that answer. */
-	return want->fixed_pitch ? ((CTFontGetSymbolicTraits(candidate) & kCTFontMonoSpaceTrait) != 0) : true;
+	CTFontSymbolicTraits traits;
+
+	/* THE ONE ROLE THAT CARRIES A REQUEST RATHER THAN A PLACE: the fixed-pitch role asks for a fact about the
+	 * face, which `CTFontGetSymbolicTraits` reads out of the tables. */
+	if (want->fixed_pitch) {
+		return (CTFontGetSymbolicTraits(candidate) & kCTFontMonoSpaceTrait) != 0;
+	}
+	/* **AND EVERY OTHER ROLE WANTS A REGULAR FACE.** The answer here was `true`, on the reasoning that "in a
+	 * tier with no theme the first face in the tier's order IS that answer" — and the tier's order is FAMILY NAME,
+	 * so a plain role was handed `C059-BdIta`, a BOLD ITALIC chosen because C sorts early. A bold italic for a
+	 * plain role is not a theming decision; it is the absence of one. The emphasized roles are unaffected, because
+	 * `CTFontCreateUIFontForLanguage` gives them their weight by copying the base face with the bold trait.
+	 *
+	 * WHAT REMAINS IS GENUINELY A THEME AND IS NOT INVENTED HERE: WHICH regular family a UI uses. This tier has no
+	 * such setting, and a hardcoded `DejaVu Sans` would be this library choosing a distribution's fonts. */
+	traits = CTFontGetSymbolicTraits(candidate);
+	return (traits & (kCTFontBoldTrait | kCTFontItalicTrait)) == 0;
 }
 
 /* A ROLE, WHICH IS A REQUEST TO A SYSTEM THAT CHOOSES A FACE -- AND THE DECISION IS RECORDED RATHER THAN PRETENDED
