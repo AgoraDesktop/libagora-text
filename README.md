@@ -37,20 +37,6 @@ now Core Text written from scratch against **Apple's own 10.6 headers**.
 
 At the moment of the restart the ledger read **1038 shipped, 534 open, 460 struck** — and 515 of the open
 rows are the AAT/SFNT structure vocabulary, which is a data port of two headers rather than behaviour.
-- **`CTFont` is implemented, and the glyph step — the reason this library exists — is live.**
-  `CTFontGetGlyphsForCharacters` maps characters through the font engine behind `CGFont`, and Apple's contract
-  for it is held: `true` only when **every** character mapped, with `0` in the slot of one that did not. The
-  type, the creators, the accessors, the name table (through the sixteen keys Core Graphics has no door for)
-  and the metrics (scaled from font units into points) are answered. MEASURED: `text: 5 of 5 cases passed`.
-- **THE NAME ROUTE RESOLVES THROUGH THE ENGINE'S FACE REGISTRY, AND THE SUITE MEASURES IT EVERY RUN** rather
-  than a comment asserting it: `CTFontCreateWithName` finds a face once it has been registered — the case
-  PRINTS which of two routes answered, and every run says the name route did. An earlier attempt answered NULL
-  because the face was unregistered, which is what a NULL there means.
-- **Doors OWED, EACH NAMED WITH ITS REASON in `CTFont.c`** rather than defined approximately: the outline
-  path (lands next, with the `CGPath` it builds), the traits, the character set and languages, the
-  `fvar`/`avar`/`feat` tables, the raw table doors, the `post` table's underline metrics, the slant angle, the
-  vertical translations, the UI-role creator, the string/family/trait copies, and the ATS pair.
-
 ## The order the headers go in, which is Apple's own include graph
 
 `CTFontTraits` → `CTFontDescriptor` → `CTFont` → (`CTFontCollection`, `CTFontManager`) → `CTParagraphStyle` →
@@ -102,3 +88,17 @@ rows are the AAT/SFNT structure vocabulary, which is a data port of two headers 
   plan called out as missing: Apple deprecated CG's glyph doors, so this tree struck them, and **Core Text
   owns that step** (`CTFontGetGlyphsForCharacters`). How it reaches the font's `cmap` is the first
   architectural question of the restart, and it is not answered by a signature.
+
+- **`CTFont` is implemented, and the glyph step — the reason this library exists — is live.**
+  `CTFontGetGlyphsForCharacters` maps characters through the font engine behind `CGFont`, and Apple's contract
+  for it is held: `true` only when **every** character mapped, with `0` in the slot of one that did not. The
+  type, the creators, the accessors, the name table (through the sixteen keys Core Graphics has no door for)
+  and the metrics (scaled from font units into points) are answered. MEASURED: `text: 5 of 5 cases passed`.
+- **THE NAME ROUTE RESOLVES THROUGH THE ENGINE'S FACE REGISTRY, AND THE SUITE MEASURES IT EVERY RUN** rather
+  than a comment asserting it: `CTFontCreateWithName` finds a face once it has been registered — the case
+  PRINTS which of two routes answered, and every run says the name route did. An earlier attempt answered NULL
+  because the face was unregistered, which is what a NULL there means.
+- **Doors OWED, EACH NAMED WITH ITS REASON in `CTFont.c`** rather than defined approximately: the outline
+  path (lands next, with the `CGPath` it builds), the traits, the character set and languages, the
+  `fvar`/`avar`/`feat` tables, the raw table doors, the `post` table's underline metrics, the slant angle, the
+  vertical translations, the UI-role creator, the string/family/trait copies, and the ATS pair.
