@@ -728,3 +728,29 @@ diagnostic at all in their logs; `nm -D build/libagora-text.so` lists the door; 
 `100% tests passed, 0 tests failed out of 2` over `text: 29 of 29 cases passed, 0 failed` — with **1** names in the `owed` test, which is now ONE DOOR: `CTFontManagerCreateFontRequestRunLoopSource`,
 which needs a FONT SERVER on the other end of the port rather than anything this library can build. THAT IS THE WHOLE OWED
 LIST.
+**And the last owed door was given a DECISION rather than a sentence: the Agora font service, designed and not built
+(2026-10-11).** `CTFontManagerCreateFontRequestRunLoopSource` had been owed with the reason "a FONT SERVER on the other
+end of the port". That reason is still true, and the maintainer chose to define the missing side rather than leave the
+door pointing at nothing — SO `FONT-SERVICE.md` RECORDS ITS SHAPE AND SAYS, IN ITS OWN FIRST LINE, THAT NOTHING IN IT IS
+IMPLEMENTED. The door is still declared and not defined; the `owed` test still names it; no behaviour changed in this
+commit and the measurement is unchanged.
+
+**AND THE SURVEY IS THE VALUABLE PART, BECAUSE IT TURNED ASSUMPTIONS INTO MEASUREMENTS.** Read with `nm -D` on
+`libagora-core` and `grep`: THE PORT NAMESPACE ALREADY EXISTS (`CFSocketRegisterSocketSignature`,
+`CFSocketCopyRegisteredSocketSignature`, `CFSocketGetDefaultNameRegistryPortNumber` — which is exactly what Apple's own
+error case, "a duplicate requestPortName", assumes); the RUN-LOOP INTEGRATION EXISTS (`CFSocketCreateRunLoopSource` and
+the whole `CFRunLoop` family); a CF-NATIVE CODEC EXISTS (`CFPropertyListCreateData` / `CFPropertyListCreateWithData`),
+which matters because THIS LIBRARY IS CORE FOUNDATION AND CORE GRAPHICS ONLY, so Foundation's property-list codec is not
+available to it at any price; and a NAME TO DERIVE FROM EXISTS (`kCTFontManagerBundleIdentifier`, an Apple-era key).
+`CFMessagePort` IS ABSENT, so there is no named-message primitive to lean on and the transport is `CFSocket`. And
+`window-server/` is AN EMPTY SKELETON — one commit, a `.gitignore`, no README — so this would be AGORA'S FIRST SERVER
+rather than a second one.
+
+**AND ONE THING IS EXPLICITLY UNVERIFIED, WHICH IS THE HONEST FORM OF THE CLAIM**: those `CFSocket` registry symbols are
+exported, but whether a RUNTIME RENDEZVOUS stands behind them is in `libagora-core`, a different repository, and was not
+read. The design says so where it depends on the answer, and names checking it as the first task.
+
+**AND THE DAEMON'S JUSTIFICATION IS STATED RATHER THAN ASSUMED**: a responder registers a port under a name derived from
+its process (Apple's error case is a DUPLICATE name, so the name is derived rather than supplied), and ONLY A SYSTEM
+COMPONENT CAN ENUMERATE PROCESSES to find another process's port — a random application cannot discover a random
+application. That is the daemon's entire job, and it is why the system's half and this library's half are separate.

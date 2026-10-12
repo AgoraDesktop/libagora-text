@@ -468,4 +468,12 @@ ctest --test-dir build
   disabled face stayed matchable. **THE DISABLED LIST IS THEREFORE A LIST OF QUERIES, EXACTLY AS A FONT COLLECTION IS**:
   a face is disabled when some descriptor in the list **describes** it — the same `ct_match_satisfies` test a matching
   query gets — so a caller disables a font by **naming** it and re-enables it by naming it again. MEASURED: `100% tests passed, 0 tests failed out of 2` over
-  `text: 29 of 29 cases passed, 0 failed`, **135 public doors**, and `owed` down to **1**.
+  `text: 29 of 29 cases passed, 0 failed`, **135 public doors**, and `owed` down to **1**.- **AND THE LAST OWED DOOR HAS A DECISION BEHIND IT NOW RATHER THAN A SENTENCE: the Agora font service.** The
+  maintainer chose to define one, and `FONT-SERVICE.md` records its shape — **DESIGNED, NOT BUILT**, with the door still
+  declared and not defined, and the `owed` test still naming it. The survey behind it is MEASURED and it changes what
+  the work is: **Agora's Core Foundation already has the port namespace** (`CFSocketRegisterSocketSignature` and the
+  name-registry family), the run-loop integration (`CFSocketCreateRunLoopSource`), the codec (`CFPropertyListCreateData`)
+  and a name to derive from (`kCTFontManagerBundleIdentifier`) — while **`CFMessagePort` is absent** and
+  **`window-server/` is an empty skeleton**, so this would be **Agora's first server**. The honest reason for a daemon is
+  now stated rather than assumed: a responder registers a per-process port, and **only a system component can enumerate
+  processes to find one.**
