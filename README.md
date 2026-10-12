@@ -419,4 +419,16 @@ ctest --test-dir build
   refused **even when the line fit** — which would have made a door that refuses lines it never had to touch. Apple's
   condition is about the **line's** width, and the token is only reached when there is cutting to do; the case now
   asserts that round the other way as well (a line that fits comes back whole even with a token this tier would
-  refuse).
+  refuse).- **`CTLineCreateJustifiedLine` IS IMPLEMENTED, AND WITH IT `CTLine` OWES NOTHING.** Its header prints LESS than the
+  truncation engine's — a factor of 0 or less justifies nothing, 1.0 or more is full, and a narrower width "squishes"
+  the line — so **the two things it does not print are DECIDED AND NAMED**: the slack goes to the **spaces**, which is
+  what "fully justified" means and why the paragraph vocabulary says a last line "is naturally aligned" (it has no gap
+  to widen), and the factor is the **fraction** of the slack taken up, linearly (Apple prints no curve for its "varying
+  degrees"). A line with **no space** comes back unchanged; a line with room has its gaps widened **after each space**,
+  and the case reads the positions through the run and holds that the **first** glyph does not move while the word after
+  the first space does. MEASURED: `text: 27 of 27 cases passed, 0 failed`, with `owed` down to **4** names — **and none of them in this type**.
+- **AND THE THREE DOORS `CTLine` ONCE OWED LEFT IN THE ORDER THEIR REASONS BECAME FALSE**, because every one of those
+  reasons was a CONDITION that could be checked: `GetGlyphRuns` waited for `CTRun` to exist; `CreateTruncatedLine`
+  waited for "the typesetter, whose job the breaking is"; `CreateJustifiedLine` waited for a decision about where
+  justification slack goes — and that decision is made and written down rather than left as a sentence. **A REASON THAT
+  CANNOT BE CHECKED IS A SENTENCE, NOT A REASON.**

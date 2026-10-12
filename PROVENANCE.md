@@ -603,3 +603,35 @@ way as well.
 MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with no compiler diagnostic at all in
 their logs; `nm -D build/libagora-text.so` lists `CTLineCreateTruncatedLine` and `CTLineCreateWithGlyphs`; and a bare
 `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over `text: 26 of 26 cases passed, 0 failed`, with the `owed` test down to 5 names.
+**`CTLineCreateJustifiedLine` — the justification engine, and `CTLine` owes nothing (2026-10-11).** Its header prints
+LESS than the truncation one's, so THE TWO THINGS IT DOES NOT PRINT ARE DECIDED HERE AND NAMED AS THIS TIER'S RATHER
+THAN PRESENTED AS APPLE'S.
+
+**WHAT APPLE PRINTS IS THREE SENTENCES**, and all three are implemented: "When set to 1.0 or greater indicates, full
+justification will be performed. If less than 1.0, varying degrees of partial justification will be performed. If set to
+0 or less, then no justification will be performed"; the width is "the width to which the resultant line will be
+justified"; and "If justificationWidth is less than the actual width of the line, then negative justification will be
+performed ("text squishing")".
+
+**WHAT IT DOES NOT PRINT IS WHERE THE SLACK GOES, AND THAT IS THE DECISION.** Full justification is the typographic word
+for WIDENING THE GAPS BETWEEN WORDS — which is what `CTParagraphStyle`'s `kCTJustifiedTextAlignment` means by "Text is
+fully justified", and why that same vocabulary says a paragraph's LAST line "is naturally aligned": a last line has no
+gap to widen. So the slack is divided among the line's SPACE glyphs, applied AFTER each one, which leaves the first word
+where it was and moves every word after a space. A line with NO SPACE — a single long word, or a face with no space
+glyph — comes back over its own range, recorded as the case rather than stretched between its glyphs. SPREADING THE
+SLACK BETWEEN EVERY GLYPH would have been the plausible wrong answer, and it is the one this file named when the door
+was owed.
+
+**AND THE FACTOR IS THE FRACTION OF THE SLACK, LINEARLY** — Apple says a factor below 1.0 gives "varying degrees of
+partial justification" and prints no curve for how the degrees vary, so 0.5 justifies half way to the width. That is a
+reading, and it is in `CTLine.c` where a reader can disagree with it.
+
+**AND IT NEEDED NO NEW SEAM, WHICH IS WORTH NOTING BECAUSE THE TRUNCATION ENGINE DID.** A justified line has the SAME
+glyphs and DIFFERENT ORIGINS, so it cannot be placed by the font's advances — but the helper that places it is STATIC
+in `CTLine.c`, because the engine is its only caller. A seam is for two files that must agree; a helper is for one.
+
+MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with no compiler diagnostic at all in
+their logs; `nm -D build/libagora-text.so` lists `CTLineCreateJustifiedLine`; and a bare `ctest --test-dir build` is
+`100% tests passed, 0 tests failed out of 2` over `text: 27 of 27 cases passed, 0 failed`, with the `owed` test down to 4 names — none of them in `CTLine`. THE CASE HOLDS APPLE'S THREE
+SENTENCES AND THIS TIER'S TWO DECISIONS, reading the glyph POSITIONS through the run, because those are what
+justification changes: the glyphs are the same ones and their origins have moved.

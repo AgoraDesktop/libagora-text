@@ -756,19 +756,146 @@ CTLineRef CTLineCreateTruncatedLine(CTLineRef line, double width, CTLineTruncati
 }
 
 /* =================================================================================================
+ * THE JUSTIFICATION ENGINE, WHOSE HEADER PRINTS LESS THAN THE TRUNCATION ONE'S — SO WHAT IS NOT PRINTED IS RECORDED
+ * HERE INSTEAD OF GUESSED AT QUIETLY.
+ *
+ * APPLE PRINTS THREE THINGS. `justificationFactor`: "When set to 1.0 or greater indicates, full justification will be
+ * performed. If less than 1.0, varying degrees of partial justification will be performed. If set to 0 or less, then
+ * no justification will be performed." `justificationWidth`: "The width to which the resultant line will be
+ * justified." And: "If justificationWidth is less than the actual width of the line, then negative justification will
+ * be performed ("text squishing")."
+ *
+ * AND IT PRINTS NOTHING ABOUT WHERE THE SLACK GOES. TWO DECISIONS ARE THEREFORE THIS TIER'S, AND BOTH ARE NAMED:
+ *
+ *   WHERE: THE SPACES. Full justification is the typographic word for WIDENING THE GAPS BETWEEN WORDS, which is what
+ *   `CTParagraphStyle`'s `kCTJustifiedTextAlignment` means by "Text is fully justified" and why that same vocabulary
+ *   says the LAST line of a paragraph "is naturally aligned" — a last line has no gap to widen. So the slack is
+ *   divided among the line's SPACE glyphs, and a line with none comes back unexercised. SPREADING IT BETWEEN EVERY
+ *   GLYPH would look plausible and be wrong, which is the failure this file named when the door was owed.
+ *
+ *   HOW MUCH: `min(factor, 1.0)`, LINEARLY. Apple says a factor below 1.0 gives "varying degrees of partial
+ *   justification" and does not print HOW the degrees vary, so the factor is taken as the FRACTION of the slack that
+ *   is taken up — 0.5 justifies half way to the width. That is a reading, and it is here rather than in a caption.
+ *
+ * AND NEGATIVE JUSTIFICATION IS THE SAME ARITHMETIC with a negative slack: the spaces SHRINK by their share, which is
+ * Apple's own word for it.
+ * =============================================================================================== */
+/* THE LINE THE ENGINE BUILDS, AND WHY IT IS A HELPER RATHER THAN THE SEAM `CTLineCreateWithGlyphs`: a JUSTIFIED line
+ * has the SAME GLYPHS as the line it came from and DIFFERENT ORIGINS — the gaps moved — so it cannot be placed by the
+ * font's own advances, which is what that seam does. IT IS STATIC BECAUSE THE ENGINE IS ITS ONLY CALLER, and the
+ * advances a caller reads back are the distances between these positions (`CTLineGetGlyphRuns`), so a justified space
+ * reports the WIDER advance it was given, which is the whole point of the exercise. */
+static struct __CTLine *ct_line_with_positions(CFAttributedStringRef string, CFRange range, CTFontRef font,
+					       const CGGlyph *glyphs, const CGPoint *positions, CFIndex count)
+{
+	struct __CTLine *line;
+	CGSize last = CGSizeMake(0.0, 0.0);
+
+	if (font == NULL || count < 0 || (count > 0 && (glyphs == NULL || positions == NULL))) {
+		return NULL;
+	}
+	line = ct_line_alloc();
+	if (line == NULL) {
+		return NULL;
+	}
+	line->string = (string == NULL) ? NULL : (CFAttributedStringRef)CFRetain(string);
+	line->font = (CTFontRef)CFRetain(font);
+	line->range = range;
+	line->ascent = CTFontGetAscent(font);
+	line->descent = CTFontGetDescent(font);
+	line->leading = CTFontGetLeading(font);
+	if (count == 0) {
+		return line;
+	}
+	line->glyphs = (CGGlyph *)malloc((size_t)count * sizeof(CGGlyph));
+	line->positions = (CGPoint *)malloc((size_t)count * sizeof(CGPoint));
+	if (line->glyphs == NULL || line->positions == NULL) {
+		CFRelease((CFTypeRef)line);
+		return NULL;
+	}
+	memcpy(line->glyphs, glyphs, (size_t)count * sizeof(CGGlyph));
+	memcpy(line->positions, positions, (size_t)count * sizeof(CGPoint));
+	line->glyphCount = count;
+	/* THE WIDTH IS THE LAST GLYPH'S ORIGIN PLUS THAT GLYPH'S OWN ADVANCE — and the last advance comes from the FONT,
+	 * because only the SPACES were given new room: the final glyph is exactly as wide as it always was. Position
+	 * differences cannot supply it, since there is no position after the last one. */
+	(void)CTFontGetAdvancesForGlyphs(font, kCTFontHorizontalOrientation, &glyphs[count - 1], &last, 1);
+	line->width = (double)positions[count - 1].x + last.width;
+	return line;
+}
+
+/* THE SPACE GLYPH OF A FACE, or 0 when it has none — the one thing this engine needs to know about a line's glyphs
+ * that the line itself does not store, since it keeps GLYPHS and not the characters they came from. */
+static CGGlyph ct_line_space_glyph(CTFontRef font)
+{
+	UniChar space = (UniChar)' ';
+	CGGlyph glyph = 0;
+
+	if (font == NULL) {
+		return 0;
+	}
+	(void)CTFontGetGlyphsForCharacters(font, &space, &glyph, 1);
+	return glyph;
+}
+
+CTLineRef CTLineCreateJustifiedLine(CTLineRef line, CGFloat justificationFactor, double justificationWidth)
+{
+	const struct __CTLine *l = (const struct __CTLine *)line;
+	CGPoint *positions;
+	CTLineRef result;
+	CGGlyph space;
+	CFIndex i, spaces = 0;
+	double slack, share, shift = 0.0;
+
+	if (l == NULL) {
+		return NULL;
+	}
+	/* "IF SET TO 0 OR LESS, THEN NO JUSTIFICATION WILL BE PERFORMED", which is Apple's sentence and this door's first
+	 * branch: the result is a line of its own over the same range. */
+	if (justificationFactor <= 0.0 || l->glyphCount == 0) {
+		return CTLineCreateWithAttributedStringAndRange(l->string, l->range);
+	}
+	space = ct_line_space_glyph(l->font);
+	for (i = 0; i < l->glyphCount; i++) {
+		if (space != 0 && l->glyphs[i] == space) {
+			spaces++;
+		}
+	}
+	/* A LINE WITH NO SPACE HAS NO GAP TO WIDEN — a single long word, or a face with no space glyph — so it comes back
+	 * over its own range rather than being stretched between its glyphs (see this section's head). */
+	if (spaces == 0) {
+		return CTLineCreateWithAttributedStringAndRange(l->string, l->range);
+	}
+	/* THE SLACK, TAKEN UP TO THE FACTOR: positive when the width asked for is WIDER than the line, negative when it
+	 * is narrower — Apple's own "text squishing". */
+	slack = ((double)justificationWidth - l->width) *
+		(double)((justificationFactor > 1.0) ? 1.0 : justificationFactor);
+	share = slack / (double)spaces;
+
+	positions = (CGPoint *)malloc((size_t)l->glyphCount * sizeof(CGPoint));
+	if (positions == NULL) {
+		return NULL;
+	}
+	/* THE SHIFT IS APPLIED AFTER EACH SPACE, so it is the SPACE that grows and the word that follows it that moves —
+	 * which is what "widening the gap between words" means, and it leaves the first word where it was. */
+	for (i = 0; i < l->glyphCount; i++) {
+		positions[i] = CGPointMake((CGFloat)(l->positions[i].x + shift), l->positions[i].y);
+		if (l->glyphs[i] == space) {
+			shift += share;
+		}
+	}
+	result = (CTLineRef)ct_line_with_positions(l->string, l->range, l->font, l->glyphs, positions, l->glyphCount);
+	free(positions);
+	return result;
+}
+
+/* =================================================================================================
  * OWED DOORS, EACH WITH THE REASON IT CANNOT BE ANSWERED HERE. They are DECLARED in CTLine.h and NOT DEFINED, so a
  * caller who reaches for one gets a link error rather than an invented answer.
  *
- *   CTLineCreateJustifiedLine                      NEEDS THE JUSTIFICATION ENGINE. `justificationFactor` scales how
- *                                                 the slack is distributed, and WHERE it goes — between words, at
- *                                                 which boundaries, and what negative justification does to the
- *                                                 glyphs — is a set of rules Apple states nowhere in the header.
- *                                                 Spreading the slack evenly between glyphs would look plausible
- *                                                 and be wrong, which is the failure this tree refuses to ship.
- *
- * `CTLineGetGlyphRuns` WAS THE FIRST OF THESE TO LEAVE — it was owed for as long as `CTRun` did not exist, which is
- * why Apple's own include order puts CTRun.h AFTER CTLine.h, and the `owed` test lost its name at the same time.
- * `CTLineCreateTruncatedLine` WAS THE SECOND, and ITS REASON IS THE ONE WORTH READING: it waited for "the typesetter,
- * whose job the breaking is" — and THE TYPESETTER LANDED, so the door did. That is what an owed door's reason is FOR:
- * a condition that can be checked, not a sentence that reads like one.
+ * THIS FILE OWES NOTHING NOW, AND THAT IS WORTH SAYING RATHER THAN LEAVING AS AN EMPTY SECTION. The three doors that
+ * were owed here left in the order their reasons became false, and EACH OF THOSE REASONS WAS A CONDITION THAT COULD BE
+ * CHECKED: `CTLineGetGlyphRuns` waited for `CTRun` to exist; `CTLineCreateTruncatedLine` waited for "the typesetter,
+ * whose job the breaking is"; and `CTLineCreateJustifiedLine` waited for a decision about where justification slack
+ * goes, which the section above makes and names. A REASON THAT CANNOT BE CHECKED IS A SENTENCE, NOT A REASON.
  * =============================================================================================== */

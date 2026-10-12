@@ -137,7 +137,10 @@ CTLineRef CTLineCreateTruncatedLine(CTLineRef line, double width, CTLineTruncati
 				    CTLineRef truncationToken);
 
 /* ---------------------------------------------------------------------------------------
- * AND THE OWED DOOR THAT IS LEFT, DECLARED HERE AND NOT DEFINED. `CTLine.c` carries its reason.
+ * THE LAST DOOR OF THIS HEADER, AND WITH IT `CTLine` OWES NOTHING. `CTLineCreateJustifiedLine` left the owed list in
+ * the commit that decided WHERE justification slack goes — the one thing its header does not print — and that decision
+ * is written down in `CTLine.c` rather than presented as Apple's. The other two doors this header once owed left the
+ * same way, each when the condition its reason named became false.
  * ------------------------------------------------------------------------------------- */
 CTLineRef CTLineCreateJustifiedLine(CTLineRef line, CGFloat justificationFactor, double justificationWidth);
 

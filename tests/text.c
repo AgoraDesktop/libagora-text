@@ -2679,6 +2679,127 @@ static int case_line_truncation(void)
 	return g_fail - before;
 }
 
+/* THE JUSTIFICATION ENGINE, WHOSE HEADER PRINTS LESS THAN THE TRUNCATION ONE'S — so its TWO UNPRINTED DECISIONS are
+ * asserted as this tier's and nothing else's: the slack goes to the SPACES (widening the gaps between words), and the
+ * FACTOR is the fraction of the slack taken up. Apple's three printed sentences are held too: a factor of 0 or less
+ * justifies NOTHING, full justification reaches the width it was asked for, and a NARROWER width SQUISHES the line
+ * rather than refusing it.
+ *
+ * AND THE CASE READS THE GLYPH POSITIONS THROUGH THE RUN, because they are what justification CHANGES: the glyphs are
+ * the same ones and their ORIGINS have moved. */
+static int case_line_justification(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(12.0);
+	CFMutableDictionaryRef attrs;
+	CFAttributedStringRef astr, word_astr;
+	CTLineRef line, justified, half, squished, word, wide_word;
+	CFArrayRef runs;
+	CTRunRef run;
+	const CGPoint *before_xy, *after_xy;
+	double width, wide, got;
+
+	check(font != NULL, "no font, so there is no line to justify");
+	if (font == NULL) {
+		return g_fail - before;
+	}
+	attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					  &kCFTypeDictionaryValueCallBacks);
+	check(attrs != NULL, "the test could not make its dictionary");
+	if (attrs == NULL) {
+		return g_fail - before;
+	}
+	CFDictionarySetValue(attrs, kCTFontAttributeName, font);
+	astr = CFAttributedStringCreate(kCFAllocatorDefault, CFSTR("one two three"), attrs);
+	word_astr = CFAttributedStringCreate(kCFAllocatorDefault, CFSTR("word"), attrs);
+	line = (astr != NULL) ? CTLineCreateWithAttributedString(astr) : NULL;
+	word = (word_astr != NULL) ? CTLineCreateWithAttributedString(word_astr) : NULL;
+	check(line != NULL && word != NULL, "the lines under test could not be made");
+	if (line == NULL || word == NULL) {
+		return g_fail - before;
+	}
+	width = CTLineGetTypographicBounds(line, NULL, NULL, NULL);
+	wide = width + 20.0;
+	check(width > 0.0, "the line to justify has no width");
+
+	/* A FACTOR OF ZERO — AND OF LESS — JUSTIFIES NOTHING, which is Apple's own sentence. */
+	justified = CTLineCreateJustifiedLine(line, 0.0, wide);
+	check(justified != NULL, "a factor of 0 answered nothing");
+	if (justified != NULL) {
+		got = CTLineGetTypographicBounds(justified, NULL, NULL, NULL);
+		check(got - width < 0.001 && width - got < 0.001,
+		      "a factor of 0 changed the line: %g against %g", got, width);
+	}
+	check(CTLineCreateJustifiedLine(line, -1.0, wide) != NULL, "a negative factor answered nothing");
+
+	/* FULL JUSTIFICATION REACHES THE WIDTH ASKED FOR, keeping every glyph and the string range. */
+	justified = CTLineCreateJustifiedLine(line, 1.0, wide);
+	check(justified != NULL, "full justification answered nothing");
+	if (justified != NULL) {
+		got = CTLineGetTypographicBounds(justified, NULL, NULL, NULL);
+		check(got > width, "full justification did not widen the line: %g against %g", got, width);
+		check(got - wide < 0.001 && wide - got < 0.001,
+		      "full justification reached %g, and the width asked for was %g", got, wide);
+		check(CTLineGetGlyphCount(justified) == CTLineGetGlyphCount(line),
+		      "justification changed the glyph count: %ld against %ld",
+		      (long)CTLineGetGlyphCount(justified), (long)CTLineGetGlyphCount(line));
+		check(CTLineGetStringRange(justified).location == CTLineGetStringRange(line).location &&
+		      CTLineGetStringRange(justified).length == CTLineGetStringRange(line).length,
+		      "justification changed the string range");
+
+		/* AND THE GAPS MOVED, WHICH IS THE WHOLE OF IT: the FIRST glyph stays where it was and the first glyph AFTER
+		 * the first space does not. The positions come from the runs, because that is where a line keeps them. */
+		runs = CTLineGetGlyphRuns(line);
+		run = (runs != NULL) ? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
+		before_xy = (run != NULL) ? CTRunGetPositionsPtr(run) : NULL;
+		runs = CTLineGetGlyphRuns(justified);
+		run = (runs != NULL) ? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
+		after_xy = (run != NULL) ? CTRunGetPositionsPtr(run) : NULL;
+		check(before_xy != NULL && after_xy != NULL, "the positions of one of the two lines are unreadable");
+		if (before_xy != NULL && after_xy != NULL) {
+			check(after_xy[0].x - before_xy[0].x < 0.001 && before_xy[0].x - after_xy[0].x < 0.001,
+			      "justification moved the FIRST glyph, and the first word is where it always was");
+			check(after_xy[4].x > before_xy[4].x + 0.001,
+			      "justification did not move the word after the first space: %g against %g",
+			      (double)after_xy[4].x, (double)before_xy[4].x);
+		}
+	}
+
+	/* AND HALF THE FACTOR IS HALF THE SLACK, which is this tier's LINEAR reading of "varying degrees of partial
+	 * justification" — the one thing Apple prints no curve for. */
+	half = CTLineCreateJustifiedLine(line, 0.5, wide);
+	check(half != NULL, "partial justification answered nothing");
+	if (half != NULL) {
+		got = CTLineGetTypographicBounds(half, NULL, NULL, NULL);
+		check(got > width && got < wide,
+		      "half the slack landed OUTSIDE the line and the width: %g, against %g and %g", got, width, wide);
+	}
+
+	/* AND A NARROWER WIDTH SQUISHES IT — Apple's own word for negative justification — rather than refusing. */
+	squished = CTLineCreateJustifiedLine(line, 1.0, width - 4.0);
+	check(squished != NULL, "a narrower width answered nothing, and Apple says the line is squished");
+	if (squished != NULL) {
+		got = CTLineGetTypographicBounds(squished, NULL, NULL, NULL);
+		check(got < width, "a narrower width did not narrow the line: %g against %g", got, width);
+	}
+
+	/* AND A LINE WITH NO SPACE HAS NO GAP TO WIDEN, so it comes back unchanged — the recorded case, and the one a
+	 * single long word or an overflowed line hits. */
+	wide_word = CTLineCreateJustifiedLine(word, 1.0, 500.0);
+	check(wide_word != NULL, "a line with no space answered nothing");
+	if (wide_word != NULL) {
+		double word_width = CTLineGetTypographicBounds(word, NULL, NULL, NULL);
+
+		got = CTLineGetTypographicBounds(wide_word, NULL, NULL, NULL);
+		check(got - word_width < 0.001 && word_width - got < 0.001,
+		      "a line with no space was stretched anyway: %g against %g", got, word_width);
+	}
+
+	/* NULL SAFETY. */
+	check(CTLineCreateJustifiedLine(NULL, 1.0, 100.0) == NULL, "a NULL line was justified");
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -2706,6 +2827,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The glyph substitution, named three ways", case_glyph_info },
 	{ "The umbrella, and the version of the surface it implements", case_umbrella_version },
 	{ "A line truncates the way Apple prints it, and refuses another font", case_line_truncation },
+	{ "A line justifies at the spaces, by the fraction it is given", case_line_justification },
 };
 
 int main(void)
