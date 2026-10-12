@@ -143,3 +143,23 @@ the font's matrix forced out of the composition the new case fails on exactly th
 This section is changed IN THE SAME COMMIT as the change it describes, and `README.md`'s status with it. The
 previous repository got that wrong — its `PROVENANCE.md` said "not yet made" long after the work was finished
 and its `README.md` went on claiming the NS types were unconverted — and the only defence is the rule.
+
+**The build recipe, and the suite's runtime path (2026-10-11).** `tests/CMakeLists.txt` no longer assumes the
+caller's shell carries an `LD_LIBRARY_PATH`: the test's search path is derived from the imported
+`CoreFoundation::CoreFoundation` and `AgoraDrawing::Drawing` targets, so a **bare** `ctest` works on a clean
+build and cannot disagree with the prefix the library was actually built against. Two things made that
+necessary rather than tidy. The loader is not consulted for a dependency of a dependency — `libagora-core.so`
+NEEDs `libobjc.so.4.6` and records no runtime path of its own, so `DT_RUNPATH` on the test executable could
+never have covered it — and the prefix the build trees happened to point at was `/tmp/agora-prefix`, which a
+`/tmp` cleanup had already deleted once. **THE PREFIX IS NOW `../build-prefix`, WHICH IS NOT A NEW DECISION:
+it is the one `libagora-core`'s README has documented all along (`--prefix "$PWD/../build-prefix"`), and the
+`/tmp` path was a casualty of where the trees were configured rather than a convention.** The same commit adds
+the `## Build` section this `README.md` never had, and corrects the one false comment in it: the suite's "Core
+Graphics is the library's own dependency and not the suite's" had been untrue since the font case began
+loading a face from a file.
+
+MEASURED, and this is the recipe the `## Build` section prints: configure with
+`-DCMAKE_PREFIX_PATH=<Agora>/build-prefix -DCMAKE_C_COMPILER=/usr/bin/clang-19` from a **deleted** `build/`,
+`cmake --build build` exits 0 with no warnings and no errors in its log, and `ctest --test-dir build` with no
+`LD_LIBRARY_PATH` in the environment is `100% tests passed, 0 tests failed out of 1` over
+`text: 6 of 6 cases passed, 0 failed`.

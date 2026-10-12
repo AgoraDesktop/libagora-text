@@ -43,6 +43,38 @@ rows are the AAT/SFNT structure vocabulary, which is a data port of two headers 
 `CTLine` → (`CTRun`, `CTTypesetter`) → `CTFrame` → `CTFramesetter` → (`CTGlyphInfo`, `CTTextTab`,
 `CTStringAttributes`) → `CoreText.h`, the umbrella. Read from what Apple's headers include, not guessed.
 
+## Build
+
+Two dependencies, and both are Apple's own two: **Core Foundation** (`libagora-core`) and **Core Graphics**
+(`libagora-drawing`). Each is a repository of its own, built and installed on its own into a **shared install
+prefix** — the convention `libagora-core`'s README documents — and this library is then configured against
+that prefix:
+
+```sh
+PREFIX="$PWD/../build-prefix"
+
+# 1. the components below this library, in dependency order -- libagora-dispatch, libagora-objc,
+#    libagora-core, then libagora-drawing -- each configured and built from its OWN repository and
+#    installed with an overridden prefix (each component's README carries its own step):
+cmake --install ../libagora-drawing/build --prefix "$PREFIX"
+
+# 2. this library, against the prefix. MEASURED: this is the recipe that produced the status below.
+cmake -S . -B build -DCMAKE_C_COMPILER=/usr/bin/clang-19 -DCMAKE_PREFIX_PATH="$PREFIX"
+cmake --build build
+ctest --test-dir build
+```
+
+- **`ctest` IS THE WHOLE COMMAND.** The loader's search path for the *transitive* `libobjc` is set from the
+  imported targets in `tests/CMakeLists.txt`, so no `LD_LIBRARY_PATH` is needed here: `DT_RUNPATH` is not
+  consulted for a dependency of a dependency, and `libagora-core.so` records no runtime path of its own, so
+  no rpath on the test executable could have covered it.
+- **`build-prefix/` sits outside every component's `build/`**, which is the rule the components share: a
+  component consumes another only as that component's *built* output, never by building a sibling inside its
+  own build tree. Being a sibling of the component directories, it is also outside every component's
+  `git status`.
+- **`clang-19` is written out because `clang` is not on this machine's `PATH`** — this is the compiler the
+  build actually used. The project's rule is clang only; GCC is not a supported compiler.
+
 ## Status
 
 - **The leaf is done and the library BUILDS.** `CTFontTraits.h` and `CTFontTraits.c` — the four trait keys,
@@ -117,3 +149,10 @@ rows are the AAT/SFNT structure vocabulary, which is a data port of two headers 
   character set and languages, the `fvar`/`avar`/`feat` tables, the raw table doors, the `post` table's
   underline metrics, the slant angle, the vertical translations, the UI-role creator, the string/family/trait
   copies, and the ATS pair.
+- **THE BUILD COMES FROM THE PREFIX THE COMPONENTS' OWN READMEs DOCUMENT, AND `ctest` IS THE WHOLE COMMAND.**
+  The two dependencies are installed into the shared `../build-prefix`, not a `/tmp` path, and the suite's
+  runtime search path is taken FROM THE IMPORTED TARGETS in `tests/CMakeLists.txt` rather than from the
+  caller's shell — the transitive `libobjc` needs it, and a dependency of a dependency is not reached by
+  `DT_RUNPATH`. MEASURED: `cmake --build build` exits 0 with no warnings from that prefix, and a **bare**
+  `ctest --test-dir build` is `1/1 passed` — `text: 6 of 6 cases passed, 0 failed` — with no
+  `LD_LIBRARY_PATH` set. See the `## Build` section above.
