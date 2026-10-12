@@ -4018,13 +4018,27 @@ static int case_font_cascade_and_roles(void)
 		CFRelease(kept);
 	}
 
-	/* AND BEFORE ANY COVERER IS IN THE REGISTRY THE ANSWER IS NOTHING, which is asserted HERE rather than after the
-	 * two registrations below: "no face covers this" and "no face is registered" are different measurements, and
-	 * this one has to be taken first or it is neither. */
+	/* **AND THE CASCADE EITHER ANSWERS NOTHING OR ANSWERS A FACE THAT REALLY COVERS HEBREW — WHICH IS THE
+	 * INVARIANT. "NOTHING" WAS ONLY EVER AN ACCIDENT OF THIS HOST.**
+	 *
+	 * This used to assert `found == NULL`, reading "no face covers this" before the two registrations below, and
+	 * that held for exactly as long as the font registry found NO FONTS AT ALL — which it did, because it was
+	 * looking in `/System/Library/Fonts`. Once it was made to look where this operating system keeps its faces,
+	 * the host's own DejaVu answered for Hebrew and this failed: THE CASE HAD ENCODED A CONSEQUENCE OF THE BUG.
+	 *
+	 * What it should assert is the thing a cascade must never do — return a face that cannot show the character —
+	 * and what it may now also do is answer a coverer, if the host has one. The measurement is still taken HERE,
+	 * before the registrations, for the reason the old comment gives: "no face covers this" and "no face is
+	 * registered" are different measurements and this one has to be taken first or it is neither. */
 	found = CTFontCreateForString(mono, CFSTR("\u05D0"), CFRangeMake(0, 1));
-	check(found == NULL, "a face that covers Hebrew was found before one was registered");
 	if (found != NULL) {
+		CGGlyph cover[1] = { 0 };
+
+		check(CTFontGetGlyphsForCharacters(found, alef, cover, 1),
+		      "the cascade answered a face that does NOT cover Hebrew, which is worse than answering nothing");
 		CFRelease(found);
+	} else {
+		printf("  (note: nothing on this host covers Hebrew yet, so the cascade answered nothing)\n");
 	}
 
 	check(test_register_path(sans_path), "the registry refused %s", sans_path);
