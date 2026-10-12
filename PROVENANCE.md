@@ -1174,9 +1174,17 @@ no table read and no new seam: half the advance minus the left side bearing, and
 ORIGIN OF THE BOUNDING BOX the glyph door reports — for the horizontal orientation that origin IS the bearing — so the
 case holds the answer against the two doors it is built from, and adds ONE CHECK THAT NEEDS NO ARITHMETIC AT ALL: A
 SPACE HAS NO OUTLINE, therefore no bearing, so its offset must be EXACTLY half its advance. AND THE VERTICAL METRICS
-ARE NOT READ, WHICH IS RECORDED WHERE THE DOOR IS: a face may carry `vhea`/`vmtx`/`VORG`, NO FACE INSTALLED HERE
-CARRIES THEM (asked of every installed face's table directory rather than assumed), and what the door answers is the
-format's own fallback for a face without them. AND "NOTHING WAS WRITTEN" IS ASSERTED BY LOOKING: a sentinel is put in
+ARE NOT READ, WHICH IS RECORDED WHERE THE DOOR IS — AND THE SENTENCE THAT STOOD THERE WAS CORRECTED IN A LATER COMMIT
+OF THE SAME SESSION, BECAUSE IT CLAIMED A MEASUREMENT THAT HAD NEVER BEEN TAKEN. It said "a face may carry
+`vhea`/`vmtx`/`VORG`, NO FACE INSTALLED HERE CARRIES THEM (asked of every installed face's table directory rather than
+assumed)"; the scan behind it had asked for `fvar`, `avar`, `feat`, `morx` and `mort` and NOT for `vhea`/`vmtx` at all,
+so the claim was written from the SHAPE of the reason in front of it. IT WAS CAUGHT BY RUNNING THE INVENTORY AGAINST
+THE WHOLE FONT SET — the instrument whose entire purpose is to make such a reason checkable — AND TWO FACES HERE CARRY
+BOTH TABLES: `DroidSansFallbackFull.ttf` (98,766 bytes of `vmtx`) and `NotoColorEmoji.ttf`. SO THE CONDITION THE DOOR
+NAMED AS ITS LANDING POINT IS ALREADY TRUE, and the unit that moves it is a TABLE READ rather than a shortage of
+faces. What the door answers meanwhile is the format's own fallback for a face without them, which is exact for every
+face here that has no `vmtx` — every face the suite draws with and all but two installed.
+AND "NOTHING WAS WRITTEN" IS ASSERTED BY LOOKING: a sentinel is put in
 the caller's array and read back after a zero count, a negative count, a NULL font, a NULL glyph array and a NULL
 output — because a door that half-fills an array is the failure this kind of door actually has.
 
@@ -1205,3 +1213,35 @@ MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 wi
 library DEFINES **155** `CT…` names; and the `owed` guard is down to **6** — `CTFontCopyFeatures` (no face here carries
 `feat`), `CTFontCopySupportedLanguages` and `CTFontGetStringEncoding` (Apple's own mappings, the user's decision is that
 they stay owed), the ATS pair (PERMANENT: Agora has no ATS) and the font service's transport (a system, not a door).
+
+**A CORRECTION, IN THE NEXT COMMIT OF THE SAME SESSION: A `MEASURED` CLAIM THAT HAD NEVER BEEN MEASURED (2026-10-12).**
+The unit above said, in `CTFont.c`, in this file and in the README, that the vertical metrics door reads no `vhea`/`vmtx`
+because **"no face installed here carries them (asked of every installed face's table directory rather than assumed)"**.
+THAT MEASUREMENT HAD NEVER BEEN TAKEN. The scan that preceded the unit asked every installed face for `fvar`, `avar`,
+`feat`, `morx` and `mort` — the tables the OWED REASONS named — AND NEVER FOR `vhea`/`vmtx` AT ALL, so a sentence about
+the ENVIRONMENT was written from the SHAPE OF THE REASON in front of it. IT IS THE SAME FAULT THIS FILE RECORDS AT
+LENGTH for the first five commits (a claim written from what the run was expected to print), and it survived because it
+was written in the reassuring form — "asked … rather than assumed" is a phrase that describes a measurement without
+being one.
+
+**AND THE INSTRUMENT THAT CAUGHT IT IS THE ONE THAT EXISTS FOR EXACTLY THIS.** Asked properly, over all 118 installed
+faces: **TWO FACE THE DOOR IS WRONG ABOUT — `DroidSansFallbackFull.ttf` (98,766 bytes of `vmtx`, `vhea`
+`numOfLongVerMetrics` 1, ascender 0) and `NotoColorEmoji.ttf` (`vmtx` with 3 long metrics, ascender 1275 at 2048 units
+per em).** So the condition that door's own comment named as its landing point — "THE DAY A VERTICAL FACE IS INSTALLED,
+the tables it carries are what this answer would have to consult" — IS ALREADY TRUE, and what is left is the table read
+(`vhea`'s ascent and line gap, `vmtx`'s per-glyph origin and advance, `VORG` for a CFF face) and not a shortage of
+faces. The three places are corrected in the commit that records this, each naming the correction rather than deleting
+it, and the door now says plainly that a caller drawing one of those two faces vertically gets the fallback.
+
+**AND THE LESSON IS ONE LINE, WHICH IS WHY IT IS RECORDED AS A CORRECTION AND NOT A FOOTNOTE: AN INVENTORY MEASURES THE
+TABLE YOU ASK IT FOR, AND NOTHING ELSE.** A scan that asks the questions the owed reasons name will CONFIRM every one
+of them and cannot falsify the one that is false. Ask for the WHOLE table directory, of EVERY installed face, before
+writing a sentence about what the machine does not have — and never write "measured" over a set you did not enumerate.
+The claim would have stood indefinitely: nothing in the suite draws a vertical face, so no case could have contradicted
+it.
+
+MEASURED, after the correction, from a DELETED `build/`: configure and `cmake --build build` exit 0 with no compiler
+diagnostic and no warning; bare `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over
+`text: 42 of 42 cases passed, 0 failed`; and the `owed` guard is still **6** names — THE CORRECTION MOVED NO DOOR,
+because the vertical metrics belong to a door that is DEFINED and answers a fallback, and the read it needs is a unit
+rather than an owed name.

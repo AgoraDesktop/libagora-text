@@ -1402,12 +1402,25 @@ CGRect CTFontGetBoundingRectsForGlyphs(CTFontRef font, CTFontOrientation orienta
  * origin IS the left side bearing -- and the ascent from `CTFontGetAscent`. Nothing here is a table read, because
  * nothing here needs one.
  *
- * AND THE VERTICAL METRICS ARE NOT READ, WHICH IS RECORDED AS A BOUNDARY RATHER THAN HIDDEN BY THE DOOR'S PRESENCE.
- * A face MAY carry `vhea` and `vmtx` (or `VORG`), which state the vertical origin and advance itself -- and NO FACE
- * INSTALLED HERE CARRIES THEM, which was measured by asking the installed faces for their table directories rather
- * than assumed. WHAT THIS DOOR ANSWERS IS THE FORMAT'S OWN FALLBACK FOR A FACE WITHOUT THEM: vertical layout on the
- * HORIZONTAL advances with the ascent above them, which is exactly where the two formulas above come from. THE DAY
- * A VERTICAL FACE IS INSTALLED, the tables it carries are what this answer would have to consult.
+ * AND THE VERTICAL METRICS ARE NOT READ, WHICH IS RECORDED AS A BOUNDARY RATHER THAN HIDDEN BY THE DOOR'S PRESENCE --
+ * AND THE SENTENCE THAT FIRST STOOD HERE WAS FALSE, SO IT IS CORRECTED RATHER THAN TIDIED. It said "NO FACE INSTALLED
+ * HERE CARRIES THEM, which was measured by asking the installed faces for their table directories rather than
+ * assumed". THE MEASUREMENT HAD NEVER BEEN TAKEN: the scan that preceded this unit asked every installed face for
+ * `fvar`, `avar`, `feat`, `morx` and `mort`, AND NOT FOR `vhea`/`vmtx` AT ALL -- so a claim about the ENVIRONMENT was
+ * written from the SHAPE of the reason in front of it, which is the exact fault this tree's PROVENANCE documents at
+ * length. Asked properly, TWO faces here carry BOTH tables, and they are named because a reader can go and check:
+ * `DroidSansFallbackFull.ttf` (98,766 bytes of `vmtx`, `vhea` `numOfLongVerMetrics` 1) and `NotoColorEmoji.ttf`.
+ *
+ * SO THE CONDITION THAT WAS WRITTEN TO MOVE THIS DOOR IS TRUE ALREADY, and what is left is the WORK rather than the
+ * environment: `vhea`'s ascent and line gap, `vmtx`'s per-glyph origin and advance (and `VORG` for a CFF face) are
+ * what a vertical answer would read through the seam's own table door, and the unit that takes them is named here.
+ * UNTIL IT IS TAKEN, A CALLER DRAWING ONE OF THOSE TWO FACES VERTICALLY GETS THE FALLBACK BELOW -- which is the
+ * difference between a recorded gap and a hidden one.
+ *
+ * WHAT THE DOOR ANSWERS, THEREFORE, IS THE FORMAT'S OWN FALLBACK FOR A FACE WITHOUT VERTICAL METRICS: vertical
+ * layout on the HORIZONTAL advances with the ascent above them, which is exactly where the two formulas above come
+ * from. It is exact for every face here that has no `vmtx`, which is every face this suite draws with and all but two
+ * of the faces installed.
  *
  * AND A SECOND BOUNDARY GOES WITH IT: what this door answers is SCALED BY THE POINT SIZE AND NOT BY THE MATRIX,
  * which is this library's rule for every metric -- the matrix moves GLYPHS, and these are offsets in the boxes they

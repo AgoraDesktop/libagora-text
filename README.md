@@ -641,10 +641,17 @@ mistake would show up as a factor of fifty-seven. The case also measures the tra
 - **AND THE VERTICAL ORIGIN IS A COMPOSITION OF THREE DOORS THAT ALREADY EXISTED** — half the advance minus the left
 side bearing, and the ascent — with the bearing taken from the ORIGIN OF THE BOUNDING BOX. **A SPACE IS THE CHECK THAT
 NEEDS NO ARITHMETIC**: it has no outline and therefore no bearing, so its offset must be exactly half its advance.
-The vertical metrics (`vhea`/`vmtx`/`VORG`) are **not read, and that is a recorded boundary**: no face installed here
-carries them (measured over every installed face), and what the door answers is the format's own fallback. Everything
-else is held against the doors it composes, and the array is asserted UNTOUCHED for a zero count, a negative count, a
-NULL font, a NULL glyph array and a NULL output — which is the only way to see "nothing was written".
+The vertical metrics (`vhea`/`vmtx`/`VORG`) are **not read, and that is a recorded boundary — CORRECTED IN A LATER
+COMMIT OF THE SAME SESSION, because the sentence first written here said "no face installed here carries them
+(measured over every installed face)" AND THE MEASUREMENT HAD NEVER BEEN TAKEN**: the scan asked for `fvar`, `avar`,
+`feat`, `morx` and `mort`, and not for `vhea`/`vmtx` at all. Asked properly, **two faces here carry both tables** —
+`DroidSansFallbackFull.ttf` and `NotoColorEmoji.ttf` — so the condition that was written to move this door is
+**already true**, and what remains is the work (read `vhea`'s ascent and line gap, `vmtx`'s per-glyph origin and
+advance, `VORG` for a CFF face) rather than the environment. What the door answers is the format's fallback, which is
+exact for every face here that carries no `vmtx` — every face the suite draws with and all but two installed.
+Everything else is held against the doors it composes, and the array is asserted UNTOUCHED for a zero count, a
+negative count, a NULL font, a NULL glyph array and a NULL output — which is the only way to see "nothing was
+written".
 - **AND ONE DETAIL IS RECORDED BECAUSE IT PRINTED ITSELF IN A CASE'S NOTE: a negative zero.** An upright face's slant
 came out `-0.0` — equal to zero to every comparison, read as negative by `signbit` and printed as "-0" — so the door
 normalises it, and the case's own recomputation does too. MEASURED: `100% tests passed, 0 tests failed out of 2` over
