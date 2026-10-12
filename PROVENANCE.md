@@ -372,3 +372,47 @@ neither; and a bare `ctest --test-dir build` is `100% tests passed, 0 tests fail
 `text: 18 of 18 cases passed, 0 failed`. The new case checks the run's glyphs against the FONT'S OWN MAPPING of the
 same string, its positions against its own advances, its width against the LINE's, its attributes against the string's,
 its range against the line's, and its draw against PIXELS — half the run marking ink strictly inside the whole.
+
+**`CTTypesetter` — the first thing in this library that DECIDES rather than measures (2026-10-11).** Declared and
+implemented: its two creators (and the two option constants, inferred as the other unpublished keys are),
+`CTTypesetterCreateLine`, and the two breaking doors. THE WHOLE ALGORITHM IS APPLE'S OWN SENTENCE — "The line break can
+be triggered either by a hard break character in the stream or by filling the specified width with characters" — so a
+newline ends the line WHEREVER IT IS and the line includes it, and otherwise characters are taken until the width is
+full. The whole string is typeset ONCE (glyphs and advances for every character, in the creator), which is what makes
+every later question a sum over an array rather than a second pass over the text.
+
+**AND THE PARAGRAPH STYLE REACHES IT — THE FIRST TIME IN THIS LIBRARY THAT A RECORDED SETTING CHANGES WHAT THE
+LIBRARY DOES.** The typesetter reads the string's paragraph style through a SECOND attribute key carried as a recorded
+value (`kCTParagraphStyleAttributeName`, whose header is later in the include order, exactly like the font's) and
+honours the line-break mode: WORD WRAPPING backs off to the last space that fits and INCLUDES IT — a line's trailing
+whitespace is part of its range, which is why `CTLineGetTrailingWhitespaceWidth` exists at all — CHAR WRAPPING breaks
+at the width, and CLIPPING and TRUNCATING return the whole remainder, because what those modes do is a matter of
+DRAWING (a clipped line is cut off; a truncated one is given an ellipsis by the framesetter) rather than of which
+characters belong to the line. THE CASE PROVES THE SETTING REACHES THE BREAKER BY DIFFERENCE rather than by
+restating it: `"one two three"` at seven advances breaks after **4** characters under the default and after **7**
+under a char-wrapping style.
+
+**AND THE TWO BREAKING DOORS DIFFER IN EXACTLY THE WAY APPLE NAMES**, which is the whole of the difference: the cluster
+door "is similar to a character break, except that it will not break apart linguistic clusters. NO OTHER CONTEXTUAL
+ANALYSIS WILL BE DONE" — so it never backs off to a space and reads no paragraph style. Seven advances of
+`"one two three"` gives 4 from the line door and 7 from the cluster door, and the case asserts BOTH NUMBERS, because
+"they differ" would pass on an implementation that got both wrong.
+
+**WHAT IS NOT ATTEMPTED IS STATED WHERE A CALLER READS IT**: nothing of UAX #14, no hyphenation, and NO BIDIRECTIONAL
+REORDERING AT ALL — so `kCTTypesetterOptionDisableBidiProcessing` is RECORDED and cannot change an answer, which is
+the difference between a door that cannot do something and one that pretends it did.
+
+**AND THE SEAM IS A NEW INTERNAL HEADER.** A typeset line is a line over a RANGE of the string, and Apple has no
+public door for one — in Apple's implementation the typesetter owns the runs and the line is a view of them; here they
+are separate objects, so `CTLine_internal.h` is where they agree. IT ALSO CARRIES THE FONT-KEY ACCESSOR, so that value
+is written ONCE: the line and the typesetter both read the same key through the same function, which is also why
+`CTLine.c`'s private `ct_line_font_attribute` became `CTLineFontAttributeName`. The case holds the property that makes
+the seam necessary: a line cut from characters 4..6 reports the range **(4, 3)** — the STRING's coordinates, not the
+line's own.
+
+MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with no compiler diagnostic at all in
+their logs; `nm -D build/libagora-text.so` lists `CTTypesetterGetTypeID`, both creators, `CreateLine`, both breaking
+doors and both option constants; and a bare `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2`
+over `text: 20 of 20 cases passed, 0 failed`. AND THE REFACTOR WAS CHECKED BY MORE THAN THE NEW CASES: changing
+`CTLine.c` to build over a range left all eighteen earlier cases passing, which is the regression evidence for the one
+touch this unit made outside its own files.

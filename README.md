@@ -302,3 +302,28 @@ ctest --test-dir build
   between a run and the line that makes one — Apple has no public creator for a run, since a line is what produces
   one — so that the two files agree about how a run is built instead of one of them `extern`ing what the other
   defines.
+- **`CTTypesetter` IS DECLARED AND IMPLEMENTED, AND IT IS THE FIRST THING HERE THAT **DECIDES** RATHER THAN MEASURES.**
+  Its whole algorithm is Apple's own sentence: *"The line break can be triggered either by a hard break character in
+  the stream or by filling the specified width with characters."* So a newline ends the line **wherever it is**, and
+  otherwise characters are taken until the width is full. `CTTypesetterCreateLine` turns a break into a line,
+  `SuggestClusterBreak` asks the same question without the contextual part, and both option constants are defined.
+  MEASURED: `text: 20 of 20 cases passed, 0 failed`.
+- **AND THE PARAGRAPH STYLE REACHES IT, WHICH IS THE FIRST TIME A RECORDED SETTING CHANGES WHAT THIS LIBRARY DOES.**
+  The typesetter reads the string's paragraph style (through the second attribute key this library carries as a
+  recorded value, `kCTParagraphStyleAttributeName`) and honours the **line-break mode**: word wrapping backs off to the
+  last space that fits and **includes it** — a line's trailing whitespace is part of its range, which is why
+  `CTLineGetTrailingWhitespaceWidth` exists — while char wrapping breaks at the width, and clipping/truncating return
+  the whole remainder because the DRAWN result is those modes' business. **THE CASE PROVES IT BY DIFFERENCE**: the
+  same string at the same width breaks after **4** characters under the default and after **7** under a
+  char-wrapping style.
+- **THE TWO BREAKING DOORS DIFFER IN EXACTLY THE WAY APPLE NAMES.** *"similar to a character break, except that it will
+  not break apart linguistic clusters. No other contextual analysis will be done"* — so the cluster door never backs
+  off to a space and reads no paragraph style. Seven advances of `"one two three"` gives **4** from the line door and
+  **7** from the cluster door, and the case asserts both numbers rather than that they differ.
+- **WHAT IS NOT ATTEMPTED IS SAID WHERE A CALLER READS IT**: no UAX #14, no hyphenation, and no bidirectional
+  reordering at all — so `kCTTypesetterOptionDisableBidiProcessing` is **recorded and cannot change an answer**, which
+  is the difference between a door that cannot do something and one that pretends it did.
+- **AND A TYPESET LINE NEEDS A LINE OVER A **RANGE**, WHICH NO PUBLIC HEADER NAMES.** `CTLine_internal.h` is that seam
+  — and it carries the font-key accessor too, so the value is written **once** and the line and the typesetter cannot
+  disagree about which attribute names a font. The case holds the property that makes it necessary: a line cut from
+  characters 4..6 reports the range **(4, 3)**, in the STRING's coordinates rather than its own.

@@ -27,25 +27,17 @@
  * how a run is built instead of one of them `extern`ing what the other defines. */
 #include <CoreText/CTRun_internal.h>
 
+/* AND THIS FILE'S OWN INTERNAL HEADER, WHICH IS NOT A CIRCLE: it declares the two things a TYPESETTER needs from a
+ * line — a line made over a RANGE, and the name of the font key — and including it here is what makes the
+ * declarations and the definitions below the SAME functions rather than two files agreeing by convention. */
+#include <CoreText/CTLine_internal.h>
+
 #include <CoreFoundation/CFCharacterSet.h>
 #include <CoreFoundation/CFRuntime.h>
 
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
-
-/* ---------------------------------------------------------------------------------------------
- * THE FONT ATTRIBUTE'S NAME, WHICH THIS TREE DOES NOT HAVE YET, AND THE ONE PLACE CTLine REACHES OUTSIDE ITSELF.
- * Apple's key is `kCTFontAttributeName`, declared in `CTStringAttributes.h` — MUCH LATER in the include order this
- * repository writes the headers in, so the constant does not exist. THE VALUE IS WRITTEN HERE RATHER THAN A
- * CONSTANT INVENTED: "NSFontAttributeName" is the value that header will carry (it is one of the keys the AppKit's
- * dictionary crosses on, which is the rule this tree measured), and THIS FUNCTION IS WHAT GOES AWAY the day
- * `CTStringAttributes.h` lands — nothing else in the library names the key.
- * ----------------------------------------------------------------------------------------------- */
-static CFStringRef ct_line_font_attribute(void)
-{
-	return CFSTR("NSFontAttributeName");
-}
 
 /* =================================================================================================
  * THE OBJECT.
@@ -163,27 +155,30 @@ static struct __CTLine *ct_line_alloc(void)
 		(CFIndex)(sizeof(struct __CTLine) - sizeof(CFRuntimeBase)), NULL);
 }
 
-/* THE ONE PLACE A LINE IS MADE. `font` is BORROWED by the caller and RETAINED here, so the creator below can hand
- * it straight over. */
-static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRef font)
+/* THE ONE PLACE A LINE IS MADE, AND IT IS ALWAYS MADE OVER A RANGE. A whole-string line and a typeset line differ in
+ * ONE number — where the glyphs begin — so they are one function with the range as a parameter rather than two
+ * functions that could drift apart. `font` is BORROWED by the callers and RETAINED here. */
+static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRef font, CFRange range)
 {
 	struct __CTLine *line;
 	CFStringRef text;
-	CFRange whole;
 	UniChar *chars;
 	CGSize *advances;
 	CFIndex n, i;
 	double x = 0.0;
 
 	text = CFAttributedStringGetString(string);
-	n = CFStringGetLength(text);
+	n = range.length;
 	line = ct_line_alloc();
 	if (line == NULL) {
 		return NULL;
 	}
 	line->string = (CFAttributedStringRef)CFRetain(string);
 	line->font = (CTFontRef)CFRetain(font);
-	line->range = CFRangeMake(0, n);
+	/* THE RANGE IS THE STRING'S OWN AND STAYS THE STRING'S OWN, which is the whole point of the parameter: a line cut
+	 * out of the MIDDLE of a document reports the range it covers THERE, so a caller laying out line after line never
+	 * has to translate between the line's coordinates and the string's. */
+	line->range = range;
 	/* THE HEIGHTS ARE THE FONT'S AND NOT THE GLYPHS', which is what a framesetter needs: line after line placed
 	 * without measuring glyph by glyph. They are read even for a line of nothing, so that a line still has a
 	 * baseline to sit on. */
@@ -194,7 +189,6 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 		return (CTLineRef)line;
 	}
 
-	whole = CFRangeMake(0, n);
 	chars = (UniChar *)malloc((size_t)n * sizeof(UniChar));
 	line->glyphs = (CGGlyph *)malloc((size_t)n * sizeof(CGGlyph));
 	line->positions = (CGPoint *)malloc((size_t)n * sizeof(CGPoint));
@@ -208,7 +202,7 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 		CFRelease((CFTypeRef)line);
 		return NULL;
 	}
-	CFStringGetCharacters(text, whole, chars);
+	CFStringGetCharacters(text, range, chars);
 
 	/* APPLE'S CONTRACT FOR THE GLYPH STEP IS A BOOLEAN, AND A LINE DOES NOT NEED IT: a character the font cannot
 	 * encode becomes glyph 0, which IS `.notdef`, and Apple DRAWS `.notdef` for such a character rather than
@@ -223,8 +217,8 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 	}
 	line->glyphCount = n;
 	line->width = x;
-	/* THE TRAILING WHITESPACE IS MEASURED BACKWARDS OVER THE CHARACTERS, because that is what the door is about:
-	 * the part of the line's width that is invisible at its end. */
+	/* THE TRAILING WHITESPACE IS MEASURED BACKWARDS OVER THE CHARACTERS THIS LINE HAS, because that is what the door
+	 * is about: the part of the line's width that is invisible at its end. */
 	for (i = n - 1; i >= 0 && ct_line_is_whitespace(chars[i]); i--) {
 		line->trailingWhitespace += advances[i].width;
 	}
@@ -236,10 +230,23 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 /* =================================================================================================
  * CREATION.
  * =============================================================================================== */
+/* THE FACE OUT OF AN ATTRIBUTED STRING, AND THE ONE PLACE THAT NAMES THE KEY. Apple's key is
+ * `kCTFontAttributeName`, declared in `CTStringAttributes.h` — MUCH LATER in the include order this repository writes
+ * the headers in, so the constant does not exist. THE VALUE IS WRITTEN HERE RATHER THAN A CONSTANT INVENTED:
+ * "NSFontAttributeName" is the value that header will carry (the rule this tree measured on the AppKit's crossing
+ * dictionaries), and THIS FUNCTION IS WHAT GOES AWAY the day `CTStringAttributes.h` lands. IT IS ALSO WHAT A
+ * TYPESETTER READS THE KEY THROUGH, which is why it is declared in `CTLine_internal.h` instead of being kept to this
+ * file: one copy of a value is one thing to keep in step, and two copies are two. */
+CFStringRef CTLineFontAttributeName(void)
+{
+	return CFSTR("NSFontAttributeName");
+}
+
 CTLineRef CTLineCreateWithAttributedString(CFAttributedStringRef string)
 {
 	CFTypeRef value;
 	CFRange effective = CFRangeMake(0, 0);
+	CFRange whole;
 
 	if (string == NULL) {
 		return NULL;
@@ -252,11 +259,36 @@ CTLineRef CTLineCreateWithAttributedString(CFAttributedStringRef string)
 	 * AND A ZERO-LENGTH STRING ANSWERS NULL for the same reason: there is no character to carry the attribute, so
 	 * there is no font to be found. Recorded because it is a case a caller WILL hit — an editor asks for the line
 	 * of an empty document — and the answer is "there is nothing to lay out", which NULL says. */
-	value = CFAttributedStringGetAttribute(string, 0, ct_line_font_attribute(), &effective);
+	value = CFAttributedStringGetAttribute(string, 0, CTLineFontAttributeName(), &effective);
 	if (value == NULL || CFGetTypeID(value) != CTFontGetTypeID()) {
 		return NULL;
 	}
-	return ct_line_create_with_font(string, (CTFontRef)value);
+	whole = CFRangeMake(0, CFStringGetLength(CFAttributedStringGetString(string)));
+	return ct_line_create_with_font(string, (CTFontRef)value, whole);
+}
+
+/* AND THE SECOND WAY IN, WHICH NO PUBLIC HEADER NAMES: a TYPESETTER makes lines out of PARTS of a string, and there is
+ * no public door for that — so the two files agree about it in `CTLine_internal.h`, where its reason is written down.
+ * The range is VALIDATED here rather than trusted: the callers are inside this library, but the bounds are still a
+ * fact about the string, and a door that can be reached with a bad range must refuse rather than read past the end. */
+CTLineRef CTLineCreateWithAttributedStringAndRange(CFAttributedStringRef string, CFRange range)
+{
+	CFTypeRef value;
+	CFIndex length;
+
+	if (string == NULL) {
+		return NULL;
+	}
+	length = CFStringGetLength(CFAttributedStringGetString(string));
+	if (range.location < 0 || range.length < 0 || range.location > length ||
+	    range.location + range.length > length) {
+		return NULL;
+	}
+	value = CFAttributedStringGetAttribute(string, range.location, CTLineFontAttributeName(), NULL);
+	if (value == NULL || CFGetTypeID(value) != CTFontGetTypeID()) {
+		return NULL;
+	}
+	return ct_line_create_with_font(string, (CTFontRef)value, range);
 }
 
 /* =================================================================================================

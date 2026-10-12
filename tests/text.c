@@ -27,6 +27,7 @@
 #include <CoreText/CTLine.h>
 #include <CoreText/CTParagraphStyle.h>
 #include <CoreText/CTRun.h>
+#include <CoreText/CTTypesetter.h>
 
 #include <CoreFoundation/CoreFoundation.h>
 
@@ -1767,6 +1768,241 @@ static int case_run_object(void)
 	return g_fail - before;
 }
 
+/* ONE CHARACTER'S ADVANCE IN THE FACE UNDER TEST, so that every width below is expressed in the units the breaker
+ * actually uses rather than in points guessed from a font's metrics. A monospace face is chosen for the same reason:
+ * one advance is then every advance, and "seven advances fit seven characters" is a fact rather than a hope. */
+static CGFloat typesetter_advance(CTFontRef font)
+{
+	UniChar c = (UniChar)'x';
+	CGGlyph g = 0;
+	CGSize size = CGSizeMake(0.0, 0.0);
+
+	(void)CTFontGetGlyphsForCharacters(font, &c, &g, 1);
+	(void)CTFontGetAdvancesForGlyphs(font, kCTFontHorizontalOrientation, &g, &size, 1);
+	return size.width;
+}
+
+/* THE TYPESETTER'S OWN SURFACE: ITS IDENTITY, ITS TWO CREATORS, ITS TWO OPTION CONSTANTS, AND THE RANGE RULE ITS LINE
+ * DOOR IS BUILT ON. The breaking itself is the next case; this one holds the things that would be true of a
+ * typesetter that broke nothing at all. */
+static int case_typesetter_object(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(12.0);
+	CFMutableDictionaryRef attrs;
+	CFAttributedStringRef astr;
+	CTTypesetterRef ts, ts_same;
+	CTLineRef line;
+	CFRange range;
+
+	check(font != NULL, "no font, so there is nothing to typeset");
+	if (font == NULL) {
+		return g_fail - before;
+	}
+	attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					  &kCFTypeDictionaryValueCallBacks);
+	check(attrs != NULL, "the test could not make its dictionary");
+	if (attrs == NULL) {
+		return g_fail - before;
+	}
+	CFDictionarySetValue(attrs, CFSTR("NSFontAttributeName"), font);
+	astr = CFAttributedStringCreate(kCFAllocatorDefault, CFSTR("one two three"), attrs);
+	check(astr != NULL, "the test could not make its attributed string");
+	if (astr == NULL) {
+		return g_fail - before;
+	}
+
+	ts = CTTypesetterCreateWithAttributedString(astr);
+	check(ts != NULL, "a typesetter could not be made from an attributed string WITH a font");
+	if (ts == NULL) {
+		return g_fail - before;
+	}
+	check(CFGetTypeID((CFTypeRef)ts) == CTTypesetterGetTypeID(),
+	      "CFGetTypeID(typesetter) is %lu and CTTypesetterGetTypeID() is %lu",
+	      (unsigned long)CFGetTypeID((CFTypeRef)ts), (unsigned long)CTTypesetterGetTypeID());
+
+	/* THE SECOND CREATOR IS THE FIRST WITH OPTIONS, and an EMPTY options dictionary must not change the answer. */
+	ts_same = CTTypesetterCreateWithAttributedStringAndOptions(astr, attrs);
+	check(ts_same != NULL, "the options-taking creator answered nothing for a dictionary of options");
+	check(ts_same != NULL && CFEqual(ts, ts_same), "the two creators disagree about the same string and font");
+
+	/* AND A STRING WITH NO FONT IS NOT TYPESETTABLE, for the same reason a line with no font is not a line. */
+	check(CTTypesetterCreateWithAttributedString(NULL) == NULL, "a NULL attributed string was typeset");
+
+	/* THE TWO OPTIONS ARE STRINGS, WHICH IS ALL A CALLER CAN CHECK OF A VALUE APPLE DOES NOT PUBLISH. */
+	check(kCTTypesetterOptionDisableBidiProcessing != NULL &&
+	      CFGetTypeID(kCTTypesetterOptionDisableBidiProcessing) == CFStringGetTypeID(),
+	      "the bidi option key is not a CFString");
+	check(kCTTypesetterOptionForcedEmbeddingLevel != NULL &&
+	      CFGetTypeID(kCTTypesetterOptionForcedEmbeddingLevel) == CFStringGetTypeID(),
+	      "the embedding-level option key is not a CFString");
+	check(!CFEqual(kCTTypesetterOptionDisableBidiProcessing, kCTTypesetterOptionForcedEmbeddingLevel),
+	      "the two option keys are the same string");
+
+	/* A RANGE IN THE MIDDLE OF THE STRING MAKES A LINE THAT REPORTS THAT RANGE — the whole reason a typesetter needs
+	 * a way into a line that no public header names (see CTLine_internal.h). */
+	line = CTTypesetterCreateLine(ts, CFRangeMake(4, 3));
+	check(line != NULL, "a line over characters 4..6 could not be made");
+	if (line != NULL) {
+		range = CTLineGetStringRange(line);
+		check(range.location == 4 && range.length == 3,
+		      "the line's string range is (%ld, %ld), want (4, 3) — a typeset line must report the string's "
+		      "coordinates, not its own", (long)range.location, (long)range.length);
+		check(CTLineGetGlyphCount(line) == 3, "the line over three characters holds %ld glyphs",
+		      (long)CTLineGetGlyphCount(line));
+	}
+
+	/* A ZERO LENGTH MEANS THE REST OF THE STRING, in Apple's own words for the parameter. */
+	line = CTTypesetterCreateLine(ts, CFRangeMake(4, 0));
+	check(line != NULL, "a zero-length range at 4 answered nothing");
+	if (line != NULL) {
+		range = CTLineGetStringRange(line);
+		check(range.location == 4 && range.length == 9,
+		      "a zero-length range at 4 became (%ld, %ld), want (4, 9) — the rest of a 13-character string",
+		      (long)range.location, (long)range.length);
+	}
+
+	/* AND A RANGE OUTSIDE THE STRING FAILS, which Apple states as a requirement of the caller and this tier answers
+	 * by refusing rather than by clipping to fit. */
+	check(CTTypesetterCreateLine(ts, CFRangeMake(0, 100)) == NULL, "a range past the end of the string made a line");
+	check(CTTypesetterCreateLine(ts, CFRangeMake(-1, 2)) == NULL, "a negative range made a line");
+	check(CTTypesetterCreateLine(NULL, CFRangeMake(0, 1)) == NULL, "a NULL typesetter made a line");
+
+	/* NULL SAFETY, THE SAME CONTRACT EVERY OTHER DOOR IN THIS LIBRARY HAS. */
+	check(CTTypesetterSuggestLineBreak(NULL, 0, 100.0) == 0, "a NULL typesetter suggested a break");
+	check(CTTypesetterSuggestClusterBreak(NULL, 0, 100.0) == 0, "a NULL typesetter suggested a cluster break");
+	check(CTTypesetterSuggestLineBreak(ts, -1, 100.0) == 0, "a negative start index suggested a break");
+	check(CTTypesetterSuggestLineBreak(ts, 13, 100.0) == 0, "a start index at the end suggested a break");
+	return g_fail - before;
+}
+
+/* THE BREAKER, WHICH IS THE ONE PLACE IN THIS LIBRARY THAT MAKES A DECISION RATHER THAN MEASURING ONE. Every
+ * assertion below is either Apple's printed sentence (a hard break, or the width filled) or a PROPERTY the answers
+ * must have together — that the breaks tile the string, that they never return zero, and that the two breaking doors
+ * differ in exactly the way Apple names. */
+static int case_typesetter_breaking(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(12.0);
+	CFMutableDictionaryRef attrs, attrs_styled;
+	CFAttributedStringRef plain, styled, hard;
+	CTParagraphStyleRef style;
+	CTParagraphStyleSetting setting;
+	CTTypesetterRef ts, ts_styled, ts_hard;
+	CTLineRef first_line;
+	CGFloat advance, seven;
+	CTLineBreakMode mode = kCTLineBreakByCharWrapping;
+	CFIndex from_line, from_cluster, from_styled, index, step, lines;
+	CFRange range;
+
+	check(font != NULL, "no font, so there is nothing to break");
+	if (font == NULL) {
+		return g_fail - before;
+	}
+	attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					  &kCFTypeDictionaryValueCallBacks);
+	check(attrs != NULL, "the test could not make its dictionary");
+	if (attrs == NULL) {
+		return g_fail - before;
+	}
+	CFDictionarySetValue(attrs, CFSTR("NSFontAttributeName"), font);
+	plain = CFAttributedStringCreate(kCFAllocatorDefault, CFSTR("one two three"), attrs);
+	ts = (plain != NULL) ? CTTypesetterCreateWithAttributedString(plain) : NULL;
+	check(ts != NULL, "the typesetter under test could not be made");
+	if (ts == NULL) {
+		return g_fail - before;
+	}
+	advance = typesetter_advance(font);
+	check(advance > 0.0, "the face's advance is not positive, so no width below could be measured");
+	seven = 7.0 * advance;
+
+	/* THE TWO BREAKING DOORS DIFFER IN EXACTLY THE WAY APPLE NAMES, and this is the whole of the difference: Apple
+	 * says the cluster door "is similar to a character break, except that it will not break apart linguistic clusters.
+	 * NO OTHER CONTEXTUAL ANALYSIS WILL BE DONE", so it never backs off to a word boundary and the line door does.
+	 * SEVEN ADVANCES OF "one two three" IS THE WIDTH THAT SHOWS IT: seven characters fit ("one two"), the last space
+	 * that fits is at index 3, and the line door ends the line after it (`"one "`, four characters) while the cluster
+	 * door ends it at the width (seven). */
+	from_line = CTTypesetterSuggestLineBreak(ts, 0, seven);
+	from_cluster = CTTypesetterSuggestClusterBreak(ts, 0, seven);
+	check(from_line == 4, "seven advances of \"one two three\" broke as a LINE after %ld characters, want 4",
+	      (long)from_line);
+	check(from_cluster == 7, "the same width broke as a CLUSTER after %ld characters, want 7 — the width with no "
+	      "backing off", (long)from_cluster);
+	check(from_line < from_cluster, "the two breaking doors answered the same thing, and Apple says they differ");
+
+	/* A HARD BREAK WINS WHEREVER IT IS, even with the whole width to spare — Apple's sentence puts the two triggers
+	 * side by side, and the break character is part of the line. */
+	hard = CFAttributedStringCreate(kCFAllocatorDefault, CFSTR("AB\nCD"), attrs);
+	ts_hard = (hard != NULL) ? CTTypesetterCreateWithAttributedString(hard) : NULL;
+	check(ts_hard != NULL, "the typesetter for the newline string could not be made");
+	if (ts_hard != NULL) {
+		check(CTTypesetterSuggestLineBreak(ts_hard, 0, 1000.0) == 3,
+		      "a newline after two characters did not end the line at 3: %ld",
+		      (long)CTTypesetterSuggestLineBreak(ts_hard, 0, 1000.0));
+		check(CTTypesetterSuggestClusterBreak(ts_hard, 0, 1000.0) == 3,
+		      "the cluster door did not honour the newline either");
+		check(CTTypesetterSuggestLineBreak(ts_hard, 3, 1000.0) == 2,
+		      "the second line of \"AB\\nCD\" is not the two characters after the newline");
+	}
+
+	/* AND THE PARAGRAPH STYLE'S LINE BREAK MODE IS READ, which is THE ONE PLACE IN THIS LIBRARY A RECORDED SETTING
+	 * CHANGES WHAT THE LIBRARY DOES rather than being carried and answered back. The same string, the same width, one
+	 * attribute added: char wrapping must break at the width where word wrapping backed off to the space. */
+	setting.spec = kCTParagraphStyleSpecifierLineBreakMode;
+	setting.valueSize = sizeof mode;
+	setting.value = &mode;
+	style = CTParagraphStyleCreate(&setting, 1);
+	attrs_styled = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+						 &kCFTypeDictionaryValueCallBacks);
+	check(style != NULL && attrs_styled != NULL, "the test could not make its paragraph style or dictionary");
+	if (style != NULL && attrs_styled != NULL) {
+		CFDictionarySetValue(attrs_styled, CFSTR("NSFontAttributeName"), font);
+		/* THE KEY IS THE VALUE `CTTypesetter.c` WRITES, WHICH IS ITS OWN RECORDED BOUNDARY: the real constant
+		 * `kCTParagraphStyleAttributeName` lives in `CTStringAttributes.h`, later in the documented include order. */
+		CFDictionarySetValue(attrs_styled, CFSTR("NSParagraphStyleAttributeName"), style);
+		styled = CFAttributedStringCreate(kCFAllocatorDefault, CFSTR("one two three"), attrs_styled);
+		ts_styled = (styled != NULL) ? CTTypesetterCreateWithAttributedString(styled) : NULL;
+		check(ts_styled != NULL, "the typesetter with a char-wrapping style could not be made");
+		if (ts_styled != NULL) {
+			from_styled = CTTypesetterSuggestLineBreak(ts_styled, 0, seven);
+			check(from_styled == 7, "a CHAR-WRAPPING paragraph style broke after %ld characters, want 7 — the "
+			      "mode was not read", (long)from_styled);
+		}
+	}
+
+	/* THE BREAKS TILE THE STRING: from the first character to the last, every step at least one character, no gap
+	 * and no overlap. THIS IS THE PROPERTY A CALLER'S LAYOUT LOOP LIVES ON — a zero would spin forever and a gap
+	 * would drop text — and no single assertion above can tell it. */
+	index = 0;
+	lines = 0;
+	while (index < 13 && lines < 64) {
+		step = CTTypesetterSuggestLineBreak(ts, index, seven);
+		check(step >= 1, "a break at %ld took %ld characters, and a caller's loop would never advance",
+		      (long)index, (long)step);
+		if (step < 1) {
+			break;
+		}
+		index += step;
+		lines++;
+	}
+	check(index == 13, "the breaks covered %ld of 13 characters", (long)index);
+	check(lines > 1, "thirteen characters at seven advances broke into %ld line(s)", (long)lines);
+
+	/* AND A SUGGESTED BREAK REALLY MAKES A LINE, with the range the break named — the two doors agreeing rather than
+	 * being asserted separately. */
+	first_line = CTTypesetterCreateLine(ts, CFRangeMake(0, from_line));
+	check(first_line != NULL, "a line could not be made from the suggested break");
+	if (first_line != NULL) {
+		range = CTLineGetStringRange(first_line);
+		check(range.location == 0 && range.length == from_line,
+		      "the line's string range is (%ld, %ld) and the break suggested %ld characters",
+		      (long)range.location, (long)range.length, (long)from_line);
+		check(CTLineGetGlyphCount(first_line) == from_line, "the line from the break holds %ld glyphs",
+		      (long)CTLineGetGlyphCount(first_line));
+	}
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -1786,6 +2022,8 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "A line is one run, and every measuring door agrees with the font", case_line_object },
 	{ "A line draws, and the ink follows the text position", case_line_drawing },
 	{ "The run agrees with its line, and draws over a range", case_run_object },
+	{ "The typesetter's own surface, and its range rule", case_typesetter_object },
+	{ "The typesetter breaks at the width, and the paragraph style says how", case_typesetter_breaking },
 };
 
 int main(void)
