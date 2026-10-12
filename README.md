@@ -251,3 +251,30 @@ ctest --test-dir build
   `CTTextTabRef` — whose header is LATER in Apple's include order, so neither it nor the door that makes one
   exists yet. The default is answered as an **EMPTY ARRAY** of the right type, the case asserts both halves of
   that (the type, and the emptiness), and `ct_para_tab_fallback` is where the twelve tabs will be built.
+- **`CTLine` IS DECLARED AND IMPLEMENTED — THE FIRST THING HERE THAT IS BUILT RATHER THAN STORED, AND THE FIRST
+  THAT DRAWS.** `CTLineCreateWithAttributedString` makes **one run**: the string's characters become glyphs through
+  `CTFontGetGlyphsForCharacters` (the door this library was started for), each glyph is placed by
+  `CTFontGetAdvancesForGlyphs`, and the font's own ascent, descent and leading are the line's heights. Every
+  measuring door is arithmetic over those — glyph count, string range, typographic bounds, flush offset, trailing
+  whitespace, image bounds — the caret pair inverts, and **`CTLineDraw` puts the ink on a page** through
+  `CGContextShowGlyphsAtPositions`. MEASURED: `text: 17 of 17 cases passed, 0 failed`.
+- **THE SINGLE-RUN BOUNDARY IS STATED RATHER THAN LEFT TO BE DISCOVERED FROM A WRONG LAYOUT.** Apple's own sentence
+  for the creator is that "without a typesetter object, the line cannot be properly broken", so this is the simple
+  case and it says what it is: **no line breaking, no two fonts in one line, no bidirectional reordering and no
+  shaping** — a character's glyph is drawn where its own advance puts it, in the order the characters appeared.
+  Multi-run, bidi and complex scripts are the HarfBuzz milestone the Core Text plan already names.
+- **`CTLineDraw`'S ONE CROSS-FRAMEWORK SEMANTIC IS MEASURED RATHER THAN ASSUMED.** This Core Graphics' own header
+  says `CGContextShowGlyphsAtPositions` takes positions "specified in user space" and that "the CTM alone places
+  the pen" — unlike the three advance doors, whose pen "starts at the TEXT POSITION" — so the line's origin is
+  applied by `CTLineDraw` itself. The case **draws the same line at two text positions into a real bitmap and
+  checks the ink moved by 30 pixels**, because a comment cannot tell those two readings apart and a picture can.
+- **THREE DOORS ARE OWED, AND THE `owed` TEST NOW NAMES SEVEN.** `GetGlyphRuns` — a line's runs are `CTRunRef`s
+  and `CTRun` does not exist yet, since Apple's own include order puts its header *after* `CTLine.h`, which is why
+  this header never mentions the type — and `CreateTruncatedLine` / `CreateJustifiedLine`, which need the
+  truncation and justification engines: where an ellipsis may fall, which clusters may not be split, and where
+  justification slack goes are rules Apple states **nowhere** in the header, and spreading the slack evenly would
+  look plausible and be wrong.
+- **AND THE FONT-ATTRIBUTE KEY IS THE ONE PLACE `CTLine` REACHES OUTSIDE ITSELF.** A line must read
+  `kCTFontAttributeName`, whose header (`CTStringAttributes.h`) is much later in the documented include order, so
+  **the value is written once in `CTLine.c`** — with the reason and its removal point — rather than the constant
+  invented. Nothing else in the library names the key, and the suite names the same string.

@@ -294,3 +294,47 @@ they will be built.
 MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with 0 warnings and 0 errors in their
 logs, and a bare `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over
 `text: 15 of 15 cases passed, 0 failed`.
+
+**`CTLine` — the first thing here that is BUILT rather than stored, and the first that DRAWS (2026-10-11).** The type
+after `CTParagraphStyle` in Apple's include order, declared and implemented. `CTLineCreateWithAttributedString` makes
+ONE RUN: the string's characters become glyphs through `CTFontGetGlyphsForCharacters` — the door this library was
+started for — each glyph is placed by `CTFontGetAdvancesForGlyphs`, and the font's own ascent, descent and leading are
+the line's heights. Then every measuring door is arithmetic over those (glyph count, string range, typographic bounds,
+flush offset, trailing whitespace, image bounds), the caret pair inverts, and `CTLineDraw` puts the ink on a page
+through `CGContextShowGlyphsAtPositions`.
+
+**THE SINGLE-RUN BOUNDARY IS WRITTEN WHERE A CALLER READS IT, NOT LEFT TO BE DISCOVERED FROM A WRONG LAYOUT.** Apple's
+own sentence for the creator is that "without a typesetter object, the line cannot be properly broken", so this is the
+simple case: NO LINE BREAKING, NO TWO FONTS IN ONE LINE, NO BIDIRECTIONAL REORDERING AND NO SHAPING — a character's
+glyph is drawn where its own advance puts it, in the order the characters appeared. Multi-run, bidi and complex scripts
+are the HarfBuzz milestone this project's plan already names. AND THREE DOORS ARE OWED WITH THEIR REASONS:
+`CTLineGetGlyphRuns`, because a line's runs are `CTRunRef`s and `CTRun` does not exist yet — Apple's own include order
+puts its header AFTER `CTLine.h`, which is why that header never mentions the type, and this is the first owed door
+whose reason is another HEADER rather than another engine; and `CTLineCreateTruncatedLine` with
+`CTLineCreateJustifiedLine`, which need the truncation and justification engines — where an ellipsis may fall, which
+clusters may not be split, and where justification slack goes are rules Apple states NOWHERE in the header, and
+spreading the slack evenly would look plausible and be wrong. The `owed` test now names SEVEN doors.
+
+**AND `CTLineDraw`'S ONE CROSS-FRAMEWORK SEMANTIC IS MEASURED RATHER THAN ASSUMED.** This Core Graphics' own header
+says `CGContextShowGlyphsAtPositions` takes positions "specified in user space" and that "the CTM alone places the
+pen" — UNLIKE the three advance doors, whose pen "starts at the TEXT POSITION" — so the line's origin is applied by
+`CTLineDraw` itself. THE CASE DRAWS THE SAME LINE AT TWO TEXT POSITIONS INTO A REAL BITMAP AND CHECKS THE INK MOVED BY
+THE SAME 30 POINTS (to within five), because a comment cannot tell those two readings apart and a picture can. AND THE
+BITMAP ITSELF TAUGHT THE CASE SOMETHING: this library's bitmap contexts SUPPORT EXACTLY ONE PIXEL FORMAT
+(`kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little`) and REFUSE the others rather than reinterpret them, so
+the case asks for that one — a case asking for another would have been testing the refusal.
+
+**AND THE FIRST RUN OF THAT CASE FOUND TWO THINGS, NEITHER OF THEM THE LINE'S FAULT, AND BOTH WORTH KEEPING.** ONE IS
+A FINDING RATHER THAN A BUG: **THIS TIER'S `CTFontGetDescent` RETURNS A NEGATIVE NUMBER**, because the seam answers
+`CGFontGetDescent` with the engine's own `face->descender` — negative in FreeType's convention — and nothing on the way
+up changes it. APPLE'S OWN HEADER DOES NOT SETTLE THE SIGN: it says only "the scaled font descent metric", scaled by
+the size and matrix. So the case asserts THAT the line's heights are the font's, and no more, and the sign is recorded
+here as an OPEN QUESTION for the tier that can answer it — the AppKit's own `NSFont`, or a measurement on the era —
+rather than invented inside a case. THE OTHER WAS THE CASE'S OWN MISTAKE, which is the kind worth writing down too: it
+clicked EXACTLY halfway between two glyphs, where the answer is a TIE — this implementation gives ties to the glyph on
+the right — so its clicks moved INSIDE an advance, where the answer is a contract rather than a coin toss.
+
+MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with no compiler diagnostic at all in
+their logs; `nm -D build/libagora-text.so` lists the eleven defined `CTLine` doors and NONE of the three owed ones; and
+a bare `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over
+`text: 17 of 17 cases passed, 0 failed`.

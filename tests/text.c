@@ -24,9 +24,17 @@
 #include <CoreText/CTFontManager.h>
 #include <CoreText/CTFontManagerErrors.h>
 #include <CoreText/CTFontTraits.h>
+#include <CoreText/CTLine.h>
 #include <CoreText/CTParagraphStyle.h>
 
 #include <CoreFoundation/CoreFoundation.h>
+
+/* THE TWO CORE GRAPHICS HEADERS THE DRAWING CASE NEEDS, WHICH ARE THE SUITE'S AND NOT THE LIBRARY'S: the line's
+ * draw door takes a `CGContextRef` the suite has to MAKE, and making one means a bitmap context and a colour
+ * space. (`math.h` was here for a moment and is gone: the comparisons in the cases are written as differences
+ * against a tolerance rather than as `fabs`, so nothing needs it.) */
+#include <CoreGraphics/CGBitmapContext.h>
+#include <CoreGraphics/CGColorSpace.h>
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -1240,6 +1248,301 @@ static int case_paragraph_style_object(void)
 	return g_fail - before;
 }
 
+/* THE FIRST LINE THIS LIBRARY EVER LAYS OUT, AND EVERY DOOR THAT SAYS SOMETHING ABOUT IT. The line is built from
+ * a real face in one pass, so the assertions are all comparisons against the SAME facts asked another way: the
+ * glyph count against the character count, the width against the advances the font reports when it is asked
+ * directly, the caret offsets against each other, and the flush against arithmetic done here. A case that restated
+ * the implementation's own sums would pass with the implementation wrong. */
+static int case_line_object(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(12.0);
+	CFMutableDictionaryRef attrs, empty;
+	CFAttributedStringRef astr, bare, spaced;
+	CTLineRef line, second;
+	CFStringRef text = CFSTR("WAVE");
+	UniChar chars[4];
+	CGGlyph glyphs[4];
+	CGSize advances[4];
+	CFIndex i;
+	double sum = 0.0, width, flush;
+	CGFloat ascent = 0.0, descent = 0.0, leading = 0.0;
+	CFRange range;
+	CGFloat offset, secondary = -1.0;
+
+	check(font != NULL, "no font, so there is no line to lay out");
+	if (font == NULL) {
+		return g_fail - before;
+	}
+	attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					  &kCFTypeDictionaryValueCallBacks);
+	empty = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					  &kCFTypeDictionaryValueCallBacks);
+	check(attrs != NULL && empty != NULL, "the test could not make its dictionaries");
+	if (attrs == NULL || empty == NULL) {
+		return g_fail - before;
+	}
+	/* THE KEY IS THE VALUE `CTLine.c` WRITES, WHICH IS THE BOUNDARY THAT IMPLEMENTATION RECORDS: the real constant
+	 * `kCTFontAttributeName` lives in `CTStringAttributes.h`, which is LATER in this library's include order and
+	 * does not exist yet. So the case names the same string, and both move together the day it lands. */
+	CFDictionarySetValue(attrs, CFSTR("NSFontAttributeName"), font);
+	astr = CFAttributedStringCreate(kCFAllocatorDefault, text, attrs);
+	check(astr != NULL, "the test could not make its attributed string");
+	if (astr == NULL) {
+		return g_fail - before;
+	}
+
+	line = CTLineCreateWithAttributedString(astr);
+	check(line != NULL, "a line could not be made from an attributed string that HAS a font");
+	if (line == NULL) {
+		return g_fail - before;
+	}
+
+	/* ITS IDENTITY IS THE RUNTIME'S, as it is for every object in this library. */
+	check(CFGetTypeID((CFTypeRef)line) == CTLineGetTypeID(),
+	      "CFGetTypeID(line) is %lu and CTLineGetTypeID() is %lu",
+	      (unsigned long)CFGetTypeID((CFTypeRef)line), (unsigned long)CTLineGetTypeID());
+
+	/* ONE GLYPH PER CHARACTER AND THE WHOLE STRING IS THE RANGE, which is the SINGLE-RUN boundary stated as a fact:
+	 * every character the string has is in the line. */
+	check(CTLineGetGlyphCount(line) == 4, "the line holds %ld glyphs, want 4", (long)CTLineGetGlyphCount(line));
+	range = CTLineGetStringRange(line);
+	check(range.location == 0 && range.length == 4, "the string range is (%ld, %ld), want (0, 4)",
+	      (long)range.location, (long)range.length);
+
+	/* AND THE WIDTH IS THE SUM OF THE ADVANCES, RE-MEASURED FROM THE FONT — the same question through another
+	 * route, which is what makes this a check rather than a restatement. */
+	CFStringGetCharacters(text, CFRangeMake(0, 4), chars);
+	(void)CTFontGetGlyphsForCharacters(font, chars, glyphs, 4);
+	(void)CTFontGetAdvancesForGlyphs(font, kCTFontHorizontalOrientation, glyphs, advances, 4);
+	for (i = 0; i < 4; i++) {
+		sum += advances[i].width;
+	}
+	width = CTLineGetTypographicBounds(line, &ascent, &descent, &leading);
+	check(width > 0.0, "the line has no width at all");
+	check(width - sum < 0.001 && sum - width < 0.001,
+	      "the line is %g wide and its own glyphs' advances add up to %g", width, sum);
+	/* AND THE HEIGHTS COME FROM THE FONT, which is what a framesetter places line after line with. WHAT IS
+	 * ASSERTED IS THAT — the line's heights ARE the font's — and NOT A SIGN, because Apple's own header states no
+	 * sign: it says only "the scaled font descent metric", scaled by the size and matrix.
+	 *
+	 * AND THE SIGN IS WORTH RECORDING, BECAUSE THIS TIER'S DESCENT COMES BACK NEGATIVE. The reason is one layer
+	 * down: the seam answers `CGFontGetDescent` with the engine's own `face->descender`, which is negative in
+	 * FreeType's convention, and nothing on the way up changes it. WHETHER APPLE'S IS NEGATIVE TOO IS AN OPEN
+	 * QUESTION THE ERA'S HEADERS DO NOT SETTLE — so it is recorded here as a finding for the tier that can answer
+	 * it rather than as a sign invented in a case. The line reports what the font reports; that is the line's
+	 * whole contract, and the assertion below is that contract and nothing more. */
+	check(ascent - CTFontGetAscent(font) < 0.001 && CTFontGetAscent(font) - ascent < 0.001,
+	      "the line's ascent %g is not the font's %g", (double)ascent, (double)CTFontGetAscent(font));
+	check(descent - CTFontGetDescent(font) < 0.001 && CTFontGetDescent(font) - descent < 0.001,
+	      "the line's descent %g is not the font's %g", (double)descent, (double)CTFontGetDescent(font));
+	check(leading - CTFontGetLeading(font) < 0.001 && CTFontGetLeading(font) - leading < 0.001,
+	      "the line's leading %g is not the font's %g", (double)leading, (double)CTFontGetLeading(font));
+
+	/* THE TWO CARET DOORS ARE INVERSES. */
+	offset = CTLineGetOffsetForStringIndex(line, 0, NULL);
+	check(offset == 0.0, "the offset for index 0 is %g, want 0", (double)offset);
+	offset = CTLineGetOffsetForStringIndex(line, 4, &secondary);
+	check(offset - width < 0.001 && width - offset < 0.001,
+	      "the offset one past the last character is %g, want the line's width %g", (double)offset, width);
+	check(offset - secondary < 0.001 && secondary - offset < 0.001,
+	      "the secondary offset %g is not the primary %g, and a single run has one caret per boundary",
+	      (double)secondary, (double)offset);
+	for (i = 1; i < 4; i++) {
+		CGFloat previous = CTLineGetOffsetForStringIndex(line, i - 1, NULL);
+		CGFloat current = CTLineGetOffsetForStringIndex(line, i, NULL);
+
+		if (!(current > previous)) {
+			check(0, "the offsets do not increase: index %ld is %g after %g", (long)i, (double)current,
+			      (double)previous);
+		}
+	}
+	/* AND HIT TESTING INVERTS THE OFFSETS. THE CLICKS ARE PLACED INSIDE A GLYPH'S ADVANCE AND NOT ON A BOUNDARY,
+	 * because a click exactly halfway between two glyphs is a TIE — this implementation gives ties to the glyph on
+	 * the right — and a case that asserted the other side would be asserting a coin toss rather than a contract. */
+	{
+		CGFloat second_start = CTLineGetOffsetForStringIndex(line, 1, NULL);
+		CGFloat second_end = CTLineGetOffsetForStringIndex(line, 2, NULL);
+		CGFloat inside = (CGFloat)(second_start + (second_end - second_start) / 4.0);
+		CFIndex hit = CTLineGetStringIndexForPosition(line, CGPointMake(inside, 0.0));
+
+		check(hit == 1, "a click a quarter into the second glyph answered index %ld, want 1", (long)hit);
+		check(CTLineGetStringIndexForPosition(line, CGPointMake(second_end + 1.0, 0.0)) == 2,
+		      "a click just inside the third glyph did not answer index 2");
+		check(CTLineGetStringIndexForPosition(line, CGPointMake(-100.0, 0.0)) == 0,
+		      "a click before the line did not answer the first index");
+		check(CTLineGetStringIndexForPosition(line, CGPointMake(10000.0, 0.0)) == 4,
+		      "a click past the line did not answer one past the last character");
+	}
+
+	/* FLUSH IS ARITHMETIC ON THE WIDTH, AND THE CLAMP IS APPLE'S OWN SENTENCE FOR THE FACTOR. */
+	check(CTLineGetPenOffsetForFlush(line, 0.0, 200.0) == 0.0, "left flush is not 0");
+	flush = CTLineGetPenOffsetForFlush(line, 1.0, 200.0);
+	check(flush - (200.0 - width) < 0.001 && (200.0 - width) - flush < 0.001,
+	      "right flush is %g, want %g", flush, 200.0 - width);
+	flush = CTLineGetPenOffsetForFlush(line, 0.5, 200.0);
+	check(flush - (200.0 - width) / 2.0 < 0.001 && (200.0 - width) / 2.0 - flush < 0.001,
+	      "centre flush is %g, want %g", flush, (200.0 - width) / 2.0);
+	check(CTLineGetPenOffsetForFlush(line, -5.0, 200.0) == 0.0,
+	      "a factor below 0 is not clamped to left flush");
+	flush = CTLineGetPenOffsetForFlush(line, 5.0, 200.0);
+	check(flush - (200.0 - width) < 0.001 && (200.0 - width) - flush < 0.001,
+	      "a factor above 1 is not clamped to right flush");
+
+	/* EQUALITY IS BY VALUE: the same string in the same font is the same line. */
+	second = CTLineCreateWithAttributedString(astr);
+	check(second != NULL && CFEqual(line, second), "two lines from the same string and font are not equal");
+	check(second != NULL && CFHash(line) == CFHash(second), "two equal lines hash differently");
+
+	/* AND THE WAYS A LINE IS REFUSED: nothing at all, and a string with no font in it. */
+	check(CTLineCreateWithAttributedString(NULL) == NULL, "a NULL attributed string made a line");
+	bare = CFAttributedStringCreate(kCFAllocatorDefault, text, empty);
+	check(bare == NULL || CTLineCreateWithAttributedString(bare) == NULL,
+	      "a string with NO font attribute made a line, and a line has no default face to fall back to");
+
+	/* AND A LINE WITH WHITESPACE AT ITS END REPORTS IT, which is the whole purpose of that door. */
+	spaced = CFAttributedStringCreate(kCFAllocatorDefault, CFSTR("WAVE  "), attrs);
+	check(spaced != NULL, "the test could not make the spaced attributed string");
+	if (spaced != NULL) {
+		CTLineRef s = CTLineCreateWithAttributedString(spaced);
+
+		check(s != NULL, "a line ending in two spaces could not be made");
+		if (s != NULL) {
+			double whole = CTLineGetTypographicBounds(s, NULL, NULL, NULL);
+			double tail = CTLineGetTrailingWhitespaceWidth(s);
+
+			check(tail > 0.0, "a line ending in two spaces reports NO trailing whitespace");
+			check(tail < whole, "the trailing whitespace is the whole line, which it cannot be");
+		}
+	}
+	return g_fail - before;
+}
+
+/* HOW MANY PIXELS THE LAST DRAW MARKED, AND WHERE THE LEFTMOST MARK IS. The four bytes are the premultiplied RGBA
+ * quartet, so "marked" is ANY of them being nonzero: an opaque black glyph writes alpha. */
+static int line_ink_count(const unsigned char *pixels, size_t width, size_t height)
+{
+	size_t x, y;
+	int count = 0;
+
+	for (y = 0; y < height; y++) {
+		for (x = 0; x < width; x++) {
+			const unsigned char *p = pixels + (y * width + x) * 4;
+
+			if (p[0] != 0 || p[1] != 0 || p[2] != 0 || p[3] != 0) {
+				count++;
+			}
+		}
+	}
+	return count;
+}
+
+static int line_ink_left(const unsigned char *pixels, size_t width, size_t height)
+{
+	size_t x, y;
+
+	for (x = 0; x < width; x++) {
+		for (y = 0; y < height; y++) {
+			const unsigned char *p = pixels + (y * width + x) * 4;
+
+			if (p[0] != 0 || p[1] != 0 || p[2] != 0 || p[3] != 0) {
+				return (int)x;
+			}
+		}
+	}
+	return -1;
+}
+
+/* THE DOOR THAT PUTS INK ON A PAGE, AND IT IS CHECKED BY LOOKING AT PIXELS RATHER THAN BY CALLING IT. A case that
+ * called CTLineDraw and asserted nothing would pass with a draw door that did nothing at all, so this draws into a
+ * real bitmap and counts the marks — AND THEN DRAWS THE SAME LINE AT ANOTHER TEXT POSITION AND CHECKS THE MARKS
+ * MOVED, which is the only way to tell the two readings of Core Graphics' own `ShowGlyphsAtPositions` apart: its
+ * header says positions are in user space and "the CTM alone places the pen", while the advance doors' pen "starts
+ * at the TEXT POSITION". Whichever this Core Graphics does, the LINE's contract is that its origin is the caller's
+ * text position, and a picture says whether that is what happens. */
+static int case_line_drawing(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(12.0);
+	enum { W = 160, H = 40 };
+	static unsigned char pixels[W * H * 4];
+	CGColorSpaceRef space;
+	CGContextRef ctx;
+	CFMutableDictionaryRef attrs;
+	CFAttributedStringRef astr;
+	CTLineRef line;
+	CGRect ink;
+	int at_zero, at_thirty;
+
+	check(font != NULL, "no font, so there is nothing to draw");
+	if (font == NULL) {
+		return g_fail - before;
+	}
+	attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					  &kCFTypeDictionaryValueCallBacks);
+	check(attrs != NULL, "the test could not make its dictionary");
+	if (attrs == NULL) {
+		return g_fail - before;
+	}
+	CFDictionarySetValue(attrs, CFSTR("NSFontAttributeName"), font);
+	astr = CFAttributedStringCreate(kCFAllocatorDefault, CFSTR("WAVE"), attrs);
+	check(astr != NULL, "the test could not make its attributed string");
+	if (astr == NULL) {
+		return g_fail - before;
+	}
+	line = CTLineCreateWithAttributedString(astr);
+	check(line != NULL, "the line to draw could not be made");
+	if (line == NULL) {
+		return g_fail - before;
+	}
+
+	space = CGColorSpaceCreateDeviceRGB();
+	check(space != NULL, "the test could not make a colour space");
+	if (space == NULL) {
+		return g_fail - before;
+	}
+	/* THE ONE FORMAT THIS CORE GRAPHICS' BITMAP CONTEXT SUPPORTS, AND IT REFUSES THE OTHERS RATHER THAN
+	 * REINTERPRETING THEM: 8 bits per component, 32 bits per pixel, `kCGImageAlphaPremultipliedFirst` with
+	 * `kCGBitmapByteOrder32Little` — the format its own contexts use (see CGImage.h). Asking for
+	 * `kCGImageAlphaPremultipliedLast` is a documented refusal, so a case that used it would be testing the
+	 * refusal rather than the line. */
+	ctx = CGBitmapContextCreate(pixels, W, H, 8, W * 4, space,
+				    kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
+	check(ctx != NULL, "the test could not make a bitmap context to draw into");
+	if (ctx == NULL) {
+		return g_fail - before;
+	}
+	CGContextSetRGBFillColor(ctx, 0.0, 0.0, 0.0, 1.0);
+
+	/* THE IMAGE BOUNDS EXIST AND ENCLOSE SOMETHING, before anything is drawn. */
+	ink = CTLineGetImageBounds(line, ctx);
+	check(!CGRectIsNull(ink) && ink.size.width > 0.0 && ink.size.height > 0.0,
+	      "the line's image bounds are empty: %g by %g", (double)ink.size.width, (double)ink.size.height);
+
+	/* THE FIRST DRAW, AT THE CONTEXT'S ORIGIN. */
+	memset(pixels, 0, sizeof pixels);
+	CTLineDraw(line, ctx);
+	check(line_ink_count(pixels, W, H) > 0, "CTLineDraw marked NO pixels at all");
+	at_zero = line_ink_left(pixels, W, H);
+
+	/* AND THE SECOND, THIRTY POINTS TO THE RIGHT — SAME LINE, SAME CONTEXT, ONE SETTING CHANGED. */
+	memset(pixels, 0, sizeof pixels);
+	CGContextSetTextPosition(ctx, 30.0, 0.0);
+	CTLineDraw(line, ctx);
+	check(line_ink_count(pixels, W, H) > 0, "the second draw marked no pixels at all");
+	at_thirty = line_ink_left(pixels, W, H);
+	check(at_zero >= 0 && at_thirty >= 0, "one of the two draws left nothing to measure");
+	check(at_thirty > at_zero + 25 && at_thirty < at_zero + 35,
+	      "moving the text position by 30 moved the ink by %d, from %d to %d", at_thirty - at_zero, at_zero,
+	      at_thirty);
+
+	/* AND THE IMAGE BOUNDS FOLLOW THE TEXT POSITION, which is Apple's own sentence for that door. */
+	ink = CTLineGetImageBounds(line, ctx);
+	check(!CGRectIsNull(ink) && ink.origin.x > 29.0 && ink.origin.x < 31.0,
+	      "the image bounds did not follow the text position: x is %g, want about 30", (double)ink.origin.x);
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -1256,6 +1559,8 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The auto-activation setting round-trips as a preference", case_manager_settings },
 	{ "The paragraph vocabularies and the fourteen settings", case_paragraph_style_values },
 	{ "A paragraph style answers defaults, copies and retains", case_paragraph_style_object },
+	{ "A line is one run, and every measuring door agrees with the font", case_line_object },
+	{ "A line draws, and the ink follows the text position", case_line_drawing },
 };
 
 int main(void)
