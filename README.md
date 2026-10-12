@@ -378,4 +378,14 @@ ctest --test-dir build
   the order they were recorded — the two attribute-key values, by `CTStringAttributes`, and this default, by
   `CTTextTab` — each in the commit that brought the thing it was waiting for, and each checked by the cases that were
   ALREADY asserting the deviation: a retirement that changed behaviour would have failed those cases rather than paid
-  them.
+  them.- **`CTGlyphInfo` IS DECLARED AND IMPLEMENTED — THE LAST OF THE VOCABULARY, AND THE VALUE OF A KEY ITS SIBLING ALREADY
+  NAMES.** (`kCTGlyphInfoAttributeName`.) Its three creators name ONE glyph three ways: by **name** — resolved through
+  the face with `CTFontGetGlyphWithName`, and the name **kept** so the getter answers what it was given — by **index**,
+  and by **CID in a `CTCharacterCollection`**. The case holds what each one CAN answer, which is not the same thing
+  three times: an index-made glyph info stores no name and the getter **resolves it lazily through the engine's own
+  glyph-name door** (which is why that door is at the seam, and where a NULL would have been a shortage rather than a
+  boundary); and **a CID-made one keeps its collection and has NO GLYPH AT ALL**, because a CID is a key into a
+  collection's CMap and this tier has no CMap — asserted **as** a boundary. MEASURED: `text: 24 of 24 cases passed, 0 failed`.
+- **AND ITS COLLECTION VOCABULARY HAS NO GAPS**, the opposite shape to the underline one the attribute case holds:
+  `kCTIdentityMappingCharacterCollection` is 0 and the five Adobe collections are 1 through 5 in Apple's order, so this
+  enum may be counted where that one may not.

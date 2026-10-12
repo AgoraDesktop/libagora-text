@@ -506,3 +506,31 @@ change that altered behaviour would have FAILED the case that recorded the devia
 MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with no compiler diagnostic at all in
 their logs; a `grep` over the library's sources finds each of the two retired attribute-key values in exactly one file;
 and a bare `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over `text: 23 of 23 cases passed, 0 failed`.
+**`CTGlyphInfo` — the glyph substitution, and the last of the vocabulary (2026-10-11).** Three creators, three getters
+and a type id, over a glyph named three ways: BY NAME (resolved through the face with `CTFontGetGlyphWithName`, the name
+KEPT so the getter answers it), BY INDEX, and BY CID IN A COLLECTION. It is the value of `kCTGlyphInfoAttributeName`,
+which `CTStringAttributes` already declared, so this closes the loop between the two vocabulary headers.
+
+**AND THE THREE WAYS ARE NOT THE SAME ANSWER THREE TIMES.** An INDEX-made glyph info stores no name, and its getter
+RESOLVES ONE LAZILY through the engine's glyph-name door — the seam door that exists for exactly this, cached because a
+`Get` reference belongs to the object. A NAME-made one keeps what it was given. And A CID-MADE ONE KEEPS ITS COLLECTION
+AND HAS NO GLYPH AT ALL: a CID is a key into a COLLECTION's CMap, and a collection is a mapping table this tier does not
+have — the same standing the character set, the platform font and the vertical metrics carry, and it is ASSERTED AS A
+BOUNDARY by the case rather than left for a caller to discover.
+
+**AND ITS COLLECTION VOCABULARY HAS NO GAPS**, the opposite shape to the underline one this repository's attribute case
+holds: the identity mapping is 0 and the five Adobe collections are 1 through 5 in Apple's order. The case asserts both
+the values and the absence of a gap.
+
+**AND THIS PARAGRAPH IS A CORRECTION, WHICH IS WHY IT IS HERE.** The commit that implemented this type
+(`9c9beab`) CLAIMED that "README.md's status and PROVENANCE.md's Agora-changes section are changed in this same
+commit" — AND IT WAS NOT TRUE WHEN IT WAS WRITTEN. The script that writes these two documents asserts on its ANCHORS
+before writing anything, and the README's anchor did not match, so it aborted; the shell commands that committed were
+separated by newlines rather than gated on that script, so the commit proceeded and the documents were left behind.
+THE FAULT IS THE ONE THIS TREE HAS NOW RECORDED FOUR TIMES — a claim written from what the run was EXPECTED to do —
+and the remedy is the same one: the two documents are written HERE, by a script that APPENDS rather than matching an
+anchor, and the numbers quoted are the ones CAPTURED from the run below.
+
+MEASURED, from a DELETED `build/`: configure and `cmake --build build` exit 0 with no compiler diagnostic at all in
+their logs; `nm -D build/libagora-text.so` lists all seven glyph-info doors; and a bare `ctest --test-dir build` is
+`100% tests passed, 0 tests failed out of 2` over `text: 24 of 24 cases passed, 0 failed`.
