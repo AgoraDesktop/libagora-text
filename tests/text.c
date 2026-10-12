@@ -32,6 +32,7 @@
 #include <CoreText/CTFramesetter.h>
 #include <CoreText/CTStringAttributes.h>
 #include <CoreText/CTTextTab.h>
+#include <CoreText/CTGlyphInfo.h>
 
 #include <CoreFoundation/CoreFoundation.h>
 
@@ -2404,6 +2405,97 @@ static int case_text_tab(void)
 	return g_fail - before;
 }
 
+/* THE GLYPH SUBSTITUTION, WHICH IS THE VALUE OF AN ATTRIBUTE KEY `CTStringAttributes` ALREADY NAMES. Its three
+ * creators name the same glyph three ways, so the case builds one each and holds what each CAN answer: an INDEX has no
+ * name until somebody asks for one and the engine resolves it, a NAME keeps what it was given, and a CID keeps the
+ * collection it belongs to and has NO GLYPH AT ALL — the one boundary here, asserted AS a boundary rather than left to
+ * be discovered. */
+static int case_glyph_info(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(12.0);
+	CTGlyphInfoRef by_glyph, again, by_name, by_cid;
+	CFStringRef got;
+	CGGlyph glyph = 0;
+
+	check(font != NULL, "no font, so there is nothing to substitute");
+	if (font == NULL) {
+		return g_fail - before;
+	}
+	{
+		UniChar c = (UniChar)'A';
+
+		check(CTFontGetGlyphsForCharacters(font, &c, &glyph, 1) && glyph != 0,
+		      "the face has no glyph for 'A'");
+	}
+
+	/* BY INDEX, WHOSE NAME IS NOT STORED AND IS FOUND ANYWAY — through the engine's own name door, which is the
+	 * reason that door is at the seam. AND IT IS FOUND ONCE: the second call answers the same object. */
+	by_glyph = CTGlyphInfoCreateWithGlyph(glyph, font, CFSTR("A"));
+	check(by_glyph != NULL, "a glyph info could not be made from a glyph");
+	if (by_glyph == NULL) {
+		return g_fail - before;
+	}
+	check(CFGetTypeID((CFTypeRef)by_glyph) == CTGlyphInfoGetTypeID(),
+	      "CFGetTypeID(glyphInfo) is %lu and CTGlyphInfoGetTypeID() is %lu",
+	      (unsigned long)CFGetTypeID((CFTypeRef)by_glyph), (unsigned long)CTGlyphInfoGetTypeID());
+	got = CTGlyphInfoGetGlyphName(by_glyph);
+	check(got != NULL, "a glyph made from an index resolved NO name, and the engine has one for it");
+	check(got != NULL && CFGetTypeID((CFTypeRef)got) == CFStringGetTypeID(),
+	      "the resolved glyph name is not a CFString");
+	check(CTGlyphInfoGetGlyphName(by_glyph) == got,
+	      "the lazily resolved name was not the same object on the second call");
+	check(CTGlyphInfoGetCharacterIdentifier(by_glyph) == 0 &&
+	      CTGlyphInfoGetCharacterCollection(by_glyph) == kCTIdentityMappingCharacterCollection,
+	      "an index-made glyph info claims a CID");
+
+	/* EQUALITY IS BY GLYPH AND FACE, and the case builds the second one the same way rather than by name: whether a
+	 * NAME resolves to the same glyph is the face's business, and asserting it here would be testing the face. */
+	again = CTGlyphInfoCreateWithGlyph(glyph, font, NULL);
+	check(again != NULL && CFEqual(by_glyph, again),
+	      "two glyph infos for the same glyph in the same face are not equal");
+
+	/* AND BY NAME, WHICH KEEPS WHAT IT WAS GIVEN even when the face cannot resolve it. */
+	by_name = CTGlyphInfoCreateWithGlyphName(CFSTR("A"), font, CFSTR("A"));
+	check(by_name != NULL, "a glyph info could not be made from a name");
+	if (by_name != NULL) {
+		got = CTGlyphInfoGetGlyphName(by_name);
+		check(got != NULL && CFEqual(got, CFSTR("A")),
+		      "the name-made glyph info did not answer the name it was given");
+	}
+
+	/* AND BY CID, WHICH IS THE BOUNDARY: the collection comes back and the glyph does not, because a CID is a key
+	 * into a collection's CMap and this tier has no CMap. */
+	by_cid = CTGlyphInfoCreateWithCharacterIdentifier((CGFontIndex)1234, kCTAdobeJapan1CharacterCollection,
+							  CFSTR("A"));
+	check(by_cid != NULL, "a glyph info could not be made from a CID");
+	if (by_cid != NULL) {
+		check(CTGlyphInfoGetCharacterIdentifier(by_cid) == 1234, "the CID came back as %u, want 1234",
+		      (unsigned)CTGlyphInfoGetCharacterIdentifier(by_cid));
+		check(CTGlyphInfoGetCharacterCollection(by_cid) == kCTAdobeJapan1CharacterCollection,
+		      "the collection did not come back");
+		check(CTGlyphInfoGetGlyphName(by_cid) == NULL,
+		      "a CID-made glyph info answered a glyph name, and it has no face to resolve one in");
+		check(!CFEqual(by_cid, by_glyph), "a CID-made glyph info equals an index-made one");
+	}
+
+	/* THE COLLECTION VOCABULARY, WHOSE VALUES HAVE NO GAPS — the opposite shape to the underline one the attribute
+	 * case holds. */
+	check(kCTIdentityMappingCharacterCollection == 0 && kCTAdobeCNS1CharacterCollection == 1 &&
+	      kCTAdobeGB1CharacterCollection == 2 && kCTAdobeJapan1CharacterCollection == 3 &&
+	      kCTAdobeJapan2CharacterCollection == 4 && kCTAdobeKorea1CharacterCollection == 5,
+	      "the character collections are not 0 through 5 in Apple's order");
+	check(sizeof(CTCharacterCollection) == 2, "a character collection is %zu bytes, want 2",
+	      sizeof(CTCharacterCollection));
+
+	/* NULL SAFETY. */
+	check(CTGlyphInfoCreateWithGlyphName(NULL, font, NULL) == NULL, "a NULL glyph name made a glyph info");
+	check(CTGlyphInfoCreateWithGlyph(glyph, NULL, NULL) == NULL, "a NULL font made a glyph info");
+	check(CTGlyphInfoGetGlyphName(NULL) == NULL, "a NULL glyph info answered a name");
+	check(CTGlyphInfoGetCharacterIdentifier(NULL) == 0, "a NULL glyph info answered a CID");
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -2428,6 +2520,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "A frame fills a path, and its lines tile what it showed", case_frame_object },
 	{ "The attribute keys, twelve proven and two inferred", case_string_attribute_keys },
 	{ "The tab, and the default it was owed for", case_text_tab },
+	{ "The glyph substitution, named three ways", case_glyph_info },
 };
 
 int main(void)
