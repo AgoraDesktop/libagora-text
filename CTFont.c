@@ -25,6 +25,7 @@
 #include <CoreText/CTFont.h>
 
 #include <CoreFoundation/CFRuntime.h>
+#include <CoreFoundation/CFCharacterSet.h>
 #include <CoreGraphics/CGFont_internal.h>
 
 #include <stdbool.h>
@@ -708,15 +709,79 @@ CGPathRef CTFontCreatePathForGlyph(CTFontRef font, CGGlyph glyph, const CGAffine
 	return (CGPathRef)ctx.path;
 }
 
+/* THE FACE'S CHARACTER SET: EVERY CODE UNIT THE FACE MAPS TO A GLYPH, AND IT IS ANSWERED BY THE SAME STEP
+ * `CTFontGetGlyphsForCharacters` USES, ASKED EXHAUSTIVELY RATHER THAN ONE CHARACTER AT A TIME. The seam maps a BATCH
+ * of code units in one call, so the whole basic multilingual plane is SIXTEEN calls and no table access is needed --
+ * which is why this door did not have to wait for the seam to grow a table door, where the rest of its family does.
+ *
+ * A CODE UNIT IS IN THE SET WHEN THE FACE MAPS IT TO A **NON-ZERO** GLYPH, and glyph 0 is `.notdef` -- "this face has
+ * nothing here" -- which is the same rule the mapping door reports as failure. Surrogates therefore fall out of the
+ * answer by themselves rather than needing a special case, and a face that maps U+0000 keeps it.
+ *
+ * AND THE SCAN IS BOUNDED AT U+FFFF, WHICH IS RECORDED RATHER THAN SILENT: the seam takes UTF-16 code units, so the
+ * planes above the basic multilingual plane are not reachable THROUGH THIS DOOR -- a surrogate pair is two code units
+ * and the second of them alone maps to nothing. Apple reads a cmap and would include them. See PROVENANCE.md for the
+ * condition that would close it. */
+CFCharacterSetRef CTFontCopyCharacterSet(CTFontRef font)
+{
+	const struct __CTFont *f = (const struct __CTFont *)font;
+	CFMutableCharacterSetRef set;
+	uint16_t *characters;
+	CGGlyph *glyphs;
+	const size_t chunk = 4096;
+	uint32_t start;
+
+	if (f == NULL) {
+		return NULL;
+	}
+	set = CFCharacterSetCreateMutable(kCFAllocatorDefault);
+	characters = (uint16_t *)malloc(chunk * sizeof(uint16_t));
+	glyphs = (CGGlyph *)malloc(chunk * sizeof(CGGlyph));
+	if (set == NULL || characters == NULL || glyphs == NULL) {
+		if (set != NULL) {
+			CFRelease(set);
+		}
+		free(characters);
+		free(glyphs);
+		return NULL;
+	}
+	for (start = 0; start <= 0xFFFF; start += (uint32_t)chunk) {
+		size_t i, count = ((0x10000u - start) < chunk) ? (size_t)(0x10000u - start) : chunk;
+
+		for (i = 0; i < count; i++) {
+			characters[i] = (uint16_t)(start + i);
+		}
+		if (cg_font_glyphs_for_unichars(f->graphics, characters, glyphs, count) > 0) {
+			for (i = 0; i < count; i++) {
+				if (glyphs[i] != 0) {
+					CFCharacterSetAddCharactersInRange(set, CFRangeMake((CFIndex)(start + i), 1));
+				}
+			}
+		}
+	}
+	free(characters);
+	free(glyphs);
+	return (CFCharacterSetRef)set;
+}
+
 /* =================================================================================================
  * OWED DOORS, EACH WITH THE REASON IT CANNOT BE ANSWERED HERE. They are DECLARED in CTFont.h and NOT DEFINED,
  * so a caller who reaches for one gets a link error rather than a plausible wrong answer.
  *
  *   CTFontGetSymbolicTraits, CTFontCopyTraits     the seam reports no style flags, and deriving traits from a
  *                                                 subfamily STRING would be a guess wearing a fact's clothes.
- *   CTFontCopyCharacterSet, CFStringEncoding      needs every character the face covers: the inverse of the
- *   CTFontCopySupportedLanguages                   glyph step, over the whole cmap, plus the OS/2 and
- *                                                 name-table data that languages come from.
+ *   CTFontCopySupportedLanguages,                 needs the OS/2 and name-table data that languages come from,
+ *   CTFontGetStringEncoding                       which is DATA IN A TABLE and not a mapping -- see below.
+ *
+ * AND TWO THAT USED TO BE HERE ARE GONE FROM IT. `CTFontCopyCharacterSet` IS DEFINED NOW, AND BY THE INVERSE OF THE
+ * GLYPH STEP THIS LIBRARY ALREADY HAD: the face is asked which code units it maps, in sixteen calls, and the ones it
+ * answers for are the set. IT IS A FACT AND NOT A GUESS -- the same fact `CTFontGetGlyphsForCharacters` reports, asked
+ * exhaustively -- and the case holds the two doors to saying the same thing, code unit by code unit.
+ *
+ * AND ONE BOUNDARY IS RECORDED WHERE THE DOOR IS: the seam's mapping takes UTF-16 CODE UNITS, so the scan covers the
+ * BASIC MULTILINGUAL PLANE and the faces' coverage of the planes above it is NOT reported. Apple reads a cmap, which
+ * would include them. The condition that would close it is a seam door taking SCALAR VALUES rather than code units,
+ * and nothing else about this door would change.
  *   CTFontCopyVariationAxes, CTFontCopyVariation  these are the `fvar` and `avar` tables -- font variation.
  *   CTFontCopyFeatures, CTFontCopyFeatureSettings  These are the `feat` table. No seam door reads a table.
  *   CTFontCopyAvailableTables, CTFontCopyTable    the same, and a raw table needs a table-access door.

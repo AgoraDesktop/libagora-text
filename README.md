@@ -492,4 +492,20 @@ ctest --test-dir build
   them with a checkable reason each: the font-table readers (`fvar`, `avar`, `feat`, `post`, raw `CTFontCopyTable`) and
   the doors where a SYSTEM CHOOSES A FACE (UI roles, cascade/fallback). WHAT WAS WRONG WAS THE GUARD: the `owed` test
   named **one** of the twenty-three, so a door that quietly acquired a definition would have passed it. The list is now
-  all twenty-three. MEASURED: `text: 30 of 30 cases passed, 0 failed`, `owed` **23** names.
+  all twenty-three. MEASURED: `text: 30 of 30 cases passed, 0 failed`, `owed` **23** names.- **AND ONE OF THE TWENTY-THREE OWED DOORS IS DEFINED: `CTFontCopyCharacterSet`, answered by the INVERSE OF THE GLYPH
+  STEP THIS LIBRARY ALREADY HAD.** The seam maps a BATCH of code units per call, so the whole basic multilingual plane
+  is **sixteen calls** and no table access is needed — which is exactly why this door did not have to wait for the seam
+  to grow one, where the rest of its family does. **A code unit is in the set when the face maps it to a NON-ZERO glyph**
+  (`0` is `.notdef` — "nothing here"), so surrogates fall out by themselves and a face that maps `U+0000` keeps it. The
+  case holds the equivalence that IS the contract: **membership and the mapping door must agree**, code unit by code
+  unit, over a sample including a character the face has, one it may not, and one that is not a character at all.
+- **AND ONE BOUNDARY IS RECORDED WHERE THE DOOR IS, because the answer is narrower than Apple's**: the seam takes
+  **UTF-16 code units**, so the scan covers the **BMP** and coverage of the planes above it is **not reported** — a
+  surrogate pair is two code units and the second alone maps to nothing. Apple reads a cmap and would include them. The
+  condition that closes it is a seam door taking **scalar values**, and nothing else about this door would change.
+- **AND THE REST OF THE OWED FAMILY NOW HAS A NAMED KEYSTONE**: the font seam sits on **FreeType**, and
+  `libagora-drawing/CGFont.c` **already includes `FT_TRUETYPE_TABLES_H`** — so `FT_Load_Sfnt_Table` is one function
+  away, and with it `fvar`/`avar` (variation), `feat` (features), `post` (underline metrics), and `OS/2`+`head`
+  (traits, whose current reason is that guessing them from a subfamily STRING *"would be a guess wearing a fact's
+  clothes"* — a table read is the fact). **That door belongs to another repository**, so the family is a cross-repo unit
+  rather than a gate. MEASURED: `100% tests passed, 0 tests failed out of 2` over `text: 31 of 31 cases passed, 0 failed`, and `owed` down to **22**.

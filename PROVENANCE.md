@@ -815,3 +815,37 @@ definition. Nothing was implemented by this commit and no behaviour changed.
 
 MEASURED, from the run in the same command: a bare `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over `text: 30 of 30 cases passed, 0 failed`, and the `owed` test now
 names **23** doors where it named one.
+**`CTFontCopyCharacterSet` is defined, by the inverse of the glyph step this library already had (2026-10-11).** The door
+was owed with the reason "needs every character the face covers: the inverse of the glyph step, over the whole cmap, plus
+the OS/2 and name-table data that languages come from" — AND THE FIRST HALF OF THAT SENTENCE NAMED ITS OWN ANSWER. The
+seam door `cg_font_glyphs_for_unichars` maps a BATCH of UTF-16 code units per call, so the inverse is the forward step
+asked exhaustively: the whole basic multilingual plane is SIXTEEN calls, the cost of a door that reads no table at all.
+THE OS/2 AND NAME-TABLE HALF IS STILL OWED, in `CTFontCopySupportedLanguages` and `CTFontGetStringEncoding`.
+
+**AND THE RULE IS STATED WHERE THE CODE IS, BECAUSE IT DECIDES THE ANSWER**: a code unit is in the set when the face maps
+it to a NON-ZERO glyph, and glyph 0 is `.notdef` — "this face has nothing here" — which is the same rule the mapping
+door reports as failure. Surrogates therefore fall out of the answer by themselves rather than needing a case of their
+own, and a face that maps `U+0000` keeps it. AND THE CASE HOLDS THE ONLY THING THAT MATTERS: MEMBERSHIP AND THE MAPPING
+DOOR AGREE, code unit by code unit, over a sample chosen to include characters a monospace face has, one it may or may
+not have, and one that is not a character at all. IT NEVER ASSERTS WHICH — only that two doors say the same thing, which
+is a fact whichever way the face answers.
+
+**AND ONE BOUNDARY IS RECORDED RATHER THAN LEFT TO BE DISCOVERED: THE SCAN COVERS THE BASIC MULTILINGUAL PLANE AND NOT
+THE PLANES ABOVE IT.** The seam's mapping takes UTF-16 CODE UNITS, so a surrogate pair is two code units and the second
+of them alone maps to nothing; Apple reads a cmap, which would report that coverage. THE CONDITION THAT WOULD CLOSE IT
+IS CHECKABLE AND SMALL — a seam door taking SCALAR VALUES instead of code units — and nothing else about this door would
+change. It is recorded in `CTFont.c` beside the door.
+
+**AND THE REST OF THE OWED FAMILY NOW HAS A NAMED KEYSTONE, FOUND BY LOOKING RATHER THAN GUESSING**: the font seam is
+implemented in `libagora-drawing/CGFont.c` and sits on **FreeType**, and that file ALREADY INCLUDES
+`FT_TRUETYPE_TABLES_H` — so `FT_Load_Sfnt_Table` is ONE FUNCTION AWAY, and with it the whole table family that is owed
+here (`fvar`/`avar` for variation, `feat` for features, `post` for the underline metrics, and `OS/2`+`head` for traits —
+whose reason for being owed is that deriving them from a subfamily STRING "would be a guess wearing a fact's clothes",
+where a table read is the fact). **THAT SEAM DOOR BELONGS TO ANOTHER REPOSITORY**, which is what makes the family a
+CROSS-REPO unit rather than a gate in this one. NAMED HERE SO THE NEXT UNIT STARTS FROM THE KEYSTONE RATHER THAN FROM
+THE DOOR LIST.
+
+MEASURED, from a DELETED `build/` in the same command: configure and `cmake --build build` exit 0 with NO compiler
+diagnostic at all; a bare `ctest --test-dir build` is `100% tests passed, 0 tests failed out of 2` over `text: 31 of 31 cases passed, 0 failed`; and the `owed` guard — which now
+names every declared-but-undefined door — is down to **22** names, having dropped `CTFontCopyCharacterSet` IN THE
+SAME COMMIT THAT DEFINED IT, which is the discipline the previous commit established.

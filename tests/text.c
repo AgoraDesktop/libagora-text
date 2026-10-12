@@ -3159,6 +3159,62 @@ static int case_font_service_wire(void)
 	return g_fail - before;
 }
 
+/* THE FACE'S CHARACTER SET, WHICH IS THE INVERSE OF THE GLYPH STEP THIS LIBRARY ALREADY HAD: a code unit is in the set
+ * when the face maps it, which is the same fact `CTFontGetGlyphsForCharacters` reports, asked exhaustively.
+ *
+ * AND THAT EQUIVALENCE IS WHAT THIS CASE HOLDS, because it is the whole contract: MEMBERSHIP AND THE MAPPING DOOR MUST
+ * AGREE, code unit by code unit, over a sample chosen to include characters a monospace face has (letters, digits), one
+ * it may or may not have (a CJK ideograph), and one that is not a character at all (U+FFFE). The case never assumes
+ * WHICH of them the face covers -- it asserts only that two doors agree about it, which is a fact either way. */
+static int case_font_character_set(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(12.0);
+	CFCharacterSetRef set;
+	UniChar sample[6];
+	CGGlyph glyphs[6];
+	bool mapped[6];
+	CFIndex i, members = 0;
+	uint32_t code;
+
+	check(font != NULL, "no font, so there is no character set to copy");
+	if (font == NULL) {
+		return g_fail - before;
+	}
+	set = CTFontCopyCharacterSet(font);
+	check(set != NULL, "the face's character set came back NULL");
+	if (set == NULL) {
+		return g_fail - before;
+	}
+	sample[0] = (UniChar)'A';
+	sample[1] = (UniChar)'0';
+	sample[2] = (UniChar)' ';
+	sample[3] = (UniChar)0x00E9;	/* e-acute */
+	sample[4] = (UniChar)0x4E2D;	/* a CJK ideograph */
+	sample[5] = (UniChar)0xFFFE;	/* not a character */
+	for (i = 0; i < 6; i++) {
+		mapped[i] = CTFontGetGlyphsForCharacters(font, &sample[i], &glyphs[i], 1);
+	}
+	for (i = 0; i < 6; i++) {
+		check(CFCharacterSetIsCharacterMember(set, sample[i]) == mapped[i],
+		      "the set and the mapping door disagree about U+%04X", (unsigned)sample[i]);
+	}
+
+	/* AND IT IS NEITHER EVERYTHING NOR NOTHING, which is what the scan has to get right. The count is taken by asking
+	 * the set itself, so the case measures the answer rather than trusting it. */
+	for (code = 0; code <= 0xFFFF; code++) {
+		if (CFCharacterSetIsCharacterMember(set, (UniChar)code)) {
+			members++;
+		}
+	}
+	check(members > 0, "the face maps nothing at all, which cannot be true of a face that draws");
+	check(members < 0x10000, "the set is every code unit, so the scan discriminates nothing");
+
+	check(CTFontCopyCharacterSet(NULL) == NULL, "a NULL font produced a character set");
+	CFRelease(set);
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -3190,6 +3246,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "Matching finds the faces a query describes, in a stable order", case_font_matching },
 	{ "A disabled face leaves every matching answer, and comes back", case_font_visibility },
 	{ "The two halves of the font service speak the same wire", case_font_service_wire },
+	{ "The character set agrees with the mapping, code unit by code unit", case_font_character_set },
 };
 
 int main(void)
