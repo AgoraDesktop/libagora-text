@@ -1361,12 +1361,24 @@ static int case_line_object(void)
 	 * ASSERTED IS THAT — the line's heights ARE the font's — and NOT A SIGN, because Apple's own header states no
 	 * sign: it says only "the scaled font descent metric", scaled by the size and matrix.
 	 *
-	 * AND THE SIGN IS WORTH RECORDING, BECAUSE THIS TIER'S DESCENT COMES BACK NEGATIVE. The reason is one layer
-	 * down: the seam answers `CGFontGetDescent` with the engine's own `face->descender`, which is negative in
-	 * FreeType's convention, and nothing on the way up changes it. WHETHER APPLE'S IS NEGATIVE TOO IS AN OPEN
-	 * QUESTION THE ERA'S HEADERS DO NOT SETTLE — so it is recorded here as a finding for the tier that can answer
-	 * it rather than as a sign invented in a case. The line reports what the font reports; that is the line's
-	 * whole contract, and the assertion below is that contract and nothing more. */
+	 * **AND THE SIGN QUESTION THIS COMMENT USED TO LEAVE OPEN HAS SINCE BEEN ANSWERED — BY THE ARITHMETIC, SINCE NO
+	 * ERA HEADER SETTLES IT.** It used to read: "this tier's descent comes back negative ... WHETHER APPLE'S IS
+	 * NEGATIVE TOO IS AN OPEN QUESTION THE ERA'S HEADERS DO NOT SETTLE — so it is recorded here as a finding for the
+	 * tier that can answer it." THE ANSWER IS THAT THE DESCENT IS A MAGNITUDE AT EVERY LAYER BUT ONE: `CGFontGetDescent`
+	 * and `CTFontGetDescent` answer a POSITIVE descent, because the sum that consumes them is
+	 * `ascent + descent + leading`, and the only negative descent in the tree is `NSFont -descender`, which negates at
+	 * the one layer whose own documentation asks for a negative value.
+	 *
+	 * THE GROUND IS MEASURED: a 13-point font came out 25.2 points per line — 1.94 em — because the negative descent
+	 * SUBTRACTED 3.1 and `CGFontGetLeading` answered `face->height` (the LINE height, which this sum then added on top
+	 * of the two it already had). The three candidate readings are 25.2, 9.5 and 15.7 em-scaled, AND ONLY THE LAST IS A
+	 * LINE HEIGHT: 15.7 = 1.21 em. So the assertion below is now the one the sum exists for — the line's three parts
+	 * add up to something a line could be — while the sign cases that follow still assert only "the line reports what
+	 * the font reports", which is this line's whole contract and nothing more. */
+	check(ascent + descent + leading > 0.9 * CTFontGetSize(font) &&
+	      ascent + descent + leading < 1.6 * CTFontGetSize(font),
+	      "the line's ascent + descent + leading is %g, which is not a line height for a %g pt font",
+	      (double)(ascent + descent + leading), (double)CTFontGetSize(font));
 	check(ascent - CTFontGetAscent(font) < 0.001 && CTFontGetAscent(font) - ascent < 0.001,
 	      "the line's ascent %g is not the font's %g", (double)ascent, (double)CTFontGetAscent(font));
 	check(descent - CTFontGetDescent(font) < 0.001 && CTFontGetDescent(font) - descent < 0.001,
