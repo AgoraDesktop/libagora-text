@@ -302,6 +302,14 @@ ctest --test-dir build
   between a run and the line that makes one — Apple has no public creator for a run, since a line is what produces
   one — so that the two files agree about how a run is built instead of one of them `extern`ing what the other
   defines.
+- **AND A LINE IS KERNED, WHICH IS THE DIFFERENCE BETWEEN SPACING AND TYPESETTING.** An advance is a glyph's own
+  opinion of how far the pen moves; a KERN is the font's opinion about a PAIR, and `CTLine` applies it between every
+  neighbouring pair — MEASURED, `To` closes by 2.209 points at 13 in one face and 1.016 in another. **THE
+  TYPESETTER'S WIDTH HAD TO LEARN IT TOO**: `ct_ts_fit` measured a line's fit from the advances alone, so with the
+  positions kerned the fit and the line disagreed and a title measured to one width and laid out to the other
+  WRAPPED — MEASURED in the AppKit's menu ink test as the first column's ink falling from 339 pixels to 147. The
+  number crosses the files in `CTFont_internal.h`, because Apple's Core Text has NO public kerning door: the
+  adjustment belongs to the typesetting layer and never leaves it as a number.
 - **`CTTypesetter` IS DECLARED AND IMPLEMENTED, AND IT IS THE FIRST THING HERE THAT **DECIDES** RATHER THAN MEASURES.**
   Its whole algorithm is Apple's own sentence: *"The line break can be triggered either by a hard break character in
   the stream or by filling the specified width with characters."* So a newline ends the line **wherever it is**, and
