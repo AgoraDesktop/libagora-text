@@ -27,6 +27,7 @@
 /* AND THE MATCHING TIER'S WALK, WHICH TWO CASES READ SO THAT "the first face in the tier's order" is asserted
  * against the order itself rather than against a family name this machine happens to hold first. */
 #include <CoreText/CTFontMatching_internal.h>
+#include <CoreText/CTFont_internal.h>
 #include <CoreText/CTFont.h>
 /* AND THE ENGINE'S INTERNAL HEADER, FOR THE DOORS CORE TEXT OWNS BUT DOES NOT IMPLEMENT: the Unicode
  * glyph step and the face registry. */
@@ -4707,6 +4708,253 @@ static int case_font_vertical_origin(void)
 	return g_fail - before;
 }
 
+
+/* ============================================================================================ *
+ * A LINE IS KERNED, WHICH IS THE DIFFERENCE BETWEEN SPACING AND TYPESETTING.                     *
+ *                                                                                                *
+ * An ADVANCE is a glyph's own opinion of how far the pen moves; a KERN is the font's opinion      *
+ * about a PAIR — that an `o` belongs closer under a `T` than the two advances put it — and a line *
+ * that sums advances and stops has thrown that opinion away. MEASURED, DejaVu Sans asks for `To`  *
+ * to close by 348 units of 2048, an em's sixth: TWO PIXELS of daylight at 13 points, the width of *
+ * a stem.                                                                                         *
+ *                                                                                                *
+ * THE TWO FACES ARE THE TWO ANSWERS. `test_font` is DejaVu Sans MONO Bold, which has NO `kern`    *
+ * table at all — so it holds the case where the adjustment must be zero and the layout must be    *
+ * the plain sum — and a proportional face holds the case where it is not. A case with only the    *
+ * second would pass on a face with no kerning; one with only the first would pass on a line that  *
+ * never kerns.                                                                                    *
+ * ============================================================================================ */
+static int case_line_kerning(void)
+{
+	int before = g_fail;
+	CTFontRef mono = test_font(13.0);
+	CTFontRef prop = CTFontCreateWithName(CFSTR("DejaVu Sans"), 13.0, NULL);
+	UniChar t = 'T', o = 'o';
+	CGGlyph tg[2], og[2];
+	CGSize tadv[2];
+	double kern, mono_kern, tadvance;
+	int defined;
+
+	check(mono != NULL, "no monospace face, so the no-kerning half cannot be asked");
+	if (mono == NULL) {
+		return g_fail - before;
+	}
+	memset(tg, 0, sizeof tg);
+	memset(og, 0, sizeof og);
+	defined = CTFontGetGlyphsForCharacters(mono, &t, tg, 1) && CTFontGetGlyphsForCharacters(mono, &o, og, 1);
+	check(defined, "the monospace face has no glyph for 'T' or 'o', so nothing can be laid out");
+	if (!defined) {
+		return g_fail - before;
+	}
+
+	/* **THE FACE WITH NO KERN TABLE, WHICH IS A RESULT AND NOT AN ABSENCE**: the door answers zero for every pair
+	 * rather than reaching the engine for a table that is not there. */
+	mono_kern = CTFontGetKerningBetweenGlyphs(mono, tg[0], og[0]);
+	check(mono_kern == 0.0, "a face with no kern table answered %g for 'To'", mono_kern);
+
+	check(prop != NULL, "no proportional face resolved, so the kerned half cannot be asked");
+	if (prop == NULL) {
+		return g_fail - before;
+	}
+	memset(tg, 0, sizeof tg);
+	memset(og, 0, sizeof og);
+	defined = CTFontGetGlyphsForCharacters(prop, &t, tg, 1)
+		  && CTFontGetGlyphsForCharacters(prop, &o, og, 1);
+	check(defined, "the proportional face has no glyph for 'T' or 'o'");
+	if (!defined) {
+		CFRelease(prop);
+		return g_fail - before;
+	}
+	kern = CTFontGetKerningBetweenGlyphs(prop, tg[0], og[0]);
+	tadvance = CTFontGetAdvancesForGlyphs(prop, kCTFontHorizontalOrientation, tg, tadv, 1);
+	printf("  (DejaVu Sans asks for 'To' to close by %.3f points at 13; 'T' advances %.3f)\n",
+	       kern, tadvance);
+	check(kern < 0.0, "this face does not kern 'To' (%g), so the layout cannot be judged", kern);
+
+	{
+		CFMutableDictionaryRef attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
+									 &kCFTypeDictionaryKeyCallBacks,
+									 &kCFTypeDictionaryValueCallBacks);
+		CFAttributedStringRef astr;
+		CTLineRef line;
+
+		if (attrs != NULL) {
+			CFDictionarySetValue(attrs, kCTFontAttributeName, prop);
+		}
+		astr = CFAttributedStringCreate(kCFAllocatorDefault, CFSTR("To"), attrs);
+		line = (astr != NULL) ? CTLineCreateWithAttributedString(astr) : NULL;
+		check(line != NULL, "the line 'To' could not be made");
+		if (line != NULL) {
+			CFArrayRef runs = CTLineGetGlyphRuns(line);
+			CTRunRef run = (runs != NULL && CFArrayGetCount(runs) > 0)
+				? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
+
+			check(run != NULL && CTRunGetGlyphCount(run) == 2, "the run is not two glyphs");
+			if (run != NULL && CTRunGetGlyphCount(run) == 2) {
+				CGPoint pos[2];
+				double width;
+
+				pos[0] = CGPointMake(0.0, 0.0);
+				pos[1] = CGPointMake(0.0, 0.0);
+				CTRunGetPositions(run, CFRangeMake(0, 2), pos);
+				check(fabs(pos[1].x - (tadvance + kern)) < 0.01,
+				      "'o' is placed %.3f from the pen, want %.3f — the advance %.3f plus the kern %.3f",
+				      (double)pos[1].x, (double)(tadvance + kern), tadvance, kern);
+				check(pos[1].x < tadvance - 0.5,
+				      "'o' is %.3f from the pen, the ADVANCE alone (%.3f): the kern was not applied",
+				      (double)pos[1].x, tadvance);
+				width = CTLineGetTypographicBounds(line, NULL, NULL, NULL);
+				check(fabs(width - (tadvance + kern
+						    + CTFontGetAdvancesForGlyphs(prop, kCTFontHorizontalOrientation, og,
+										 tadv, 1))) < 0.01,
+				      "the line measures %.3f, so the kern did not reach its WIDTH", width);
+			}
+			CFRelease(line);
+		}
+		if (astr != NULL) {
+			CFRelease(astr);
+		}
+		if (attrs != NULL) {
+			CFRelease(attrs);
+		}
+	}
+
+	/* **AND A PAIR THE FACE DOES NOT ADJUST**, so the check above is a measurement of the KERN and not of a layout
+	 * that always shortens the line. */
+	{
+		UniChar h = 'h';
+		CGGlyph hg[2];
+
+		memset(hg, 0, sizeof hg);
+		if (CTFontGetGlyphsForCharacters(prop, &h, hg, 1)) {
+			double hkern = CTFontGetKerningBetweenGlyphs(prop, tg[0], hg[0]);
+
+			if (hkern == 0.0) {
+				CFMutableDictionaryRef a2 = CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
+										      &kCFTypeDictionaryKeyCallBacks,
+										      &kCFTypeDictionaryValueCallBacks);
+				CFAttributedStringRef s2;
+				CTLineRef l2;
+
+				if (a2 != NULL) {
+					CFDictionarySetValue(a2, kCTFontAttributeName, prop);
+				}
+				s2 = CFAttributedStringCreate(kCFAllocatorDefault, CFSTR("Th"), a2);
+				l2 = (s2 != NULL) ? CTLineCreateWithAttributedString(s2) : NULL;
+				if (l2 != NULL) {
+					CFArrayRef r2 = CTLineGetGlyphRuns(l2);
+
+					if (r2 != NULL && CFArrayGetCount(r2) > 0) {
+						CGPoint p2[2];
+
+						p2[0] = CGPointMake(0.0, 0.0);
+						p2[1] = CGPointMake(0.0, 0.0);
+						CTRunGetPositions((CTRunRef)CFArrayGetValueAtIndex(r2, 0),
+								  CFRangeMake(0, 2), p2);
+						check(fabs(p2[1].x - tadvance) < 0.01,
+						      "'h' after 'T' is placed %.3f from the pen, want the advance alone (%.3f)",
+						      (double)p2[1].x, tadvance);
+					}
+					CFRelease(l2);
+				}
+				if (s2 != NULL) {
+					CFRelease(s2);
+				}
+				if (a2 != NULL) {
+					CFRelease(a2);
+				}
+			} else {
+				printf("  (note: 'Th' is kerned by %g too, so the unkerned pair was not asked)\n", hkern);
+			}
+		}
+	}
+	CFRelease(prop);
+	return g_fail - before;
+}
+
+
+/* **AND THE FRAMESETTER PATH, WHICH IS WHERE THE APPKIT'S TEXT GOES.** `-drawInRect:withAttributes:` makes a FRAME,
+ * not a line — that is what gives it wrapping — and a frame's lines come from the typesetter, which makes them
+ * through a door no public header names. So there are two ways into a line and only one of them is public, and a
+ * kerning change that reached `CTLineCreateWithAttributedString` and not this one would leave every label, button
+ * and menu item in the AppKit unkerned while a direct CTLine was kerned. That split is what this asks about.
+ */
+static int case_frame_kerning(void)
+{
+	int before = g_fail;
+	CTFontRef prop = CTFontCreateWithName(CFSTR("DejaVu Sans"), 13.0, NULL);
+	UniChar t = 'T', o = 'o';
+	CGGlyph tg[2], og[2];
+	CGSize tadv[2];
+	double kern, advance;
+	CFMutableDictionaryRef attrs;
+	CFAttributedStringRef astr;
+	CTFramesetterRef framesetter;
+	CGMutablePathRef path;
+	CTFrameRef frame;
+	CFArrayRef lines;
+
+	check(prop != NULL, "no proportional face, so the framesetter path cannot be asked");
+	if (prop == NULL) {
+		return g_fail - before;
+	}
+	memset(tg, 0, sizeof tg);
+	memset(og, 0, sizeof og);
+	if (!CTFontGetGlyphsForCharacters(prop, &t, tg, 1)
+	    || !CTFontGetGlyphsForCharacters(prop, &o, og, 1)) {
+		CFRelease(prop);
+		return g_fail - before;
+	}
+	kern = CTFontGetKerningBetweenGlyphs(prop, tg[0], og[0]);
+	advance = CTFontGetAdvancesForGlyphs(prop, kCTFontHorizontalOrientation, tg, tadv, 1);
+
+	attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					  &kCFTypeDictionaryValueCallBacks);
+	if (attrs != NULL) {
+		CFDictionarySetValue(attrs, kCTFontAttributeName, prop);
+	}
+	astr = CFAttributedStringCreate(kCFAllocatorDefault, CFSTR("Toggle the Checkbox"), attrs);
+	framesetter = (astr != NULL) ? CTFramesetterCreateWithAttributedString(astr) : NULL;
+	check(framesetter != NULL, "the framesetter would not take the string");
+	if (framesetter == NULL) {
+		CFRelease(prop);
+		return g_fail - before;
+	}
+	path = CGPathCreateMutable();
+	CGPathAddRect(path, NULL, CGRectMake(0.0, 0.0, 400.0, 20.0));
+	frame = CTFramesetterCreateFrame(framesetter, CFRangeMake(0, 0), path, NULL);
+	lines = (frame != NULL) ? CTFrameGetLines(frame) : NULL;
+	check(lines != NULL && CFArrayGetCount(lines) > 0, "the frame has no lines");
+	if (lines != NULL && CFArrayGetCount(lines) > 0) {
+		CTLineRef line = (CTLineRef)CFArrayGetValueAtIndex(lines, 0);
+		CFArrayRef runs = CTLineGetGlyphRuns(line);
+
+		check(runs != NULL && CFArrayGetCount(runs) > 0, "the line has no runs");
+		if (runs != NULL && CFArrayGetCount(runs) > 0) {
+			CTRunRef run = (CTRunRef)CFArrayGetValueAtIndex(runs, 0);
+			CGPoint pos[2];
+
+			pos[0] = CGPointMake(0.0, 0.0);
+			pos[1] = CGPointMake(0.0, 0.0);
+			CTRunGetPositions(run, CFRangeMake(0, 2), pos);
+			check(fabs(pos[1].x - (advance + kern)) < 0.01,
+			      "the FRAME path places 'o' at %.3f, want %.3f — the advance %.3f plus the kern %.3f, so "
+			      "the AppKit's own text is not kerned", (double)pos[1].x, (double)(advance + kern),
+			      advance, kern);
+		}
+	}
+	CGPathRelease(path);
+	CFRelease(framesetter);
+	if (astr != NULL) {
+		CFRelease(astr);
+	}
+	if (attrs != NULL) {
+		CFRelease(attrs);
+	}
+	CFRelease(prop);
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -4735,6 +4983,8 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The umbrella, and the version of the surface it implements", case_umbrella_version },
 	{ "A line truncates the way Apple prints it, and refuses another font", case_line_truncation },
 	{ "A line justifies at the spaces, by the fraction it is given", case_line_justification },
+	{ "A line is kerned: the font's pair adjustments reach the positions", case_line_kerning },
+	{ "And the FRAMESETTER path is kerned too, which is where the AppKit draws", case_frame_kerning },
 	{ "Matching finds the faces a query describes, in a stable order", case_font_matching },
 	{ "A disabled face leaves every matching answer, and comes back", case_font_visibility },
 	{ "The two halves of the font service speak the same wire", case_font_service_wire },

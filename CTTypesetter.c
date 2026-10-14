@@ -25,6 +25,7 @@
 
 #include <CoreText/CTFont.h>
 #include <CoreText/CTLine_internal.h>
+#include <CoreText/CTFont_internal.h>
 #include <CoreText/CTParagraphStyle.h>
 #include <CoreText/CTStringAttributes.h>
 
@@ -271,8 +272,21 @@ static CFIndex ct_ts_fit(const struct __CTTypesetter *ts, CFIndex start, double 
 	double x = 0.0;
 	CFIndex i = start;
 
-	while (i < ts->count && x + ts->advances[i].width <= width) {
-		x += ts->advances[i].width;
+	while (i < ts->count) {
+		double step = ts->advances[i].width;
+
+		/* **AND THE PAIR'S ADJUSTMENT, BECAUSE THE LINE'S OWN WIDTH HAS IT AND THE TWO MUST AGREE.** An advance
+		 * is what a glyph asks for on its own; a KERN is what the font says about the two glyphs TOGETHER, and
+		 * `CTLine` applies it (see `CTLine.c`). A typesetter that measured without it would break a line at a
+		 * DIFFERENT place than the line then draws it — MEASURED, a menu bar's title measured to its own kerned
+		 * width and then laid out to its unkerned one WRAPPED, and a whole word's worth of ink left the frame. */
+		if (i > start) {
+			step += (double)CTFontGetKerningBetweenGlyphs(ts->font, ts->glyphs[i - 1], ts->glyphs[i]);
+		}
+		if (x + step > width) {
+			break;
+		}
+		x += step;
 		i++;
 	}
 	return i;

@@ -21,6 +21,7 @@
  * include CTFont.h either — a LINE's surface mentions no font at all. The IMPLEMENTATION is a different question,
  * and this is where it answers it. */
 #include <CoreText/CTFont.h>
+#include <CoreText/CTFont_internal.h>
 
 /* AND THE RUN, WHICH A LINE IS MADE OF. `CTRun_internal.h` is NOT part of Core Text's surface — Apple has no public
  * creator for a run, because a line is what makes one — and it is included here so that the two files agree about
@@ -211,9 +212,22 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 
 	memset(advances, 0, (size_t)n * sizeof(CGSize));
 	(void)CTFontGetAdvancesForGlyphs(font, kCTFontHorizontalOrientation, line->glyphs, advances, n);
+	/* **AND THE PAIR'S OWN ADJUSTMENT AFTER EACH GLYPH, WHICH IS WHAT KERNING IS.** An advance is what a glyph
+	 * asks for on its own; a KERN is what the font's typographer said about the two glyphs TOGETHER — that an `o`
+	 * belongs closer under a `T` than their advances put it — and a line that sums advances and stops has thrown
+	 * that opinion away. MEASURED, the face this desktop draws with asks for `To` to close by 348 units of 2048:
+	 * an em's sixth, TWO PIXELS of daylight at 13 points, which is the width of a stem.
+	 *
+	 * IT IS APPLIED TO THE LINE'S OWN WIDTH AS WELL, because it is applied to `x` — so a line measures and draws
+	 * the same string, and every door that reads a position (`CTLineGetOffsetForStringIndex` and the hit test
+	 * above it) is reading the kerned ones because the kern is already inside the difference between two
+	 * positions. */
 	for (i = 0; i < n; i++) {
 		line->positions[i] = CGPointMake((CGFloat)x, 0.0);
 		x += advances[i].width;
+		if (i + 1 < n) {
+			x += (CGFloat)CTFontGetKerningBetweenGlyphs(font, line->glyphs[i], line->glyphs[i + 1]);
+		}
 	}
 	line->glyphCount = n;
 	line->width = x;

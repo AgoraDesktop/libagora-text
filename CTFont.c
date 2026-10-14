@@ -25,6 +25,7 @@
 #include <CoreText/CTFont.h>
 #include <CoreText/CTFontTraits.h>
 #include <CoreText/CTFontDescriptor_internal.h>
+#include <CoreText/CTFont_internal.h>
 /* THE MATCHING TIER'S WALK, WHICH THE FOUR CREATORS THAT ASK A REGISTRY USE AND DO NOT REIMPLEMENT: it is the
  * one place the candidates are gathered and put into this tier's order. */
 #include <CoreText/CTFontMatching_internal.h>
@@ -1504,6 +1505,20 @@ double CTFontGetAdvancesForGlyphs(CTFontRef font, CTFontOrientation orientation,
 	}
 	free(units);
 	return total;
+}
+
+/* **THE PAIR ADJUSTMENT, IN POINTS — THE NUMBER A LINE CANNOT GET FROM THE ADVANCES.** A glyph's advance says how
+ * far the pen moves for that glyph and nothing about which glyph comes next; the font's `kern` table is a statement
+ * about the PAIR, and it is the whole difference between "T" followed by "o" and `To`. The conversion is the same
+ * one every metric here makes: the face's number in font units, times the size over the em. */
+double CTFontGetKerningBetweenGlyphs(CTFontRef font, CGGlyph left, CGGlyph right)
+{
+	const struct __CTFont *f = (const struct __CTFont *)font;
+
+	if (f == NULL) {
+		return 0.0;
+	}
+	return (double)cg_font_kern(f->graphics, left, right) * (double)ct_font_scale(f);
 }
 
 CGRect CTFontGetBoundingRectsForGlyphs(CTFontRef font, CTFontOrientation orientation,
