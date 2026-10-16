@@ -5672,6 +5672,68 @@ static int case_line_bidi_reorder(void)
 	return g_fail - before;
 }
 
+/* **AND THE MIRRORED GLYPH — UAX #9 L4.** A RIGHT-TO-LEFT character is depicted by its mirror, so `(` shows as `)`.
+ * The probe reads it twice: the character rewrite directly, and the GLYPH the line actually asks the font for. */
+static int case_bidi_mirroring(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(13.0);
+
+	/* L4, DIRECTLY. */
+	{
+		UniChar chars[] = { '(', ')', '<', 'a' };
+		uint8_t levels[] = { 1, 1, 1, 1 };
+
+		ct_bidi_mirror(chars, 4, levels);
+		check(chars[0] == ')' && chars[1] == '(' && chars[2] == '>' && chars[3] == 'a',
+		      "L4: an odd level mirrors `(` to `)` and `<` to `>`, and leaves `a` alone");
+	}
+	{
+		UniChar chars[] = { '(' };
+		uint8_t levels[] = { 0 };
+
+		ct_bidi_mirror(chars, 1, levels);
+		check(chars[0] == '(', "L4: an EVEN level is not mirrored");
+	}
+	/* **AND THE LINE ASKS THE FONT FOR THE MIRRORED ONE.** `Hebrew alef`, then `(`: the run's SECOND glyph must be the
+	 * font's glyph for `)`, which is what L4 means in the layout. */
+	check(font != NULL, "the mirroring case has a font");
+	if (font != NULL) {
+		UniChar text[] = { 0x05D0, '(' };
+		CFStringRef s = CFStringCreateWithCharacters(kCFAllocatorDefault, text, 2);
+		CFMutableDictionaryRef attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
+			&kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+		UniChar openChar = '(', closeChar = ')';
+		CGGlyph openGlyph = 0, closeGlyph = 0;
+		CFAttributedStringRef astr;
+		CTLineRef line;
+
+		(void)CTFontGetGlyphsForCharacters(font, &openChar, &openGlyph, 1);
+		(void)CTFontGetGlyphsForCharacters(font, &closeChar, &closeGlyph, 1);
+		CFDictionarySetValue(attrs, kCTFontAttributeName, font);
+		astr = (s != NULL) ? CFAttributedStringCreate(kCFAllocatorDefault, s, attrs) : NULL;
+		line = (astr != NULL) ? CTLineCreateWithAttributedString(astr) : NULL;
+		check(line != NULL, "the mirroring line was made");
+		if (line != NULL) {
+			CFArrayRef runs = CTLineGetGlyphRuns(line);
+			CTRunRef run = (runs != NULL && CFArrayGetCount(runs) > 0)
+				? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
+			const CGGlyph *glyphs = (run != NULL) ? CTRunGetGlyphsPtr(run) : NULL;
+
+			printf("  (the line's glyph for `(` is %u; the font's `)` glyph is %u)\n",
+			       (unsigned)((glyphs != NULL) ? glyphs[1] : 0), (unsigned)closeGlyph);
+			check(glyphs != NULL && closeGlyph != 0 && openGlyph != closeGlyph && glyphs[1] == closeGlyph,
+			      "L4: the LINE looks up the MIRRORED character, not the one in the string");
+			CFRelease(line);
+		}
+		if (astr != NULL) CFRelease(astr);
+		CFRelease(attrs);
+		if (s != NULL) CFRelease(s);
+		CFRelease(font);
+	}
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -5713,6 +5775,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The bracket pairs N0", case_bidi_brackets },
 	{ "The reordering L1 and L2", case_bidi_reordering },
 	{ "A right-to-left line's glyphs are placed right to left", case_line_bidi_reorder },
+	{ "The mirrored glyph L4", case_bidi_mirroring },
 	{ "And the FRAMESETTER path is kerned too, which is where the AppKit draws", case_frame_kerning },
 	{ "Matching finds the faces a query describes, in a stable order", case_font_matching },
 	{ "A disabled face leaves every matching answer, and comes back", case_font_visibility },

@@ -130,4 +130,21 @@ void ct_bidi_reset_levels(const UniChar *text, uint8_t *levels, CFIndex count, i
  * REVERSED. All-even levels mean no reversal at all, which is why a left-to-right line's order is the identity. */
 void ct_bidi_reorder(const uint8_t *levels, CFIndex count, CFIndex *visualOrder);
 
+/* THE MIRRORED GLYPH of a character, generated from the UCD's `BidiMirroring.txt` by `tools/gen-bidi-mirroring.py`:
+ * one row per character that has a mirror, and the character it becomes. */
+struct ct_bidi_mirroring {
+	uint32_t code;
+	uint32_t mirrored;
+};
+
+extern const struct ct_bidi_mirroring ct_bidi_mirrorings[];
+extern const size_t ct_bidi_mirroring_count;
+
+/* **UAX #9 L4: THE MIRRORED GLYPH.** A character whose RESOLVED level is ODD — right to left — is depicted by its
+ * MIRRORED glyph, so `(` shows as `)` in Arabic text and `<` as `>`. The characters are rewritten IN PLACE, before
+ * the glyphs are looked up, so the engine never sees the unmirrored one. A character the table does not name — and
+ * one whose mirror is outside the BMP — is left alone, which is the honest answer for a table that ends where it
+ * does. */
+void ct_bidi_mirror(UniChar *chars, CFIndex count, const uint8_t *levels);
+
 #endif /* CORE_TEXT_CTBIDI_INTERNAL_H */

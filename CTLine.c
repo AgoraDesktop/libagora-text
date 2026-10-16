@@ -190,21 +190,18 @@ static struct __CTLine *ct_line_alloc(void)
  * weak, bracket, neutral and implicit rules, then L1's reset and L2's reorder — the seven calls below are the whole of
  * `CTBidi_internal.h`, which is what that header was built for. The answer is `visualOrder` (visual slot -> logical
  * index), and the return says whether it is NOT the identity, which is what sets `NonMonotonic`. */
-static bool fn_line_bidi_order(const UniChar *chars, CFIndex count, int paragraphLevel, CFIndex *visualOrder)
+static bool fn_line_bidi_order(const UniChar *chars, CFIndex count, int paragraphLevel, CFIndex *visualOrder,
+			       uint8_t *levels)
 {
 	CTBidiClass *classes;
-	uint8_t *levels;
 	bool moved = false;
 	CFIndex i;
 
-	if (chars == NULL || visualOrder == NULL || count <= 0) {
+	if (chars == NULL || visualOrder == NULL || levels == NULL || count <= 0) {
 		return false;
 	}
 	classes = (CTBidiClass *)malloc((size_t)count * sizeof(CTBidiClass));
-	levels = (uint8_t *)malloc((size_t)count * sizeof(uint8_t));
-	if (classes == NULL || levels == NULL) {
-		free(classes);
-		free(levels);
+	if (classes == NULL) {
 		return false;
 	}
 	for (i = 0; i < count; i++) {
@@ -223,8 +220,7 @@ static bool fn_line_bidi_order(const UniChar *chars, CFIndex count, int paragrap
 			break;
 		}
 	}
-	free(classes);
-	free(levels);
+		free(classes);
 	return moved;
 }
 
@@ -320,6 +316,9 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 	CFArrayRef tabs;
 	CFIndex tabCount;
 	double tabInterval = 0.0;
+	uint8_t *levels = NULL;
+	CFIndex *visualOrder = NULL;
+	bool moved = false;
 
 	text = CFAttributedStringGetString(string);
 	n = range.length;
@@ -361,6 +360,25 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 		return NULL;
 	}
 	CFStringGetCharacters(text, range, chars);
+
+	/* **AND THE BIDI PIPELINE RUNS HERE, BEFORE THE GLYPHS ARE LOOKED UP**, because L4 MIRRORS a character whose level
+	 * is odd and the MIRRORED character is the one the font has to be asked for: `(` in Arabic text is `)`. The visual
+	 * order is kept for the placement at the END of this function; `levels` is only needed for the mirroring. */
+	{
+		int paragraphLevel = (line->direction == kCTWritingDirectionRightToLeft) ? 1 : 0;
+
+		levels = (uint8_t *)malloc((size_t)n * sizeof(uint8_t));
+		visualOrder = (CFIndex *)malloc((size_t)n * sizeof(CFIndex));
+		if (levels != NULL && visualOrder != NULL) {
+			moved = fn_line_bidi_order(chars, n, paragraphLevel, visualOrder, levels);
+			ct_bidi_mirror(chars, n, levels);
+		} else {
+			free(levels);
+			free(visualOrder);
+			levels = NULL;
+			visualOrder = NULL;
+		}
+	}
 
 	/* APPLE'S CONTRACT FOR THE GLYPH STEP IS A BOOLEAN, AND A LINE DOES NOT NEED IT: a character the font cannot
 	 * encode becomes glyph 0, which IS `.notdef`, and Apple DRAWS `.notdef` for such a character rather than
@@ -436,42 +454,35 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 	 * indexed by LOGICAL character with a position that says where it GOES. Kerning is taken between VISUAL
 	 * neighbours, because that is the pair the eye sees. */
 	line->advances = advances;
-	if (n > 0) {
-		CFIndex *visualOrder = (CFIndex *)malloc((size_t)n * sizeof(CFIndex));
+	if (visualOrder != NULL && moved) {
+		CGPoint *placed = (CGPoint *)malloc((size_t)n * sizeof(CGPoint));
 
-		if (visualOrder != NULL) {
-			int paragraphLevel = (line->direction == kCTWritingDirectionRightToLeft) ? 1 : 0;
+		if (placed != NULL) {
+			double placedX = 0.0;
+			CFIndex k;
 
-			if (fn_line_bidi_order(chars, n, paragraphLevel, visualOrder)) {
-				CGPoint *placed = (CGPoint *)malloc((size_t)n * sizeof(CGPoint));
+			for (k = 0; k < n; k++) {
+				CFIndex logical = visualOrder[k];
 
-				if (placed != NULL) {
-					double placedX = 0.0;
-					CFIndex k;
-
-					for (k = 0; k < n; k++) {
-						CFIndex logical = visualOrder[k];
-
-						placed[logical] = CGPointMake((CGFloat)placedX, 0.0);
-						placedX += advances[logical].width;
-						if (k + 1 < n && !line->isBox[logical] && !line->isBox[visualOrder[k + 1]]) {
-							placedX += (CGFloat)CTFontGetKerningBetweenGlyphs(font, line->glyphs[logical],
-											line->glyphs[visualOrder[k + 1]]);
-						}
-					}
-					for (k = 0; k < n; k++) {
-						line->positions[k] = placed[k];
-					}
-					line->width = placedX;
-					line->visualOrder = visualOrder;
-					line->nonMonotonic = true;
-					visualOrder = NULL;
-					free(placed);
+				placed[logical] = CGPointMake((CGFloat)placedX, 0.0);
+				placedX += advances[logical].width;
+				if (k + 1 < n && !line->isBox[logical] && !line->isBox[visualOrder[k + 1]]) {
+					placedX += (CGFloat)CTFontGetKerningBetweenGlyphs(font, line->glyphs[logical],
+										line->glyphs[visualOrder[k + 1]]);
 				}
 			}
-			free(visualOrder);
+			for (k = 0; k < n; k++) {
+				line->positions[k] = placed[k];
+			}
+			line->width = placedX;
+			line->visualOrder = visualOrder;
+			line->nonMonotonic = true;
+			visualOrder = NULL;
+			free(placed);
 		}
 	}
+	free(levels);
+	free(visualOrder);
 	free(chars);
 	return (CTLineRef)line;
 }

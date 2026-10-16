@@ -1048,3 +1048,48 @@ void ct_bidi_reorder(const uint8_t *levels, CFIndex count, CFIndex *visualOrder)
 		}
 	}
 }
+
+/* =================================================================================================
+ * UAX #9 L4: THE MIRRORED GLYPH.
+ * =============================================================================================== */
+
+/* THE TABLE'S ANSWER FOR A CODE POINT, or 0 when it has no mirror. */
+static uint32_t fn_mirror_of(uint32_t codePoint)
+{
+	size_t lo = 0;
+	size_t hi = ct_bidi_mirroring_count;
+
+	while (lo < hi) {
+		size_t mid = lo + (hi - lo) / 2;
+		const struct ct_bidi_mirroring *row = &ct_bidi_mirrorings[mid];
+
+		if (codePoint < row->code) {
+			hi = mid;
+		} else if (codePoint > row->code) {
+			lo = mid + 1;
+		} else {
+			return row->mirrored;
+		}
+	}
+	return 0;
+}
+
+void ct_bidi_mirror(UniChar *chars, CFIndex count, const uint8_t *levels)
+{
+	CFIndex i;
+
+	if (chars == NULL || levels == NULL || count <= 0) {
+		return;
+	}
+	for (i = 0; i < count; i++) {
+		/* **L4: ONLY A RIGHT-TO-LEFT CHARACTER IS MIRRORED**, and only when the table names its mirror. A character
+		 * whose mirror is outside the BMP could not be written back into a UniChar, so it is left alone. */
+		if ((levels[i] % 2) != 0) {
+			uint32_t mirrored = fn_mirror_of(chars[i]);
+
+			if (mirrored != 0 && mirrored <= 0xFFFF) {
+				chars[i] = (UniChar)mirrored;
+			}
+		}
+	}
+}
