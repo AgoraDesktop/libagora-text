@@ -10,10 +10,12 @@
  * descent and leading are the line's heights. Everything else in this file is arithmetic over those, or a call to
  * Core Graphics to put the ink on a page.
  *
- * SO IT IS ONE RUN, AND THE HEADER SAYS WHAT THAT COSTS. No line breaking, no two fonts in one line, no
- * bidirectional reordering and no shaping: a character's glyph is drawn where its own advance puts it, in the order
- * the characters appeared. That is stated in CTLine.h as the boundary it is, rather than left for a caller to
- * discover from a wrong layout.
+ * SO IT IS ONE RUN, AND THE HEADER SAYS WHAT THAT COSTS. No line breaking, no two fonts in one line, no SHAPING and
+ * no GLYPH REORDERING: a character's glyph is drawn where its own advance puts it, in the order the characters
+ * appeared. **AND THE BASE WRITING DIRECTION IS THE FIRST PIECE OF BIDI THAT IS READ**: the paragraph's direction is
+ * taken at the line's first character and handed to the run, so `CTRunGetStatus` reports `kCTRunStatusRightToLeft`
+ * for a right-to-left paragraph — while the Unicode Bidirectional Algorithm, which would REORDER the glyphs (and is
+ * what makes a Latin run inside a right-to-left paragraph stay left to right), is the next slice.
  */
 #include <CoreText/CTLine.h>
 
@@ -66,6 +68,9 @@ struct __CTLine {
 	double width;			/* the sum of the advances */
 	CGFloat ascent, descent, leading;
 	double trailingWhitespace;
+	/* **AND THE DIRECTION THE PARAGRAPH RUNS IN**, read once at the line's first character: `kCTRunStatusRightToLeft`
+	 * is what a run REPORTS from it, and reordering the glyphs is the next slice. */
+	CTWritingDirection direction;
 	/* AND ITS ONE RUN, BUILT ON FIRST ASK RATHER THAN AT CREATION: a line that is only measured never pays for a
 	 * run, and a line whose runs are asked for pays for exactly one. `runs` is the ARRAY the door hands out, kept
 	 * so that two calls give a caller the same object rather than two arrays holding the same run. */
@@ -173,6 +178,27 @@ static struct __CTLine *ct_line_alloc(void)
  * lands depends on where the pen ALREADY is, so the stop is chosen while the positions are being walked. Read once at
  * the line's own start, which is right for a single-paragraph line; a line spanning paragraphs with different tab
  * vocabularies is named as owed. */
+/* **AND THE DIRECTION THE PARAGRAPH RUNS IN, WHICH THE RUN REPORTS.** The paragraph style's
+ * `kCTParagraphStyleSpecifierBaseWritingDirection` is read at the line's FIRST character; a NATURAL direction is
+ * answered LEFT-TO-RIGHT, because resolving it needs the Unicode Bidirectional Algorithm and this tier does not
+ * reorder yet — so a run reports the caller's STATED direction, and a natural one is the tier's default. See
+ * `CTRun.h`'s status flags; the REORDERING is the next slice of the bidi milestone. */
+static CTWritingDirection ct_line_base_direction(CFAttributedStringRef string, CFIndex index)
+{
+	CFTypeRef style;
+	CTWritingDirection direction = kCTWritingDirectionNatural;
+
+	if (string == NULL) {
+		return direction;
+	}
+	style = CFAttributedStringGetAttribute(string, index, kCTParagraphStyleAttributeName, NULL);
+	if (style != NULL && CFGetTypeID(style) == CTParagraphStyleGetTypeID()) {
+		(void)CTParagraphStyleGetValueForSpecifier((CTParagraphStyleRef)style,
+			kCTParagraphStyleSpecifierBaseWritingDirection, sizeof direction, &direction);
+	}
+	return direction;
+}
+
 static CFArrayRef ct_line_tab_stops(CFAttributedStringRef string, CFIndex index, double *interval)
 {
 	CFTypeRef style = CFAttributedStringGetAttribute(string, index, kCTParagraphStyleAttributeName, NULL);
@@ -236,6 +262,7 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 	 * out of the MIDDLE of a document reports the range it covers THERE, so a caller laying out line after line never
 	 * has to translate between the line's coordinates and the string's. */
 	line->range = range;
+	line->direction = ct_line_base_direction(string, range.location);
 	/* THE HEIGHTS ARE THE FONT'S AND NOT THE GLYPHS', which is what a framesetter needs: line after line placed
 	 * without measuring glyph by glyph. They are read even for a line of nothing, so that a line still has a
 	 * baseline to sit on. */
@@ -709,8 +736,9 @@ CFArrayRef CTLineGetGlyphRuns(CTLineRef line)
 	 * MANUFACTURE: the font came from these very attributes. */
 	attributes = (l->string == NULL) ? NULL
 					 : CFAttributedStringGetAttributes(l->string, l->range.location, NULL);
-	l->run = CTRunCreateWithAttributesAndGlyphs(attributes, l->font, l->range, indices, l->glyphs,
-						    l->positions, advances, l->isBox, l->glyphCount);
+	l->run = CTRunCreateWithAttributesAndGlyphs(attributes, l->font,
+		(l->direction == kCTWritingDirectionRightToLeft) ? kCTRunStatusRightToLeft : kCTRunStatusNoStatus,
+		l->range, indices, l->glyphs, l->positions, advances, l->isBox, l->glyphCount);
 	free(indices);
 	free(advances);
 	if (l->run == NULL) {
@@ -764,6 +792,7 @@ CTLineRef CTLineCreateWithGlyphs(CFAttributedStringRef string, CFRange range, CT
 	line->string = (string == NULL) ? NULL : (CFAttributedStringRef)CFRetain(string);
 	line->font = (CTFontRef)CFRetain(font);
 	line->range = range;
+	line->direction = ct_line_base_direction(string, range.location);
 	line->ascent = CTFontGetAscent(font);
 	line->descent = CTFontGetDescent(font);
 	line->leading = CTFontGetLeading(font);
@@ -956,6 +985,7 @@ static struct __CTLine *ct_line_with_positions(CFAttributedStringRef string, CFR
 	line->string = (string == NULL) ? NULL : (CFAttributedStringRef)CFRetain(string);
 	line->font = (CTFontRef)CFRetain(font);
 	line->range = range;
+	line->direction = ct_line_base_direction(string, range.location);
 	line->ascent = CTFontGetAscent(font);
 	line->descent = CTFontGetDescent(font);
 	line->leading = CTFontGetLeading(font);

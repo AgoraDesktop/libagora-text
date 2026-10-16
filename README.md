@@ -260,9 +260,11 @@ ctest --test-dir build
   `CGContextShowGlyphsAtPositions`. MEASURED: `text: 17 of 17 cases passed, 0 failed`.
 - **THE SINGLE-RUN BOUNDARY IS STATED RATHER THAN LEFT TO BE DISCOVERED FROM A WRONG LAYOUT.** Apple's own sentence
   for the creator is that "without a typesetter object, the line cannot be properly broken", so this is the simple
-  case and it says what it is: **no line breaking, no two fonts in one line, no bidirectional reordering and no
-  shaping** — a character's glyph is drawn where its own advance puts it, in the order the characters appeared.
-  Multi-run, bidi and complex scripts are the HarfBuzz milestone the Core Text plan already names.
+  case and it says what it is: **no line breaking, no two fonts in one line, no GLYPH REORDERING and no shaping** —
+  a character's glyph is drawn where its own advance puts it, in the order the characters appeared. **AND THE BASE
+  WRITING DIRECTION IS READ NOW**, the first piece of the bidi milestone: the paragraph's direction reaches the run
+  (`CTRunGetStatus` reports `kCTRunStatusRightToLeft`), while the Unicode Bidirectional Algorithm that would reorder
+  the glyphs — and multi-run and complex scripts — are the HarfBuzz milestone the Core Text plan already names.
 - **AND A RUN DELEGATE IS THE ONE NON-GLYPH THE LINE HONORS** (`CTRunDelegate.h`, `kCTRunDelegateAttributeName`): a
   character carrying one is a BOX — its advance is the delegate's width, the line's ascent and descent grow to cover
   the delegate's, and `CTLineDraw` and `CTRunDraw` skip it, so an attachment or a tab occupies space without being a
@@ -311,9 +313,10 @@ ctest --test-dir build
   `ct_run_clamp`, which all eight array doors and both range-taking measurement doors share — eight copies of the
   rule would be eight chances to disagree. The case holds it, and holds that a **part** of the run measures narrower
   than the whole, which is what the line's own doors cannot do.
-- **TWO ANSWERS ARE THIS TIER'S RATHER THAN DERIVED, AND BOTH ARE ASSERTED SO A CHANGE IS DELIBERATE**:
-  `CTRunGetStatus` is `NoStatus` and `CTRunGetTextMatrix` is the identity, because this library does no
-  bidirectional reordering and sets no run matrix. The three status flags exist for the tier that does.
+- **ONE ANSWER IS DERIVED AND ONE IS STILL THIS TIER'S, AND BOTH ARE ASSERTED SO A CHANGE IS DELIBERATE**:
+  `CTRunGetStatus` REPORTS THE LINE'S BASE WRITING DIRECTION — `kCTRunStatusRightToLeft` for a right-to-left
+  paragraph, `NoStatus` otherwise — and `CTRunGetTextMatrix` is the identity, because this library does no GLYPH
+  REORDERING and sets no run matrix. The remaining status flags exist for the tier that reorders.
 - **AND ONE NEW HEADER IS DELIBERATELY NOT PART OF THE SURFACE**: `CTRun_internal.h` carries the constructor seam
   between a run and the line that makes one — Apple has no public creator for a run, since a line is what produces
   one — so that the two files agree about how a run is built instead of one of them `extern`ing what the other
@@ -345,8 +348,9 @@ ctest --test-dir build
   off to a space and reads no paragraph style. Seven advances of `"one two three"` gives **4** from the line door and
   **7** from the cluster door, and the case asserts both numbers rather than that they differ.
 - **WHAT IS NOT ATTEMPTED IS SAID WHERE A CALLER READS IT**: no UAX #14, no hyphenation, and no bidirectional
-  reordering at all — so `kCTTypesetterOptionDisableBidiProcessing` is **recorded and cannot change an answer**, which
-  is the difference between a door that cannot do something and one that pretends it did.
+  reordering YET — so `kCTTypesetterOptionDisableBidiProcessing` is **recorded and cannot change an answer**, which
+  is the difference between a door that cannot do something and one that pretends it did. (The base writing
+  direction is read by the LINE, and its run reports it.)
 - **AND A TYPESET LINE NEEDS A LINE OVER A **RANGE**, WHICH NO PUBLIC HEADER NAMES.** `CTLine_internal.h` is that seam
   — and it carries the font-key accessor too, so the value is written **once** and the line and the typesetter cannot
   disagree about which attribute names a font. The case holds the property that makes it necessary: a line cut from
@@ -682,3 +686,10 @@ normalises it, and the case's own recomputation does too. MEASURED: `100% tests 
 `text: 42 of 42 cases passed, 0 failed`, **155 `CT…` definitions**, and `owed` down to **6** — none of them waiting on
 work this library can do: `feat` (no face here carries one), the two language/encoding mappings (Apple's own tables,
 the user's decision is that they stay owed), the ATS pair (permanent), and the font service's transport (a system).
+- **AND THE BIDI MILESTONE HAS ITS FIRST PIECE: THE BASE WRITING DIRECTION IS READ.** The line takes the paragraph
+  style's `kCTParagraphStyleSpecifierBaseWritingDirection` at its first character, and the run it makes REPORTS it —
+  `CTRunGetStatus` answers `kCTRunStatusRightToLeft` for a right-to-left paragraph, a flag this tier set for nobody
+  until now. A NATURAL direction is the tier's default (left to right), because resolving it needs the Unicode
+  Bidirectional Algorithm. **AND THE ALGORITHM IS THE NEXT SLICE, NAMED**: nothing is REORDERED yet — the
+  non-monotonic flag stays clear — which is exactly what keeps a Latin run inside a right-to-left paragraph from
+  being reversed, the mistake a whole-line flip would make. MEASURED: `text: 47 of 47 cases passed, 0 failed`.

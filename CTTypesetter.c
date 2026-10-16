@@ -16,10 +16,11 @@
  * questions a glyph can answer: whether a character is a NEWLINE (a hard break, in Core Foundation's own vocabulary
  * of newlines rather than in a list written here) and whether it is a SPACE (where word wrapping backs off to).
  *
- * AND WHAT IS ABSENT IS ABSENT LOUDLY. NO BIDIRECTIONAL REORDERING, so `kCTTypesetterOptionDisableBidiProcessing`
+ * AND WHAT IS ABSENT IS ABSENT LOUDLY. NO BIDIRECTIONAL REORDERING YET, so `kCTTypesetterOptionDisableBidiProcessing`
  * cannot change an answer — the option is RECORDED, and a caller that needs UAX #9 is told rather than given a
- * plausible left-to-right layout. NO LINE-BREAKING RULES BEYOND SPACES (nothing of UAX #14, no hyphenation), so a
- * script whose words are not space-separated breaks at the width and no sooner.
+ * plausible left-to-right layout. (The base writing direction IS read, by the LINE, and its run reports it; see
+ * `CTLine.c`.) NO LINE-BREAKING RULES BEYOND SPACES (nothing of UAX #14, no hyphenation), so a script whose words are
+ * not space-separated breaks at the width and no sooner.
  */
 #include <CoreText/CTTypesetter.h>
 

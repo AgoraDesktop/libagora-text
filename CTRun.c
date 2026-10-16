@@ -38,6 +38,9 @@ struct __CTRun {
 	 * flag is NULL when the line has none, and `CTRunDraw` skips the ones that are set. */
 	bool *isBox;			/* malloc'd, count entries, or NULL */
 	CFIndex count;
+	/* **AND WHAT THE RUN SAYS ABOUT ITSELF**, which is `CTRunGetStatus`'s whole answer: the line hands over its own
+	 * base writing direction, so a right-to-left paragraph makes a run that REPORTS `kCTRunStatusRightToLeft`. */
+	CTRunStatus status;
 };
 
 static void ct_run_finalize(CFTypeRef cf)
@@ -58,12 +61,16 @@ static void ct_run_finalize(CFTypeRef cf)
 }
 
 /* TWO RUNS ARE EQUAL WHEN THEY WERE LAID OUT WITH THE SAME ATTRIBUTES, IN THE SAME FONT, OVER THE SAME STRING
- * RANGE: the glyphs and their positions are a FUNCTION of those, so comparing them would compare one fact twice. */
+ * RANGE **AND THE SAME STATUS**: the glyphs and their positions are a FUNCTION of those, so comparing them would
+ * compare one fact twice — and the status is not a function of them, so it is compared. */
 static Boolean ct_run_equal(CFTypeRef cf1, CFTypeRef cf2)
 {
 	const struct __CTRun *a = (const struct __CTRun *)cf1;
 	const struct __CTRun *b = (const struct __CTRun *)cf2;
 
+	if (a->status != b->status) {
+		return false;
+	}
 	if ((a->attributes == NULL) != (b->attributes == NULL) || (a->font == NULL) != (b->font == NULL)) {
 		return false;
 	}
@@ -116,7 +123,8 @@ CFTypeID CTRunGetTypeID(void)
 /* =================================================================================================
  * MAKING ONE. This is the seam CTRun_internal.h exists for; nothing public reaches it.
  * =============================================================================================== */
-CTRunRef CTRunCreateWithAttributesAndGlyphs(CFDictionaryRef attributes, CTFontRef font, CFRange stringRange,
+CTRunRef CTRunCreateWithAttributesAndGlyphs(CFDictionaryRef attributes, CTFontRef font, CTRunStatus status,
+					    CFRange stringRange,
 					    const CFIndex *stringIndices, const CGGlyph *glyphs,
 					    const CGPoint *positions, const CGSize *advances,
 					    const bool *isBox, CFIndex count)
@@ -134,6 +142,7 @@ CTRunRef CTRunCreateWithAttributesAndGlyphs(CFDictionaryRef attributes, CTFontRe
 	run->attributes = (attributes == NULL) ? NULL : (CFDictionaryRef)CFRetain(attributes);
 	run->font = (font == NULL) ? NULL : (CTFontRef)CFRetain(font);
 	run->stringRange = stringRange;
+	run->status = status;
 	run->count = count;
 	if (count == 0) {
 		return (CTRunRef)run;
@@ -206,13 +215,16 @@ CFDictionaryRef CTRunGetAttributes(CTRunRef run)
 	return (r == NULL) ? NULL : r->attributes;
 }
 
-/* NO STATUS, AND THAT IS THE ANSWER RATHER THAN A PLACEHOLDER: a run this tier makes is left to right, monotonic,
- * and drawn under the identity matrix, and the three flags exist for a layout engine that reorders glyphs or sets a
- * run matrix. See CTRun.h's head. */
+/* **THE RUN'S OWN ANSWER ABOUT ITSELF.** Until the bidi milestone began this was `NoStatus` unconditionally, and that
+ * was the answer rather than a placeholder: nothing reordered. Now the LINE reads the paragraph's base writing
+ * direction and hands it to the run, so `kCTRunStatusRightToLeft` is SET when the paragraph runs right to left — the
+ * fact a caller asks this door for. REORDERING the glyphs is the next slice, so `NonMonotonic` stays clear (no string
+ * index has moved) and the matrix flag stays clear (the tier draws no matrix). */
 CTRunStatus CTRunGetStatus(CTRunRef run)
 {
-	(void)run;
-	return kCTRunStatusNoStatus;
+	const struct __CTRun *r = (const struct __CTRun *)run;
+
+	return (r == NULL) ? kCTRunStatusNoStatus : r->status;
 }
 
 const CGGlyph *CTRunGetGlyphsPtr(CTRunRef run)

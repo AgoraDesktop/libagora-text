@@ -5113,6 +5113,86 @@ static int case_text_tab_stops(void)
 	return g_fail - before;
 }
 
+/* **AND THE BASE WRITING DIRECTION, WHICH THE RUN REPORTS.** A paragraph's direction is read at the line's first
+ * character and handed to the run, so a right-to-left paragraph makes a run that says so — the FIRST piece of the
+ * bidi milestone, with the REORDERING (the Unicode Bidirectional Algorithm) named as the next slice. */
+static int case_base_writing_direction(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(13.0);
+	CTParagraphStyleSetting setting;
+	CTWritingDirection value = kCTWritingDirectionRightToLeft;
+	CTParagraphStyleRef rtl = NULL;
+	CTParagraphStyleRef ltr = NULL;
+	CFMutableDictionaryRef attrs = NULL;
+	CFAttributedStringRef astr = NULL;
+	CTLineRef line = NULL;
+	CFArrayRef runs;
+	CTRunRef run;
+	CTRunStatus status;
+
+	setting.spec = kCTParagraphStyleSpecifierBaseWritingDirection;
+	setting.valueSize = sizeof value;
+	setting.value = &value;
+	rtl = CTParagraphStyleCreate(&setting, 1);
+	value = kCTWritingDirectionLeftToRight;
+	setting.value = &value;
+	ltr = CTParagraphStyleCreate(&setting, 1);
+	check(font != NULL && rtl != NULL && ltr != NULL, "the writing-direction styles could not be made");
+	if (font == NULL || rtl == NULL || ltr == NULL) {
+		if (ltr != NULL) CFRelease(ltr);
+		if (rtl != NULL) CFRelease(rtl);
+		if (font != NULL) CFRelease(font);
+		return g_fail - before;
+	}
+	attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					  &kCFTypeDictionaryValueCallBacks);
+	CFDictionarySetValue(attrs, kCTFontAttributeName, font);
+
+	/* A RIGHT-TO-LEFT PARAGRAPH: the run reports the flag, and NOTHING has moved yet. */
+	CFDictionarySetValue(attrs, kCTParagraphStyleAttributeName, rtl);
+	astr = CFAttributedStringCreate(kCFAllocatorDefault, CFSTR("abc"), attrs);
+	line = (astr != NULL) ? CTLineCreateWithAttributedString(astr) : NULL;
+	runs = (line != NULL) ? CTLineGetGlyphRuns(line) : NULL;
+	run = (runs != NULL && CFArrayGetCount(runs) > 0) ? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
+	status = (run != NULL) ? CTRunGetStatus(run) : kCTRunStatusNoStatus;
+	printf("  (a right-to-left paragraph's run reports status %u)\n", (unsigned)status);
+	check(run != NULL && status == kCTRunStatusRightToLeft,
+	      "a right-to-left paragraph's run reports kCTRunStatusRightToLeft");
+	check((status & kCTRunStatusNonMonotonic) == 0,
+	      "and nothing was REORDERED yet, so the non-monotonic flag stays clear");
+	if (line != NULL) CFRelease(line);
+	if (astr != NULL) CFRelease(astr);
+
+	/* A LEFT-TO-RIGHT PARAGRAPH: the tier's ordinary answer, no status. */
+	CFDictionarySetValue(attrs, kCTParagraphStyleAttributeName, ltr);
+	astr = CFAttributedStringCreate(kCFAllocatorDefault, CFSTR("abc"), attrs);
+	line = (astr != NULL) ? CTLineCreateWithAttributedString(astr) : NULL;
+	runs = (line != NULL) ? CTLineGetGlyphRuns(line) : NULL;
+	run = (runs != NULL && CFArrayGetCount(runs) > 0) ? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
+	check(run != NULL && CTRunGetStatus(run) == kCTRunStatusNoStatus,
+	      "a left-to-right paragraph's run reports no status");
+	if (line != NULL) CFRelease(line);
+	if (astr != NULL) CFRelease(astr);
+
+	/* AND A NATURAL DIRECTION IS THE TIER'S DEFAULT — LEFT TO RIGHT — until the algorithm is here. */
+	CFDictionaryRemoveValue(attrs, kCTParagraphStyleAttributeName);
+	astr = CFAttributedStringCreate(kCFAllocatorDefault, CFSTR("abc"), attrs);
+	line = (astr != NULL) ? CTLineCreateWithAttributedString(astr) : NULL;
+	runs = (line != NULL) ? CTLineGetGlyphRuns(line) : NULL;
+	run = (runs != NULL && CFArrayGetCount(runs) > 0) ? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
+	check(run != NULL && CTRunGetStatus(run) == kCTRunStatusNoStatus,
+	      "and a NATURAL direction is the tier's default — left to right");
+	if (line != NULL) CFRelease(line);
+	if (astr != NULL) CFRelease(astr);
+
+	CFRelease(attrs);
+	CFRelease(ltr);
+	CFRelease(rtl);
+	CFRelease(font);
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -5144,6 +5224,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "A line is kerned: the font's pair adjustments reach the positions", case_line_kerning },
 	{ "A run delegate is a box: the line reserves its width and draws no ink", case_run_delegate },
 	{ "A tab lands at its stop, and the fit follows it there", case_text_tab_stops },
+	{ "The base writing direction reaches the run as a status", case_base_writing_direction },
 	{ "And the FRAMESETTER path is kerned too, which is where the AppKit draws", case_frame_kerning },
 	{ "Matching finds the faces a query describes, in a stable order", case_font_matching },
 	{ "A disabled face leaves every matching answer, and comes back", case_font_visibility },

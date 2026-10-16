@@ -18,10 +18,12 @@
  * ascent, descent and leading. SO EVERY CHARACTER IN THE STRING IS IN THE LINE, the string range is the whole
  * string, and the width is the sum of the advances.
  *
- * WHAT IS THEREFORE NOT ATTEMPTED, SAID PLAINLY: MULTI-RUN LINES, BIDIRECTIONAL TEXT, AND SHAPING. A line with
+ * WHAT IS THEREFORE NOT ATTEMPTED, SAID PLAINLY: MULTI-RUN LINES, GLYPH REORDERING, AND SHAPING. A line with
  * two fonts, a right-to-left run inside a left-to-right one, or a script needing ligatures or contextual forms
- * is NOT laid out correctly here — every glyph is drawn in the order its character appeared. That is the
- * HarfBuzz milestone this project's Core Text plan already names, and it is not a signature's problem.
+ * is NOT laid out correctly here — every glyph is drawn in the order its character appeared. **AND THE BASE WRITING
+ * DIRECTION IS NOW READ**: the paragraph's direction reaches the run (`CTRunGetStatus`), which is the FIRST piece of
+ * the bidi milestone; the Unicode Bidirectional Algorithm that would REORDER the glyphs is the next. That, multi-run
+ * and complex scripts are the HarfBuzz milestone this project's Core Text plan already names.
  *
  * **A RUN DELEGATE, THOUGH, IS HONORED.** A character whose attributes carry `kCTRunDelegateAttributeName` is a BOX:
  * its advance is the delegate's width rather than the placeholder glyph's, the line's ascent and descent grow to cover

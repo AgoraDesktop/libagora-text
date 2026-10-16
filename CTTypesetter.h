@@ -21,9 +21,11 @@
  * hyphenation opportunities, gets the character-level answer instead — and `CTTypesetterSuggestClusterBreak` is the
  * door for a caller that wants the character-level answer ON PURPOSE.
  *
- * AND BIDI IS ABSENT RATHER THAN OPTIONAL. Apple's default is to apply the Unicode Bidirectional Algorithm, with an
- * option to switch it off — THIS TIER NEVER REORDERS ANYTHING, so the option is RECORDED and not obeyed, and a caller
- * who needs directionality is not answered by pretending. See `CTTypesetter.c`.
+ * AND BIDI IS HALF-READ RATHER THAN PRETENDED. Apple's default is to apply the Unicode Bidirectional Algorithm, with
+ * an option to switch it off — THIS TIER NEVER REORDERS ANYTHING YET, so the option is RECORDED and not obeyed, and a
+ * caller who needs directionality is not answered by pretending. What the milestone has STARTED with is the base
+ * writing direction: a LINE reads the paragraph's direction and its run reports it (`CTRunGetStatus`), while the
+ * algorithm that would reorder the glyphs is the next slice. See `CTTypesetter.c` and `CTLine.c`.
  */
 #ifndef CORE_TEXT_CTTYPESETTER_H
 #define CORE_TEXT_CTTYPESETTER_H

@@ -21,10 +21,11 @@
  * THEM CONTIGUOUS AND OWNS THEM, so the pointer is always there — which is a stronger answer than Apple's, and is
  * recorded as the fact about this implementation that it is.
  *
- * THE OTHER TWO ANSWERS THIS TIER GIVES ARE RECORDED RATHER THAN DERIVED. `CTRunGetStatus` is `NoStatus`, and
- * `CTRunGetTextMatrix` is the identity: this library does no bidirectional reordering and sets no run matrix, so
- * the flags and the matrix exist for the tier that does. Neither is a guess — the enum is Apple's and its
- * members are named below — they are the answers the one-run layout has.
+ * **AND ONE OF THE TWO ANSWERS THIS TIER GIVES IS NOW READ RATHER THAN FIXED.** `CTRunGetStatus` reports the LINE's
+ * base writing direction — `kCTRunStatusRightToLeft` when the paragraph said so, and `NoStatus` otherwise — so the
+ * flag that exists for a direction is set from the one the caller STATED. `CTRunGetTextMatrix` is still the identity
+ * and `NonMonotonic` is still clear, because this library does no GLYPH REORDERING and sets no run matrix: the base
+ * direction is READ, and the Unicode Bidirectional Algorithm that would use it is the next slice of the milestone.
  */
 #ifndef CORE_TEXT_CTRUN_H
 #define CORE_TEXT_CTRUN_H
