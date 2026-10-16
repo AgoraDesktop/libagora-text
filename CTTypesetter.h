@@ -15,8 +15,12 @@
  * until the width is full.
  *
  * WHAT IS NOT ATTEMPTED, SAID WHERE A CALLER READS IT. The Unicode line-breaking rules (UAX #14), hyphenation, and the
- * rules for scripts whose words are not separated by spaces are NOT implemented: word wrapping here backs off to the
- * last SPACE that fits, which is what Apple's own description of that mode says ("Wrapping occurs at word boundaries,
+ * rules for scripts whose words are not separated by spaces are NOT implemented. **AND HYPHENATION IS NOT MERELY
+ * ABSENT HERE, IT IS SOMEWHERE ELSE — WHICH IS A FACT WORTH STATING WHERE A CALLER LOOKS FOR IT.** Core Text's
+ * typesetter does not hyphenate either, on the platform this follows; the resource is Core Foundation's, and this tree
+ * now answers it (`libagora-core/CFHyphenation.c`: `CFStringGetHyphenationLocationBeforeIndex`). The door for a caller
+ * that wants to do the breaking itself is `CTTypesetterSuggestClusterBreak`, named below. Word wrapping here backs off
+ * to the last SPACE that fits, which is what Apple's own description of that mode says ("Wrapping occurs at word boundaries,
  * unless the word itself doesn't fit on a single line") and no more than that. A caller typesetting Thai, or expecting
  * hyphenation opportunities, gets the character-level answer instead — and `CTTypesetterSuggestClusterBreak` is the
  * door for a caller that wants the character-level answer ON PURPOSE.
