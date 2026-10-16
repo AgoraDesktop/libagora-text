@@ -87,6 +87,14 @@ struct __CTLine {
 	/* **AND THE ADVANCES ARE KEPT WHEN THE LINE IS REORDERED**, because a glyph's advance is no longer the distance to
 	 * the next POSITION — the next position is a different character. NULL for a line in logical order. */
 	CGSize *advances;		/* malloc'd, glyphCount entries, or NULL */
+	/* **AND WHICH CHARACTER EACH GLYPH STANDS FOR, WHICH IS A MAP AND NOT ARITHMETIC.** A glyph can stand for
+	 * several characters — a ligature, a Devanagari conjunct — and a character can be several glyphs, so the
+	 * correspondence between the two cannot be an index: `clusters[g]` is the offset WITHIN THE LINE'S RANGE of the
+	 * first character the glyph `g` stands for, and a character inside a group answers with that group's glyph, which
+	 * is what makes a caret stick to a ligature instead of landing inside it. **IT IS FILLED WITH THE IDENTITY WHEN
+	 * THE LINE IS NOT SHAPED**, so every door below reads one map and the one-glyph-per-character case is the case
+	 * where the map happens to be `clusters[g] == g`. */
+	CFIndex *clusters;		/* malloc'd, glyphCount entries */
 	/* **AND THE VISUAL ORDER, WHEN IT IS NOT THE LOGICAL ONE**: `visualOrder[k]` is the logical index in visual slot
 	 * `k`, which is what the hit test walks and what makes the run report `NonMonotonic`. NULL = logical order. */
 	CFIndex *visualOrder;		/* malloc'd, glyphCount entries, or NULL */
@@ -132,6 +140,7 @@ static void ct_line_finalize(CFTypeRef cf)
 	free(line->glyphs);
 	free(line->positions);
 	free(line->advances);
+	free(line->clusters);
 	free(line->visualOrder);
 	free(line->levels);
 	free(line->isBox);
@@ -493,7 +502,12 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 	line->positions = (CGPoint *)malloc((size_t)n * sizeof(CGPoint));
 	advances = (CGSize *)malloc((size_t)n * sizeof(CGSize));
 	line->isBox = (bool *)calloc((size_t)n, sizeof(bool));
-	if (chars == NULL || line->glyphs == NULL || line->positions == NULL || advances == NULL || line->isBox == NULL) {
+	/* **THE CLUSTER MAP, IDENTITY-FILLED, WHICH IS WHAT ONE GLYPH PER CHARACTER MEANS.** Shaping replaces this fill
+	 * with what the shaper answers (see the header's note on what is still owed); until then every other door in this
+	 * file reads the map and gets exactly the index it used to compute. */
+	line->clusters = (CFIndex *)malloc((size_t)n * sizeof(CFIndex));
+	if (chars == NULL || line->glyphs == NULL || line->positions == NULL || advances == NULL || line->isBox == NULL
+	    || line->clusters == NULL) {
 		free(chars);
 		free(advances);
 		/* THE LINE IS RELEASED RATHER THAN FIXED UP: it is a fresh Core Foundation object with one reference, so
@@ -503,6 +517,9 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 		return NULL;
 	}
 	CFStringGetCharacters(text, range, chars);
+	for (i = 0; i < n; i++) {
+		line->clusters[i] = i;
+	}
 
 	/* **AND THE BIDI PIPELINE RUNS HERE, BEFORE THE GLYPHS ARE LOOKED UP**, because L4 MIRRORS a character whose level
 	 * is odd and the MIRRORED character is the one the font has to be asked for: `(` in Arabic text is `)`. The visual
@@ -919,6 +936,41 @@ static CGFloat ct_line_advance_at(const struct __CTLine *line, CFIndex i)
 	return (CGFloat)(line->width - line->positions[i].x);
 }
 
+/* **THE GLYPH A CHARACTER BELONGS TO, AND THE NEXT BOUNDARY AFTER IT, WHICH ARE THE TWO QUESTIONS A CARET ASKS.**
+ * Both are read off `line->clusters` rather than computed from an index, because the correspondence between
+ * characters and glyphs is a MAP: a ligature or a conjunct is several characters on one glyph, and a base with its
+ * mark is one character on two. The owner is the glyph whose cluster is the GREATEST cluster at or before the
+ * character, so a character inside a group answers with the group's own glyph — which is what makes a caret stick to
+ * a ligature instead of landing inside it. **THE SEARCH IS OVER EVERY GLYPH RATHER THAN A WALK**, because a
+ * right-to-left run's clusters DESCEND and a walk in either direction would be a guess about which.
+ *
+ * AND THE IDENTITY MAP MAKES BOTH OF THEM THE ARITHMETIC THEY REPLACE: with `clusters[g] == g`, "the glyph whose
+ * cluster is the greatest at or before `c`" IS `c`, and "the next boundary after `c`" IS `c + 1`. That is why the
+ * change that introduced them moved no answer in the suite. */
+static CFIndex fn_line_cluster_owner(const struct __CTLine *line, CFIndex charIndex)
+{
+	CFIndex g, owner = -1;
+
+	for (g = 0; g < line->glyphCount; g++) {
+		if (line->clusters[g] <= charIndex && (owner < 0 || line->clusters[g] > line->clusters[owner])) {
+			owner = g;
+		}
+	}
+	return owner;
+}
+
+static CFIndex fn_line_next_cluster(const struct __CTLine *line, CFIndex charIndex)
+{
+	CFIndex g, next = line->range.length;
+
+	for (g = 0; g < line->glyphCount; g++) {
+		if (line->clusters[g] > charIndex && line->clusters[g] < next) {
+			next = line->clusters[g];
+		}
+	}
+	return next;
+}
+
 CFIndex CTLineGetStringIndexForPosition(CTLineRef line, CGPoint position)
 {
 	const struct __CTLine *l = (const struct __CTLine *)line;
@@ -934,25 +986,29 @@ CFIndex CTLineGetStringIndexForPosition(CTLineRef line, CGPoint position)
 
 		for (k = 0; k < l->glyphCount; k++) {
 			CFIndex logical = l->visualOrder[k];
+			CFIndex here = l->clusters[logical];
+			CFIndex after = fn_line_next_cluster(l, here);
 			CGFloat advance = ct_line_advance_at(l, logical);
 			CGFloat midpoint = l->positions[logical].x + advance / 2.0f;
 			bool rtl = (l->levels != NULL) && ((l->levels[logical] % 2) != 0);
 
-			/* **THE HALF THE POINT FELL IN DECIDES WHICH SIDE OF THE CHARACTER THE CARET IS ON**, and which logical
-			 * index that is depends on the character's OWN direction: a right-to-left glyph's caret-before is on its
-			 * RIGHT, so its left half belongs to the character AFTER it. */
+			/* **THE HALF THE POINT FELL IN DECIDES WHICH SIDE OF THE GLYPH THE CARET IS ON**, and which CHARACTER
+			 * boundary that is depends on the glyph's OWN direction: a right-to-left glyph's caret-before is on its
+			 * RIGHT, so its left half belongs to the character AFTER the group. `here` and `after` are CLUSTER
+			 * BOUNDARIES rather than indices, so a glyph standing for three characters answers with the group's own
+			 * boundaries at both ends. */
 			if (position.x < midpoint) {
-				CFIndex answer = rtl ? (logical + 1) : logical;
+				CFIndex answer = rtl ? after : here;
 
-				return (answer > l->glyphCount) ? l->glyphCount : answer;
+				return (answer > l->range.length) ? l->range.length : answer;
 			}
 			if (position.x < l->positions[logical].x + advance) {
-				CFIndex answer = rtl ? logical : (logical + 1);
+				CFIndex answer = rtl ? here : after;
 
-				return (answer > l->glyphCount) ? l->glyphCount : answer;
+				return (answer > l->range.length) ? l->range.length : answer;
 			}
 		}
-		return l->glyphCount;
+		return l->range.length;
 	}
 	/* THE NEAREST BOUNDARY WINS: a click belongs to the character whose half of the advance it fell in. Before the
 	 * first glyph is index 0 and past the last is one past the last character, which is Apple's own bound for this
@@ -961,10 +1017,10 @@ CFIndex CTLineGetStringIndexForPosition(CTLineRef line, CGPoint position)
 		CGFloat midpoint = l->positions[i].x + ct_line_advance_at(l, i) / 2.0f;
 
 		if (position.x < midpoint) {
-			return i;
+			return l->clusters[i];
 		}
 	}
-	return l->glyphCount;
+	return l->range.length;
 }
 
 CGFloat CTLineGetOffsetForStringIndex(CTLineRef line, CFIndex charIndex, CGFloat *secondaryOffset)
@@ -983,17 +1039,27 @@ CGFloat CTLineGetOffsetForStringIndex(CTLineRef line, CFIndex charIndex, CGFloat
 	} else if (l->levels == NULL) {
 		/* **A LINE THAT NEVER RAN THE PIPELINE IS IN LOGICAL ORDER**, so its leading edge IS its left one and the end of
 		 * the line is its width — the answer this door has always given. */
-		offset = (charIndex >= l->glyphCount) ? (CGFloat)l->width : l->positions[charIndex].x;
-	} else if (charIndex < l->glyphCount) {
-		/* **APPLE'S LEADING EDGE, WHICH IS A SIDE AND NOT AN x.** A LEFT-TO-RIGHT character's leading edge is its left
-		 * one; a RIGHT-TO-LEFT character's is its RIGHT one, because that is the side the caret sits on when the
-		 * character is about to be typed. */
-		CGFloat advance = ct_line_advance_at(l, charIndex);
+		CFIndex owner = fn_line_cluster_owner(l, (charIndex >= l->range.length) ? l->range.length - 1 : charIndex);
 
-		offset = l->positions[charIndex].x + (((l->levels[charIndex] % 2) != 0) ? advance : 0.0);
+		offset = (charIndex >= l->range.length || owner < 0) ? (CGFloat)l->width : l->positions[owner].x;
+	} else if (charIndex < l->range.length) {
+		/* **APPLE'S LEADING EDGE, WHICH IS A SIDE AND NOT AN x.** A LEFT-TO-RIGHT glyph's leading edge is its left one;
+		 * a RIGHT-TO-LEFT glyph's is its RIGHT one, because that is the side the caret sits on when the character is
+		 * about to be typed. AND IT IS THE **GLYPH'S** EDGE, not the character's, because the character may not have one
+		 * of its own: every index inside a ligature answers with the ligature's edge, which is what makes a caret stop
+		 * at a ligature rather than inside it. */
+		CFIndex owner = fn_line_cluster_owner(l, charIndex);
+
+		if (owner < 0) {
+			offset = 0.0;
+		} else {
+			CGFloat advance = ct_line_advance_at(l, owner);
+
+			offset = l->positions[owner].x + (((l->levels[owner] % 2) != 0) ? advance : 0.0);
+		}
 	} else {
 		/* AND ONE PAST THE LAST CHARACTER IS ITS TRAILING EDGE. */
-		CFIndex last = l->glyphCount - 1;
+		CFIndex last = fn_line_cluster_owner(l, l->range.length - 1);
 
 		if (last >= 0 && (l->levels[last] % 2) != 0) {
 			offset = l->positions[last].x;
@@ -1068,7 +1134,10 @@ CFArrayRef CTLineGetGlyphRuns(CTLineRef line)
 			return NULL;
 		}
 		for (k = 0; k < count; k++) {
-			indices[k] = start + k;
+			/* **THE RUN'S STRING INDICES COME FROM THE CLUSTER MAP**, which is where a glyph's character now lives:
+			 * `start + k` is the run's GLYPH index and `clusters[start + k]` is the character it stands for, so a run
+			 * whose glyphs each stand for one character reports exactly the sequence it always did. */
+			indices[k] = l->clusters[start + k];
 			advances[k] = CGSizeMake(ct_line_advance_at(l, start + k), 0.0);
 		}
 		attributes = (l->string == NULL) ? NULL
@@ -1139,8 +1208,9 @@ CTLineRef CTLineCreateWithGlyphs(CFAttributedStringRef string, CFRange range, CT
 	}
 	line->glyphs = (CGGlyph *)malloc((size_t)count * sizeof(CGGlyph));
 	line->positions = (CGPoint *)malloc((size_t)count * sizeof(CGPoint));
+	line->clusters = (CFIndex *)malloc((size_t)count * sizeof(CFIndex));
 	advances = (CGSize *)malloc((size_t)count * sizeof(CGSize));
-	if (line->glyphs == NULL || line->positions == NULL || advances == NULL) {
+	if (line->glyphs == NULL || line->positions == NULL || line->clusters == NULL || advances == NULL) {
 		free(advances);
 		CFRelease((CFTypeRef)line);
 		return NULL;
@@ -1150,6 +1220,9 @@ CTLineRef CTLineCreateWithGlyphs(CFAttributedStringRef string, CFRange range, CT
 	(void)CTFontGetAdvancesForGlyphs(font, kCTFontHorizontalOrientation, line->glyphs, advances, count);
 	for (i = 0; i < count; i++) {
 		line->positions[i] = CGPointMake((CGFloat)x, 0.0);
+		/* **THE IDENTITY AGAIN: THIS DOOR IS HANDED GLYPHS**, so glyph `i` is character `i` and the caret doors have
+		 * one straight answer per glyph. */
+		line->clusters[i] = i;
 		x += advances[i].width;
 	}
 	line->glyphCount = count;
@@ -1332,12 +1405,22 @@ static struct __CTLine *ct_line_with_positions(CFAttributedStringRef string, CFR
 	}
 	line->glyphs = (CGGlyph *)malloc((size_t)count * sizeof(CGGlyph));
 	line->positions = (CGPoint *)malloc((size_t)count * sizeof(CGPoint));
-	if (line->glyphs == NULL || line->positions == NULL) {
+	line->clusters = (CFIndex *)malloc((size_t)count * sizeof(CFIndex));
+	if (line->glyphs == NULL || line->positions == NULL || line->clusters == NULL) {
 		CFRelease((CFTypeRef)line);
 		return NULL;
 	}
 	memcpy(line->glyphs, glyphs, (size_t)count * sizeof(CGGlyph));
 	memcpy(line->positions, positions, (size_t)count * sizeof(CGPoint));
+	/* **AND THE CORRESPONDENCE IS THE IDENTITY, WHICH IS THIS DOOR'S OWN MEANING**: it is handed the glyphs the line
+	 * ABOVE it already made, so glyph `i` stands for character `range.location + i` and there is nothing to map. */
+	{
+		CFIndex c;
+
+		for (c = 0; c < count; c++) {
+			line->clusters[c] = c;
+		}
+	}
 	line->glyphCount = count;
 	/* THE WIDTH IS THE LAST GLYPH'S ORIGIN PLUS THAT GLYPH'S OWN ADVANCE — and the last advance comes from the FONT,
 	 * because only the SPACES were given new room: the final glyph is exactly as wide as it always was. Position

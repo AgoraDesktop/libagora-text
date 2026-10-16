@@ -6463,6 +6463,102 @@ static int case_shaping_edges(void)
 	return g_fail - before;
 }
 
+/* **THE CORRESPONDENCE BETWEEN A GLYPH AND THE CHARACTERS IT STANDS FOR, WHICH IS NOW A MAP RATHER THAN AN INDEX.**
+ * The line holds `clusters` — one entry per glyph, saying which character it begins at — and every door that used to
+ * compute "the glyph for character i" as "i" now reads that map: the two caret doors, and the string indices a run
+ * reports.
+ *
+ * **THIS CASE IS A CONTRACT RATHER THAN A MEASUREMENT OF SHAPING, AND IT IS WRITTEN SO THAT IT SURVIVES SHAPING BEING
+ * SWITCHED ON.** What it asserts is what is true of a NON-LIGATING string in a face that ligates nothing: one glyph
+ * per character, each glyph's cluster its own index, and the run reporting 0..length-1. A string where the face DOES
+ * ligate would give fewer glyphs — which is what the engine's own cases measure — so the case picks text with no
+ * ligature pair in it and says why.
+ *
+ * AND THE DURABLE HALF IS THE CARET CONTRACT: for a left-to-right line the offsets for 0..length are NON-DECREASING
+ * from 0 to the width, whatever the glyph count is, because a caret may stand at a cluster boundary rather than at a
+ * character. That is true of the identity map and of a shaped one, which is why it is asserted here. */
+static int case_cluster_map(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(13.0);
+	/* `abc def` HAS NO LIGATURE PAIR IN IT, so one glyph per character is what ANY face answers for it. */
+	UniChar text[] = { 'a', 'b', 'c', ' ', 'd', 'e', 'f' };
+	CFStringRef str = (font != NULL) ? CFStringCreateWithCharacters(kCFAllocatorDefault, text, 7) : NULL;
+	CFMutableDictionaryRef attrs = NULL;
+	CFAttributedStringRef astr = NULL;
+
+	check(font != NULL && str != NULL, "the cluster case could not be set up");
+	if (font == NULL || str == NULL) {
+		if (str != NULL) CFRelease(str);
+		if (font != NULL) CFRelease(font);
+		return g_fail - before;
+	}
+	attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					  &kCFTypeDictionaryValueCallBacks);
+	CFDictionarySetValue(attrs, kCTFontAttributeName, font);
+	astr = CFAttributedStringCreate(kCFAllocatorDefault, str, attrs);
+	{
+		CTLineRef line = (astr != NULL) ? CTLineCreateWithAttributedString(astr) : NULL;
+
+		check(line != NULL, "the cluster case's line was made");
+		if (line != NULL) {
+			CFArrayRef runs = CTLineGetGlyphRuns(line);
+			CTRunRef run = (runs != NULL && CFArrayGetCount(runs) > 0)
+				? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
+			const CFIndex *indices = (run != NULL) ? CTRunGetStringIndicesPtr(run) : NULL;
+			CFIndex count = (run != NULL) ? CTRunGetGlyphCount(run) : 0;
+			CFIndex i;
+			Boolean identity = (count == 7) && (indices != NULL);
+
+			for (i = 0; identity && i < 7; i++) {
+				if (indices[i] != i) {
+					identity = false;
+				}
+			}
+			printf("  (a non-ligating string: %ld characters -> %ld glyphs, the run's indices %ld..%ld)\n",
+			       (long)CTLineGetGlyphCount(line), (long)count,
+			       (long)((indices != NULL && count > 0) ? indices[0] : -1),
+			       (long)((indices != NULL && count > 0) ? indices[count - 1] : -1));
+			check(identity, "seven characters with no ligature pair shape to seven glyphs, each reporting its own "
+					"character as its string index");
+			/* **THE CARET CONTRACT, WHICH IS WHAT SURVIVES SHAPING.** */
+			{
+				CGFloat previous = -1.0;
+				Boolean ascending = true;
+
+				for (i = 0; i <= 7; i++) {
+					CGFloat at = CTLineGetOffsetForStringIndex(line, i, NULL);
+
+					if (at < previous - 0.001) {
+						ascending = false;
+					}
+					previous = at;
+				}
+				check(ascending, "and the caret offsets for 0..7 are non-decreasing, whatever the glyph count is");
+				check(CTLineGetOffsetForStringIndex(line, 0, NULL) == 0.0,
+				      "with the caret before the first character at the line's origin");
+				check(fabs((double)CTLineGetOffsetForStringIndex(line, 7, NULL)
+					   - CTLineGetTypographicBounds(line, NULL, NULL, NULL)) < 0.01,
+				      "and the one past the last character at the line's width");
+			}
+			/* AND THE HIT TEST ANSWERS WITH A CHARACTER, not a glyph index: a point in the middle of the line
+			 * answers a character the string actually has. */
+			{
+				CFIndex at = CTLineGetStringIndexForPosition(line, CGPointMake(
+					(CGFloat)(CTLineGetTypographicBounds(line, NULL, NULL, NULL) / 2.0), 0.0));
+
+				check(at >= 0 && at <= 7, "the hit test answers a character in 0..7, and said %ld", (long)at);
+			}
+			CFRelease(line);
+		}
+	}
+	if (astr != NULL) CFRelease(astr);
+	CFRelease(attrs);
+	CFRelease(str);
+	CFRelease(font);
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -6523,6 +6619,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The traits dictionary: four keys and one anchor each", case_font_traits_dictionary },
 	{ "The slant angle is the face's plus the matrix's, in degrees", case_font_slant_angle },
 	{ "The vertical origin is half the advance and the ascent", case_font_vertical_origin },
+	{ "The glyph-to-character map the caret doors read", case_cluster_map },
 	{ "A ligature is one glyph for three characters", case_shaping_ligatures },
 	{ "A pair adjustment reaches the advances", case_shaping_kerning },
 	{ "A combining mark, composed in one face and attached in another", case_shaping_marks },
