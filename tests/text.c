@@ -5264,6 +5264,68 @@ static int case_bidi_paragraph_level(void)
 	return g_fail - before;
 }
 
+/* **AND THE EXPLICIT LEVELS — UAX #9 X1-X8.** An embedding, an override or an isolate changes the level for what
+ * follows, so the walk keeps a STACK; the probe reads the level of the ORDINARY characters (the controls' own levels
+ * do not matter, because X9 removes them) and the override's effect on a class. */
+static int case_bidi_explicit_levels(void)
+{
+	int before = g_fail;
+	uint8_t levels[16];
+	CTBidiClass classes[16];
+
+	/* RLE ... PDF: the level rises to 1 and the PDF brings it back, and both controls are REMOVED. */
+	{
+		UniChar text[] = { 'a', 0x202B, 'b', 0x202C, 'c' };
+
+		check(ct_bidi_explicit_levels(text, 5, 0, levels, classes), "the explicit walk runs");
+		check(levels[0] == 0 && levels[2] == 1 && levels[4] == 0,
+		      "an RLE raises the level to 1 and the PDF brings it back");
+		check(classes[1] == kCTBidiBN && classes[3] == kCTBidiBN, "and the two controls are REMOVED (BN)");
+		check(classes[2] == kCTBidiL, "while the character inside keeps its class (no override)");
+	}
+	/* RLO: the level rises AND the class is overridden. */
+	{
+		UniChar text[] = { 0x202E, 'a', 0x202C };
+
+		check(ct_bidi_explicit_levels(text, 3, 0, levels, classes), "the override walk runs");
+		check(levels[1] == 1, "an RLO raises the level to 1");
+		check(classes[1] == kCTBidiR, "and OVERRIDES the character's class to R");
+	}
+	/* LRE inside a RIGHT-TO-LEFT paragraph: the next even level above 1 is 2. */
+	{
+		UniChar text[] = { 0x202A, 'a', 0x202C };
+
+		check(ct_bidi_explicit_levels(text, 3, 1, levels, classes), "the LRE walk runs");
+		check(levels[1] == 2, "an LRE inside a right-to-left paragraph raises the level to 2");
+	}
+	/* LRI ... PDI: an ISOLATE is not an embedding — nothing leaks out of it. */
+	{
+		UniChar text[] = { 0x2066, 'a', 0x2069, 'b' };
+
+		check(ct_bidi_explicit_levels(text, 4, 0, levels, classes), "the isolate walk runs");
+		check(levels[1] == 2, "an LRI raises the level to 2 INSIDE the isolate");
+		check(levels[3] == 0, "and the PDI brings it back for what FOLLOWS");
+	}
+	/* RLI: the least odd level above 0. */
+	{
+		UniChar text[] = { 0x2067, 'a', 0x2069 };
+
+		check(ct_bidi_explicit_levels(text, 3, 0, levels, classes), "the RLI walk runs");
+		check(levels[1] == 1, "an RLI raises the level to 1 inside the isolate");
+	}
+	/* AN FSI IS X5c: its own P2/P3 decides which of the two it is. */
+	{
+		UniChar hebrew[] = { 0x2068, 0x05D0, 0x2069 };
+		UniChar latin[] = { 0x2068, 'a', 0x2069 };
+
+		check(ct_bidi_explicit_levels(hebrew, 3, 0, levels, classes), "the FSI walk runs (Hebrew)");
+		check(levels[1] == 1, "an FSI whose text is Hebrew isolates it RIGHT to left");
+		check(ct_bidi_explicit_levels(latin, 3, 0, levels, classes), "the FSI walk runs (Latin)");
+		check(levels[1] == 2, "and one whose text is Latin isolates it LEFT to right");
+	}
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -5297,6 +5359,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "A tab lands at its stop, and the fit follows it there", case_text_tab_stops },
 	{ "The base writing direction reaches the run as a status", case_base_writing_direction },
 	{ "The bidi classes, and the paragraph level P2/P3 reads", case_bidi_paragraph_level },
+	{ "The explicit levels: embeddings, overrides and isolates", case_bidi_explicit_levels },
 	{ "And the FRAMESETTER path is kerned too, which is where the AppKit draws", case_frame_kerning },
 	{ "Matching finds the faces a query describes, in a stable order", case_font_matching },
 	{ "A disabled face leaves every matching answer, and comes back", case_font_visibility },

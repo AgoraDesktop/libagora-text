@@ -692,7 +692,12 @@ the user's decision is that they stay owed), the ATS pair (permanent), and the f
   answers it, and anything the table does not name is L. **AND P2/P3 ARE BUILT ON IT** (`ct_bidi_paragraph_level`): the
   FIRST STRONG character — L is level 0, R/AL is level 1 — while STEPPING OVER an isolate run, with the caller's
   fallback when there is none. The line uses it to RESOLVE a natural direction, so a paragraph of Hebrew is level 1
-  without the caller stating anything, and the run it makes REPORTS it through `CTRunGetStatus`. **AND THE REST OF THE
-  ALGORITHM IS THE NEXT SLICE, NAMED**: the X/W/N/I rules give every OTHER character a level, and L1/L2 put them in
-  visual order — nothing is REORDERED yet, which is exactly what keeps a Latin run inside a right-to-left paragraph
-  from being reversed, the mistake a whole-line flip would make. MEASURED: `text: 48 of 48 cases passed, 0 failed`.
+  without the caller stating anything, and the run it makes REPORTS it through `CTRunGetStatus`. **AND THE EXPLICIT
+  PHASE IS BUILT TOO** (`ct_bidi_explicit_levels`, X1-X8): a STACK of directional statuses carries embeddings,
+  overrides and ISOLATES — an RLE raises the level to 1 and its PDF brings it back, an RLO OVERRIDES the class, a
+  right-to-left paragraph makes an LRE level 2, an LRI/RLI isolates what follows with the PDI bringing the level back,
+  and an FSI asks P2/P3 OF ITS OWN TEXT to decide which of the two it is. X9 marks the explicit formatting characters
+  BN — removed for the rules that follow. **AND THE REST IS THE NEXT SLICE, NAMED**: the W/N/I rules give every OTHER
+  character a level, and L1/L2 put them in visual order — nothing is REORDERED yet, which is exactly what keeps a
+  Latin run inside a right-to-left paragraph from being reversed, the mistake a whole-line flip would make. MEASURED:
+  `text: 49 of 49 cases passed, 0 failed`.

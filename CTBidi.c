@@ -75,3 +75,187 @@ int ct_bidi_paragraph_level(const UniChar *text, CFIndex count, int fallbackLeve
 	/* P3: WITH NO STRONG CHARACTER THE PARAGRAPH IS LEFT TO RIGHT, unless the higher-level protocol said otherwise. */
 	return fallbackLevel;
 }
+
+/* =================================================================================================
+ * UAX #9 X1-X8: THE EXPLICIT LEVELS.
+ * =============================================================================================== */
+
+/* THE STANDARD'S OWN CEILING, in its own units: 125 embedding levels, with the two slots X1 keeps above the base. */
+#define CT_BIDI_MAX_DEPTH 125
+
+struct ct_bidi_status {
+	int level;
+	CTBidiClass override;	/* kCTBidiL, kCTBidiR, or kCTBidiON for "no override" */
+	bool isolate;
+};
+
+/* THE LEAST ODD AND LEAST EVEN LEVELS GREATER THAN A GIVEN ONE — X2's and X3's arithmetic, named so the four
+ * embedding rules do not each re-derive it. */
+static int fn_least_greater_odd(int level)
+{
+	return (level + 1) | 1;
+}
+
+static int fn_least_greater_even(int level)
+{
+	return (level + 2) & ~1;
+}
+
+/* **X5c's QUESTION, ASKED OF AN FSI: WHICH WAY DOES THE TEXT IT ISOLATES RUN?** It is P2/P3 AGAIN, over the
+ * characters from just after the FSI to the matching PDI, SKIPPING any nested isolate run — and answering the
+ * paragraph level when there is no strong character inside. */
+static int fn_isolate_direction(const UniChar *text, CFIndex count, CFIndex start, int fallback)
+{
+	CFIndex i;
+	int depth = 0;
+
+	for (i = start; i < count; i++) {
+		CTBidiClass bidiClass = ct_bidi_class(text[i]);
+
+		if (bidiClass == kCTBidiLRI || bidiClass == kCTBidiRLI || bidiClass == kCTBidiFSI) {
+			depth++;
+			continue;
+		}
+		if (bidiClass == kCTBidiPDI) {
+			if (depth == 0) {
+				break;		/* the matching PDI ends the isolated text */
+			}
+			depth--;
+			continue;
+		}
+		if (depth > 0) {
+			continue;
+		}
+		if (bidiClass == kCTBidiL) {
+			return 0;
+		}
+		if (bidiClass == kCTBidiR || bidiClass == kCTBidiAL) {
+			return 1;
+		}
+	}
+	return fallback;
+}
+
+bool ct_bidi_explicit_levels(const UniChar *text, CFIndex count, int paragraphLevel,
+			     uint8_t *levels, CTBidiClass *classes)
+{
+	struct ct_bidi_status stack[CT_BIDI_MAX_DEPTH + 2];
+	int sp = 1;
+	int overflowIsolate = 0;
+	int overflowEmbedding = 0;
+	int validIsolate = 0;
+	CFIndex i;
+
+	if (text == NULL || levels == NULL || classes == NULL || count < 0) {
+		return false;
+	}
+	if (paragraphLevel != 0 && paragraphLevel != 1) {
+		paragraphLevel = 0;
+	}
+	/* X1: the stack begins with the paragraph level, no override and not an isolate. */
+	stack[0].level = paragraphLevel;
+	stack[0].override = kCTBidiON;
+	stack[0].isolate = false;
+
+	for (i = 0; i < count; i++) {
+		CTBidiClass bidiClass = ct_bidi_class(text[i]);
+		int currentLevel = stack[sp - 1].level;
+		int newLevel = currentLevel;
+
+		levels[i] = (uint8_t)currentLevel;
+		classes[i] = bidiClass;
+
+		switch (bidiClass) {
+		case kCTBidiRLE:
+		case kCTBidiLRE:
+		case kCTBidiRLO:
+		case kCTBidiLRO: {
+			bool rtl = (bidiClass == kCTBidiRLE || bidiClass == kCTBidiRLO);
+			CTBidiClass override = (bidiClass == kCTBidiRLO) ? kCTBidiR
+					     : (bidiClass == kCTBidiLRO) ? kCTBidiL : kCTBidiON;
+
+			newLevel = rtl ? fn_least_greater_odd(currentLevel) : fn_least_greater_even(currentLevel);
+			if (newLevel <= CT_BIDI_MAX_DEPTH && overflowIsolate == 0 && overflowEmbedding == 0) {
+				stack[sp].level = newLevel;
+				stack[sp].override = override;
+				stack[sp].isolate = false;
+				sp++;
+			} else if (overflowIsolate == 0) {
+				overflowEmbedding++;
+			}
+			/* X9: the initiator itself is REMOVED for the rules that follow. */
+			classes[i] = kCTBidiBN;
+			break;
+		}
+		case kCTBidiRLI:
+		case kCTBidiLRI:
+		case kCTBidiFSI: {
+			bool rtl = (bidiClass == kCTBidiFSI)
+				   ? (fn_isolate_direction(text, count, i + 1, paragraphLevel) == 1)
+				   : (bidiClass == kCTBidiRLI);
+			bool valid;
+
+			newLevel = rtl ? fn_least_greater_odd(currentLevel) : fn_least_greater_even(currentLevel);
+			valid = (newLevel <= CT_BIDI_MAX_DEPTH && overflowIsolate == 0 && overflowEmbedding == 0);
+			if (valid) {
+				stack[sp].level = newLevel;
+				stack[sp].override = kCTBidiON;
+				stack[sp].isolate = true;
+				sp++;
+				validIsolate++;
+			} else {
+				overflowIsolate++;
+			}
+			/* THE ISOLATE INITIATOR KEEPS ITS OWN LEVEL — the one OUTSIDE the isolate. X9 does not remove it. */
+			break;
+		}
+		case kCTBidiPDI: {
+			if (overflowIsolate > 0) {
+				overflowIsolate--;
+			} else if (validIsolate > 0) {
+				overflowEmbedding = 0;
+				while (sp > 1 && !stack[sp - 1].isolate) {
+					sp--;
+				}
+				if (sp > 1) {
+					sp--;
+				}
+				validIsolate--;
+			}
+			/* AND THE PDI CARRIES THE LEVEL IN EFFECT AFTER THE ISOLATE CLOSES. */
+			levels[i] = (uint8_t)stack[sp - 1].level;
+			break;
+		}
+		case kCTBidiPDF: {
+			if (overflowIsolate > 0) {
+				/* inside an overflowed isolate: nothing */
+			} else if (overflowEmbedding > 0) {
+				overflowEmbedding--;
+			} else if (sp > 1 && !stack[sp - 1].isolate) {
+				sp--;
+			}
+			classes[i] = kCTBidiBN;	/* X9 */
+			break;
+		}
+		case kCTBidiB: {
+			/* X8: a paragraph separator is set to the paragraph level, and a B in the MIDDLE of a line begins a new
+			 * paragraph — so the stack is reset and the text after it is read from the paragraph level, which is the
+			 * honest reading for a line this tier treats as one paragraph. */
+			levels[i] = (uint8_t)paragraphLevel;
+			sp = 1;
+			overflowIsolate = 0;
+			overflowEmbedding = 0;
+			validIsolate = 0;
+			break;
+		}
+		default: {
+			/* X6: an ordinary character takes the current level, and an OVERRIDE replaces its class. */
+			if (stack[sp - 1].override != kCTBidiON) {
+				classes[i] = stack[sp - 1].override;
+			}
+			break;
+		}
+		}
+	}
+	return true;
+}

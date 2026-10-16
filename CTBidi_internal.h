@@ -20,6 +20,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 /* **THE CLASSES, IN THE ORDER THE TABLE'S INDICES USE.** The names are Unicode's own
  * (`DerivedBidiClass.txt`), and the isolate/embedding/override CONTROLS are here because P2 must step over an
@@ -67,8 +68,19 @@ CTBidiClass ct_bidi_class(uint32_t codePoint);
 /* **UAX #9 P2 AND P3: THE PARAGRAPH'S LEVEL, WHICH IS 0 (left to right) OR 1 (right to left).** P2 finds the FIRST
  * STRONG character — L, or R/AL — SKIPPING everything between an isolate initiator and its matching PDI; P3 says the
  * paragraph is LEFT TO RIGHT when there is none, which is what `fallbackLevel` is for (a higher-level protocol may
- * say otherwise). This is the whole of the algorithm that is built so far: the X/W/N/I rules that assign a level to
- * every OTHER character, and the L1/L2 rules that reorder them, are the next slices. */
+ * say otherwise). The EXPLICIT phase — the embeddings, overrides and isolates of X1-X8 — is `ct_bidi_explicit_levels`
+ * below; the W/N/I rules that give every OTHER character a level, and the L1/L2 rules that reorder them, are the next
+ * slices. */
 int ct_bidi_paragraph_level(const UniChar *text, CFIndex count, int fallbackLevel);
+
+/* **UAX #9 X1-X8: THE EXPLICIT LEVELS.** An embedding, an override or an isolate CHANGES the level for what follows,
+ * so this walks the text with a STACK of directional statuses (level, override, isolate) and fills `levels[i]` with
+ * the embedding level of every character and `classes[i]` with its class AFTER the overrides have been applied. THE
+ * EXPLICIT FORMATTING CHARACTERS (RLE/LRE/RLO/LRO/PDF) ARE MARKED `kCTBidiBN`, which is X9's "remove them" — the
+ * level stays, and the W/N/I rules that follow are to ignore them. `levels` and `classes` must each hold `count`
+ * entries. Answers false when the text is longer than this tier will walk (never, in practice) — the depth is capped
+ * at 125 by the standard itself and overflow is HANDLED rather than refused, per the rules. */
+bool ct_bidi_explicit_levels(const UniChar *text, CFIndex count, int paragraphLevel,
+			     uint8_t *levels, CTBidiClass *classes);
 
 #endif /* CORE_TEXT_CTBIDI_INTERNAL_H */
