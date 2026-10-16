@@ -15,8 +15,8 @@
  * (`CTBidi_internal.h`) over its own characters and, when the visual order is not the logical one, PLACES each glyph
  * where the reordering says — a Hebrew letter in a Latin paragraph is drawn to the RIGHT of the Latin one before it
  * — and the run reports `kCTRunStatusNonMonotonic`. THE CARET DOORS SPEAK VISUAL ORDER: the hit test walks the visual
- * slots, and an offset is where the glyph was placed. What is still owed is the LEADING-EDGE convention for an
- * odd-level glyph and the MULTI-RUN model a non-monotonic line wants.
+ * slots, and an offset is the character's LEADING edge — its LEFT one at an even level and its RIGHT one at an odd
+ * level. What is still owed is the MULTI-RUN model a non-monotonic line wants.
  */
 #include <CoreText/CTLine.h>
 
@@ -70,6 +70,10 @@ struct __CTLine {
 	 * `k`, which is what the hit test walks and what makes the run report `NonMonotonic`. NULL = logical order. */
 	CFIndex *visualOrder;		/* malloc'd, glyphCount entries, or NULL */
 	bool nonMonotonic;
+	/* **AND THE RESOLVED LEVELS, WHEN THE PIPELINE RAN.** An ODD level is what makes a character's LEADING edge its
+	 * RIGHT one — the caret convention the offset door owes — so the levels are kept rather than freed. NULL when the
+	 * line never ran the pipeline, which means logical order and a left leading edge. */
+	uint8_t *levels;		/* malloc'd, glyphCount entries, or NULL */
 	/* **AND WHICH OF THE GLYPHS IS NOT A GLYPH BUT A BOX.** A character carrying a run delegate occupies the width its
 	 * delegate answers and draws no ink; this flag is the one thing that tells the two apart, and it is carried
 	 * alongside the glyphs so a DRAW can skip a box and the `CTRun` built from the line can too. */
@@ -108,6 +112,7 @@ static void ct_line_finalize(CFTypeRef cf)
 	free(line->positions);
 	free(line->advances);
 	free(line->visualOrder);
+	free(line->levels);
 	free(line->isBox);
 }
 
@@ -481,7 +486,7 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 			free(placed);
 		}
 	}
-	free(levels);
+	line->levels = levels;	/* the caret doors read it; NULL when the pipeline could not run */
 	free(visualOrder);
 	free(chars);
 	return (CTLineRef)line;
@@ -781,10 +786,22 @@ CFIndex CTLineGetStringIndexForPosition(CTLineRef line, CGPoint position)
 
 		for (k = 0; k < l->glyphCount; k++) {
 			CFIndex logical = l->visualOrder[k];
-			CGFloat midpoint = l->positions[logical].x + ct_line_advance_at(l, logical) / 2.0f;
+			CGFloat advance = ct_line_advance_at(l, logical);
+			CGFloat midpoint = l->positions[logical].x + advance / 2.0f;
+			bool rtl = (l->levels != NULL) && ((l->levels[logical] % 2) != 0);
 
+			/* **THE HALF THE POINT FELL IN DECIDES WHICH SIDE OF THE CHARACTER THE CARET IS ON**, and which logical
+			 * index that is depends on the character's OWN direction: a right-to-left glyph's caret-before is on its
+			 * RIGHT, so its left half belongs to the character AFTER it. */
 			if (position.x < midpoint) {
-				return logical;
+				CFIndex answer = rtl ? (logical + 1) : logical;
+
+				return (answer > l->glyphCount) ? l->glyphCount : answer;
+			}
+			if (position.x < l->positions[logical].x + advance) {
+				CFIndex answer = rtl ? logical : (logical + 1);
+
+				return (answer > l->glyphCount) ? l->glyphCount : answer;
 			}
 		}
 		return l->glyphCount;
@@ -815,14 +832,26 @@ CGFloat CTLineGetOffsetForStringIndex(CTLineRef line, CFIndex charIndex, CGFloat
 	}
 	if (charIndex < 0) {
 		offset = 0.0;
-	} else if (charIndex >= l->glyphCount) {
-		/* ONE PAST THE LAST CHARACTER IS THE END OF THE LINE, which is where a caret at the end belongs. */
-		offset = (CGFloat)l->width;
+	} else if (l->levels == NULL) {
+		/* **A LINE THAT NEVER RAN THE PIPELINE IS IN LOGICAL ORDER**, so its leading edge IS its left one and the end of
+		 * the line is its width — the answer this door has always given. */
+		offset = (charIndex >= l->glyphCount) ? (CGFloat)l->width : l->positions[charIndex].x;
+	} else if (charIndex < l->glyphCount) {
+		/* **APPLE'S LEADING EDGE, WHICH IS A SIDE AND NOT AN x.** A LEFT-TO-RIGHT character's leading edge is its left
+		 * one; a RIGHT-TO-LEFT character's is its RIGHT one, because that is the side the caret sits on when the
+		 * character is about to be typed. */
+		CGFloat advance = ct_line_advance_at(l, charIndex);
+
+		offset = l->positions[charIndex].x + (((l->levels[charIndex] % 2) != 0) ? advance : 0.0);
 	} else {
-		/* **THE GLYPH'S OWN x**, which for a REORDERED line is where it was PLACED and no longer where its character
-		 * sat in the string. (APPLE'S "LEADING EDGE" IS THE LEFT ONE HERE: an odd-level glyph's leading edge is on
-		 * the RIGHT, and telling the two apart is part of the caret slice this one leaves owed.) */
-		offset = l->positions[charIndex].x;
+		/* AND ONE PAST THE LAST CHARACTER IS ITS TRAILING EDGE. */
+		CFIndex last = l->glyphCount - 1;
+
+		if (last >= 0 && (l->levels[last] % 2) != 0) {
+			offset = l->positions[last].x;
+		} else {
+			offset = (CGFloat)l->width;
+		}
 	}
 	/* A SINGLE RUN HAS ONE CARET PER BOUNDARY, so the secondary offset is the same as the primary — which is
 	 * exactly the case Apple's sentence describes for it. */

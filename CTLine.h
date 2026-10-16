@@ -22,9 +22,9 @@
  * needing ligatures or contextual forms, is NOT laid out correctly here. **AND THE GLYPHS ARE REORDERED, WHICH IS THE
  * BIDI MILESTONE'S PAYOFF**: the line runs the whole pipeline over its own characters, PLACES each glyph where the
  * visual order says, and reports `kCTRunStatusNonMonotonic` — so a Hebrew letter in a Latin paragraph is drawn to the
- * right of the one before it. THE CARET DOORS SPEAK VISUAL ORDER; the LEADING-EDGE convention for an odd-level glyph
- * and the multi-run model are named as owed. Multi-run and complex scripts are the HarfBuzz milestone this project's
- * Core Text plan already names.
+ * right of the one before it. THE CARET DOORS SPEAK VISUAL ORDER, and an offset is the character's LEADING edge — its
+ * LEFT one at an even level and its RIGHT one at an odd level. The multi-run model is named as owed. Multi-run and
+ * complex scripts are the HarfBuzz milestone this project's Core Text plan already names.
  *
  * **A RUN DELEGATE, THOUGH, IS HONORED.** A character whose attributes carry `kCTRunDelegateAttributeName` is a BOX:
  * its advance is the delegate's width rather than the placeholder glyph's, the line's ascent and descent grow to cover

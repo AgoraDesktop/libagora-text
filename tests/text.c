@@ -5653,15 +5653,20 @@ static int case_line_bidi_reorder(void)
 		CTRunRef run = (runs != NULL && CFArrayGetCount(runs) > 0)
 			? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
 		CGFloat first = CTLineGetOffsetForStringIndex(line, 0, NULL);
+		CGFloat middle = CTLineGetOffsetForStringIndex(line, 1, NULL);
 		CGFloat last = CTLineGetOffsetForStringIndex(line, 2, NULL);
+		CGFloat afterLast = CTLineGetOffsetForStringIndex(line, 3, NULL);
 		double width = CTLineGetTypographicBounds(line, NULL, NULL, NULL);
 
-		printf("  (Hebrew: x0=%.2f, x2=%.2f, width=%.2f, status=%u)\n", (double)first, (double)last, width,
-		       (unsigned)((run != NULL) ? CTRunGetStatus(run) : 0));
+		printf("  (Hebrew carets: %g > %g > %g > %g; width %g)\n", (double)first, (double)middle, (double)last,
+		       (double)afterLast, width);
 		check(run != NULL && (CTRunGetStatus(run) & kCTRunStatusNonMonotonic) != 0,
 		      "a right-to-left line's run reports NonMonotonic");
-		check(first > last, "and the FIRST character's glyph is to the RIGHT of the last one's");
-		check(fabs((double)last) < 0.01, "with the LAST logical character at the line's origin");
+		check(fabs((double)first - width) < 0.01,
+		      "the caret BEFORE the first character is at the line's RIGHT end — its LEADING edge");
+		check(first > middle && middle > last && last > afterLast,
+		      "and the carets run RIGHT to LEFT, which is the paragraph's direction");
+		check(fabs((double)afterLast) < 0.01, "with the caret AFTER the last character at the origin");
 		check(width > 0.0, "and the width is still the whole line");
 		CFRelease(line);
 	}
