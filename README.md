@@ -707,7 +707,11 @@ the user's decision is that they stay owed), the ATS pair (permanent), and the f
   JOIN THEY NEED**: `fn_sequences` chains each level run whose LAST character is an isolate initiator to the run its
   MATCHING PDI STARTS, so the text on BOTH SIDES of an isolate is ONE isolating run sequence — and the W and N rules
   now run over SEQUENCES rather than raw runs, which is BEHAVIOUR-PRESERVING where there are no isolates (every case
-  before this one is unchanged). **AND THE REST IS THE NEXT SLICE, NAMED**: N0's BRACKET PAIRS (which need Unicode's
-  `BidiBrackets` data), the I rules, and L1/L2 — nothing is REORDERED yet, which is exactly what keeps a Latin run
-  inside a right-to-left paragraph from being reversed, the mistake a whole-line flip would make. MEASURED:
-  `text: 52 of 52 cases passed, 0 failed`.
+  before this one is unchanged). **AND THE IMPLICIT LEVELS CLOSE THE LEVEL PHASE** (`ct_bidi_resolve_implicit`, I1/I2):
+  a character whose direction DISAGREES with its embedding level is raised — R by one and a number by two at an even
+  level, and L and the numbers by one at an odd level — which is what puts a Hebrew letter in a Latin paragraph at
+  level 1, the ODD level L2 reorders on. **AND THE REST IS THE NEXT SLICE, NAMED**: N0's BRACKET PAIRS (which need
+  Unicode's `BidiBrackets` data) and L2's REORDERING (with the L1 resets, the mirroring of paired characters, and the
+  multi-run line model) — nothing is REORDERED yet, which is exactly what keeps a Latin run inside a right-to-left
+  paragraph from being reversed, the mistake a whole-line flip would make. MEASURED: `text: 53 of 53 cases passed,
+  0 failed`.

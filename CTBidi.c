@@ -734,3 +734,38 @@ void ct_bidi_resolve_neutral(CTBidiClass *classes, const uint8_t *levels, CFInde
 	free(eos);
 	free(seqLevel);
 }
+
+/* =================================================================================================
+ * UAX #9 I1 AND I2: THE IMPLICIT LEVELS.
+ * =============================================================================================== */
+
+/* **THE LEVEL A CHARACTER ACTUALLY SITS AT.** The embedding level is what the EXPLICIT phase set; the implicit rules
+ * raise it for a character whose direction DISAGREES with its level, and the amounts are the standard's: a strong R
+ * in an even (left-to-right) level goes up ONE, a number goes up TWO, and in an odd (right-to-left) level L and the
+ * numbers go up one while R stays. That is why a Hebrew letter inside a Latin paragraph ends at level 1 — an ODD
+ * level — which is exactly the fact L2 reorders on. */
+void ct_bidi_resolve_implicit(const CTBidiClass *classes, uint8_t *levels, CFIndex count)
+{
+	CFIndex i;
+
+	if (classes == NULL || levels == NULL || count <= 0) {
+		return;
+	}
+	for (i = 0; i < count; i++) {
+		CTBidiClass bidiClass = classes[i];
+
+		if ((levels[i] % 2) == 0) {
+			/* I1: an even level. */
+			if (bidiClass == kCTBidiR) {
+				levels[i] = (uint8_t)(levels[i] + 1);
+			} else if (bidiClass == kCTBidiEN || bidiClass == kCTBidiAN) {
+				levels[i] = (uint8_t)(levels[i] + 2);
+			}
+		} else {
+			/* I2: an odd level. */
+			if (bidiClass == kCTBidiL || bidiClass == kCTBidiEN || bidiClass == kCTBidiAN) {
+				levels[i] = (uint8_t)(levels[i] + 1);
+			}
+		}
+	}
+}

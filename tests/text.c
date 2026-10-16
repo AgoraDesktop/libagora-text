@@ -5464,6 +5464,55 @@ static int case_bidi_isolating_sequences(void)
 	return g_fail - before;
 }
 
+/* **AND THE IMPLICIT LEVELS — UAX #9 I1 AND I2.** The last level rule: a character whose direction DISAGREES with its
+ * embedding level is raised, by one or two, and that is what puts a Hebrew letter in a Latin paragraph at level 1 — the
+ * ODD level that L2 will later reorder on. */
+static int case_bidi_implicit_levels(void)
+{
+	int before = g_fail;
+	uint8_t levels[8];
+	CTBidiClass classes[8];
+
+	/* I1: an EVEN level. */
+	{
+		CTBidiClass c[4] = { kCTBidiL, kCTBidiR, kCTBidiEN, kCTBidiAN };
+		uint8_t lv[4] = { 0, 0, 0, 0 };
+
+		ct_bidi_resolve_implicit(c, lv, 4);
+		check(lv[0] == 0 && lv[1] == 1 && lv[2] == 2 && lv[3] == 2,
+		      "I1: at an even level R goes up ONE and a number TWO");
+	}
+	/* I2: an ODD level. */
+	{
+		CTBidiClass c[4] = { kCTBidiL, kCTBidiR, kCTBidiEN, kCTBidiAN };
+		uint8_t lv[4] = { 1, 1, 1, 1 };
+
+		ct_bidi_resolve_implicit(c, lv, 4);
+		check(lv[0] == 2 && lv[1] == 1 && lv[2] == 2 && lv[3] == 2,
+		      "I2: at an odd level L and a number go up ONE and R stays");
+	}
+	/* AND THE WHOLE PIPELINE, over a Latin-first and a right-to-left-first string. */
+	{
+		UniChar latinFirst[] = { 'a', 0x05D0 };
+		UniChar arabicFirst[] = { 0x0627, '1' };
+
+		check(ct_bidi_explicit_levels(latinFirst, 2, 0, levels, classes), "the pipeline runs");
+		ct_bidi_resolve_weak(classes, levels, 2, 0);
+		ct_bidi_resolve_neutral(classes, levels, 2, 0);
+		ct_bidi_resolve_implicit(classes, levels, 2);
+		check(levels[0] == 0 && levels[1] == 1,
+		      "a Hebrew letter in a Latin paragraph ends at level 1 — the ODD level L2 reorders on");
+
+		ct_bidi_explicit_levels(arabicFirst, 2, 0, levels, classes);
+		ct_bidi_resolve_weak(classes, levels, 2, 0);
+		ct_bidi_resolve_neutral(classes, levels, 2, 0);
+		ct_bidi_resolve_implicit(classes, levels, 2);
+		check(levels[0] == 1 && levels[1] == 2,
+		      "and the European number after an Arabic letter goes up TWO, to level 2");
+	}
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -5501,6 +5550,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The weak types W1-W7 over the level runs", case_bidi_weak_types },
 	{ "The neutral types N1 and N2", case_bidi_neutrals },
 	{ "The isolating run sequences X10 joins", case_bidi_isolating_sequences },
+	{ "The implicit levels I1 and I2", case_bidi_implicit_levels },
 	{ "And the FRAMESETTER path is kerned too, which is where the AppKit draws", case_frame_kerning },
 	{ "Matching finds the faces a query describes, in a stable order", case_font_matching },
 	{ "A disabled face leaves every matching answer, and comes back", case_font_visibility },

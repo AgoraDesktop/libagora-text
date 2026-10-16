@@ -94,4 +94,10 @@ void ct_bidi_resolve_weak(CTBidiClass *classes, const uint8_t *levels, CFIndex c
  * which need Unicode's `BidiBrackets` data — the next slice. */
 void ct_bidi_resolve_neutral(CTBidiClass *classes, const uint8_t *levels, CFIndex count, int paragraphLevel);
 
+/* **UAX #9 I1 AND I2: THE IMPLICIT LEVELS.** The LAST level rule, and the one that puts a right-to-left character
+ * inside a left-to-right paragraph at an ODD level — which is what L2 later reorders. At an EVEN level a strong R
+ * goes UP one and a NUMBER up two (I1); at an ODD level L and a number go up one and R stays (I2). `levels` is edited
+ * in place and `classes` is read: every class is L, R, EN or AN by now, because W and N have resolved the rest. */
+void ct_bidi_resolve_implicit(const CTBidiClass *classes, uint8_t *levels, CFIndex count);
+
 #endif /* CORE_TEXT_CTBIDI_INTERNAL_H */
