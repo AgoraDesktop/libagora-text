@@ -59,9 +59,31 @@
 struct __CTShaper {
 	CTFontRef font;		/* RETAINED: the face the tables come from, which is what the callback needs */
 	hb_font_t *hbFont;	/* OWNED: the HarfBuzz font over those tables, with the face's own tables as its funcs */
+	hb_unicode_funcs_t *unicode;	/* OWNED: the default Unicode functions WITH MIRRORING TURNED OFF (below) */
 	CGFloat size;		/* the point size the scale was built from */
 	unsigned upem;		/* the face's units per em, which is also the scale HarfBuzz was set to */
 };
+
+/* **MIRRORING IS TURNED OFF, AND THIS IS THE ONE PLACE IT CAN BE TURNED OFF.** HarfBuzz implements UAX #9's **L4**
+ * itself — `hb_ot_shape` mirrors a character whose script runs right to left before it looks the glyph up, because
+ * the shaper cannot know that its caller already ran the algorithm — and UAX #9's L4 is ALREADY THIS LIBRARY'S
+ * (`CTLine.c` runs `ct_bidi_mirror` over its characters so that the font is asked for the character that will be
+ * drawn). With both, a `)` in Hebrew text is mirrored to `(` by L4 and then mirrored BACK by HarfBuzz, and the line
+ * draws the wrong parenthesis. MEASURED, which is how this was found: the mirrored bracket came back as glyph 11 —
+ * the `(` — where the face's `)` is 12.
+ *
+ * **AND THE MECHANISM IS NOT THE `rtlm` FEATURE, WHICH IS WHAT IT LOOKS LIKE.** Disabling `rtlm` through
+ * `hb_shape`'s feature list does NOT stop it — MEASURED, `rtlm=0` still answers 11 for `)` in a right-to-left run,
+ * because the mirroring is not a GSUB feature at all. It is a UNICODE FUNCTION, and the only way to say "this text
+ * has already been mirrored" is to hand HarfBuzz a Unicode-functions object whose mirroring answers the character
+ * unchanged. That object is built once per shaper and its mirroring is the identity; everything else falls through to
+ * HarfBuzz's own default, which is what every other shaping decision needs. */
+static hb_codepoint_t fn_shaper_identity_mirroring(hb_unicode_funcs_t *ufuncs, hb_codepoint_t unicode, void *user_data)
+{
+	(void)ufuncs;
+	(void)user_data;
+	return unicode;
+}
 
 /* =================================================================================================
  * THE FACE, OVER THE TABLES THIS LIBRARY ALREADY READS.
@@ -146,6 +168,14 @@ CTShaperRef CTShaperCreate(CTFontRef font)
 	 * the face's tables: `GSUB`, `GPOS`, `GDEF`, `cmap`, `hmtx`, `glyf`/`CFF`. `hb_font_create` sets it already;
 	 * naming it here is what makes the dependency visible to a reader. */
 	hb_ot_font_set_funcs(shaper->hbFont);
+	{
+		hb_unicode_funcs_t *base = hb_unicode_funcs_get_default();
+
+		shaper->unicode = hb_unicode_funcs_create(base);
+		if (shaper->unicode != NULL) {
+			hb_unicode_funcs_set_mirroring_func(shaper->unicode, fn_shaper_identity_mirroring, NULL, NULL);
+		}
+	}
 	return shaper;
 }
 
@@ -160,6 +190,9 @@ void CTShaperRelease(CTShaperRef shaper)
 	 * reference the callback was given. */
 	if (s->hbFont != NULL) {
 		hb_font_destroy(s->hbFont);
+	}
+	if (s->unicode != NULL) {
+		hb_unicode_funcs_destroy(s->unicode);
 	}
 	if (s->font != NULL) {
 		CFRelease(s->font);
@@ -237,6 +270,11 @@ bool CTShaperShape(CTShaperRef shaper, const UniChar *chars, CFIndex count, CTWr
 		hb_buffer_guess_segment_properties(buffer);
 		hb_buffer_set_direction(buffer, (direction == kCTWritingDirectionRightToLeft) ? HB_DIRECTION_RTL
 											    : HB_DIRECTION_LTR);
+	}
+	/* **AND THE BUFFER IS TOLD THE CHARACTERS ARE ALREADY MIRRORED** — see `fn_shaper_identity_mirroring`, which is
+	 * where that decision and its measurement live. `rtlm` is NOT the mechanism and turning it off does nothing. */
+	if (s->unicode != NULL) {
+		hb_buffer_set_unicode_funcs(buffer, s->unicode);
 	}
 	hb_shape(s->hbFont, buffer, NULL, 0);
 	info = hb_buffer_get_glyph_infos(buffer, &length);

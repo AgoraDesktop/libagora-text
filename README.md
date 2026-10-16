@@ -779,3 +779,42 @@ the user's decision is that they stay owed), the ATS pair (permanent), and the f
   in its own header too: itemization, font fallback, and reconciling HarfBuzz's visual order for a right-to-left run
   with the line's own L2. MEASURED: `100% tests passed, 0 tests failed out of 2` over
   `text: 64 of 64 cases passed, 0 failed`.
+- **AND SHAPING IS WIRED IN: THE LINE'S GLYPHS ARE THE SHAPER'S NOW, AND THE CLUSTER MAP IS WHAT TIES THEM BACK.**
+  `ct_line_create_with_font` shapes each run instead of asking the font for one glyph per character, so a line's
+  glyph count is the SHAPER's answer and not the text's. Three things had to be true together, and each is a
+  measurement rather than a hope:
+  **(1) SHAPING IS PER BIDI LEVEL RUN, NOT PER FONT RUN** — HarfBuzz's direction is the run's and a level run inside a
+  right-to-left paragraph is left-to-right — so a font run is cut at every level change and each piece is shaped with
+  its own direction. **(2) THE VISUAL ORDER IS BUILT OVER GLYPHS FROM THE ORDER OVER CHARACTERS**, by walking the
+  character-level order and emitting each glyph ONCE at the first character it covers: that leaves the entire bidi
+  pipeline untouched, and it is correct for a ligature (emitted at its first character), for a right-to-left run
+  (already ordered by the shaper, and kept so) and for plain left-to-right text (left exactly as it was).
+  **(3) THE KERN LOOP IS GONE, AND ITS WORK IS THE SHAPER'S** — the pair adjustment is already inside the advance a
+  shaped glyph carries, so applying it again would apply it twice. MEASURED, and it is why deleting that loop is safe:
+  the shaper's answer for `To` in this suite's face is the `kern` table's own **-1.00928** points (8.6709 alone,
+  7.66162 shaped).
+  MEASURED end to end: `ffi` is **1 glyph** in `DejaVuSans`, **2** in `DejaVuSerif` and **3** in `LiberationSerif`;
+  Devanagari `ka`+VIRAMA+`ssa` is **1 glyph** from **3** characters; an Arabic word comes back in the shaper's visual
+  order with its letters in their joined forms; and a line of plain Latin is glyph-for-glyph what it always was.
+- **AND ONE FEATURE HAD TO BE TURNED OFF, WHICH THE WIRING IS WHAT FOUND.** HarfBuzz implements UAX #9's **L4** itself
+  — it mirrors a character whose script runs right to left before looking the glyph up — and L4 is ALREADY THIS
+  LIBRARY'S (`ct_bidi_mirror` runs over the line's characters so the font is asked for the character that will be
+  drawn). With both, a `)` in Hebrew text was mirrored to `(` by L4 and mirrored BACK by HarfBuzz, and the line drew
+  the wrong parenthesis: MEASURED, the mirrored bracket came back as glyph **11** (the `(`) where the face's `)` is
+  **12**. **AND THE MECHANISM IS NOT THE `rtlm` FEATURE, WHICH IS WHAT IT LOOKS LIKE** — disabling `rtlm` through
+  `hb_shape`'s feature list does NOT stop it (MEASURED, `rtlm=0` still answers 11 for `)` in a right-to-left run),
+  because the mirroring is not a GSUB feature at all: it is a UNICODE FUNCTION. The only way to say "this text is
+  already mirrored" is to hand HarfBuzz a Unicode-functions object whose mirroring answers the character unchanged,
+  and `CTShaping.c` builds one per shaper for exactly that.
+- **AND `kCTRunStatusNonMonotonic` IS NOW APPLE'S OWN FACT RATHER THAN THE PIPELINE'S.** Apple's flag says the run's
+  STRING INDICES do not ascend; the pipeline moving the characters is one reason that happens and **the shaper is a
+  second**, because a right-to-left run comes back in visual order whether or not the pipeline ran. So both are asked,
+  and two case expectations changed with it rather than being adjusted to fit: the L4 case now asks the RUN which
+  glyph stands for the bracket (a glyph is no longer a character, so `glyphs[2]` was the shaper's order and not the
+  bracket's), and the typesetter-options case records that with bidi processing OFF the flag is still SET, because the
+  shaper's order descends with nothing in the pipeline having moved.
+  MEASURED: `100% tests passed, 0 tests failed out of 2` over `text: 65 of 65 cases passed, 0 failed`, with SIXTY-FOUR
+  of those cases passing byte-identical to the commit before the wiring — the sixty-fifth being the cluster map's own.
+  **AND WHAT IS OWED IS NOW THE APPKIT'S**: the manager's glyph space is one glyph per character BY CONSTRUCTION
+  (`glyphBase` advances by the range's length), so the shaped glyph count is not yet visible through it. That is
+  stated in `NSLayoutManager.m` where the two mapping doors are, with what changing it takes.

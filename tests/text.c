@@ -5120,6 +5120,28 @@ static int case_text_tab_stops(void)
 /* **AND THE BASE WRITING DIRECTION, WHICH THE RUN REPORTS.** A paragraph's direction is read at the line's first
  * character and handed to the run, so a right-to-left paragraph makes a run that says so — the FIRST piece of the
  * bidi milestone, with the REORDERING (the Unicode Bidirectional Algorithm) named as the next slice. */
+/* **THE GLYPH A RUN PUTS A CHARACTER IN, WHICH IS NOW A QUESTION FOR THE RUN'S STRING INDICES RATHER THAN AN
+ * INDEX.** A shaped run's glyphs are in the SHAPER's order — a right-to-left run comes back in VISUAL order, so its
+ * last glyph is the first character's — and reading `glyphs[i]` for character `i` was only right while a glyph WAS a
+ * character. The run's own string indices are the map, so this asks them; a character that shares a glyph with the one
+ * before it (a ligature, a mark) answers with that glyph, which is the same rule the caret doors use. */
+static CGGlyph glyph_for_character(CTRunRef run, CFIndex character)
+{
+	const CFIndex *indices = (run != NULL) ? CTRunGetStringIndicesPtr(run) : NULL;
+	const CGGlyph *glyphs = (run != NULL) ? CTRunGetGlyphsPtr(run) : NULL;
+	CFIndex i, count = (run != NULL) ? CTRunGetGlyphCount(run) : 0;
+
+	if (indices == NULL || glyphs == NULL) {
+		return 0;
+	}
+	for (i = 0; i < count; i++) {
+		if (indices[i] == character) {
+			return glyphs[i];
+		}
+	}
+	return 0;
+}
+
 static int case_base_writing_direction(void)
 {
 	int before = g_fail;
@@ -5726,11 +5748,11 @@ static int case_bidi_mirroring(void)
 			CFArrayRef runs = CTLineGetGlyphRuns(line);
 			CTRunRef run = (runs != NULL && CFArrayGetCount(runs) > 0)
 				? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
-			const CGGlyph *glyphs = (run != NULL) ? CTRunGetGlyphsPtr(run) : NULL;
+			CGGlyph bracket = glyph_for_character(run, 1);	/* character 1 is the `(` */
 
 			printf("  (the line's glyph for `(` is %u; the font's `)` glyph is %u)\n",
-			       (unsigned)((glyphs != NULL) ? glyphs[1] : 0), (unsigned)closeGlyph);
-			check(glyphs != NULL && closeGlyph != 0 && openGlyph != closeGlyph && glyphs[1] == closeGlyph,
+			       (unsigned)bracket, (unsigned)closeGlyph);
+			check(closeGlyph != 0 && openGlyph != closeGlyph && bracket == closeGlyph,
 			      "L4: the LINE looks up the MIRRORED character, not the one in the string");
 			CFRelease(line);
 		}
@@ -5915,14 +5937,13 @@ static int case_typesetter_bidi_options(void)
 			CTRunRef run = (runs != NULL && CFArrayGetCount(runs) > 0)
 				? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
 			CTRunStatus status = (run != NULL) ? CTRunGetStatus(run) : kCTRunStatusNoStatus;
-			const CGGlyph *glyphs = (run != NULL) ? CTRunGetGlyphsPtr(run) : NULL;
+			CGGlyph bracket = glyph_for_character(run, 2);	/* character 2 is the `(` */
 
 			printf("  (no options: status %u, the bracket is glyph %u)\n", (unsigned)status,
-			       (unsigned)((glyphs != NULL) ? glyphs[2] : 0));
+			       (unsigned)bracket);
 			check((status & kCTRunStatusRightToLeft) != 0 && (status & kCTRunStatusNonMonotonic) != 0,
 			      "with no options a Hebrew line reports RightToLeft AND NonMonotonic");
-			check(glyphs != NULL && glyphs[2] == closeGlyph,
-			      "and L4 mirrors its bracket, so the font is asked for `)`");
+			check(bracket == closeGlyph, "and L4 mirrors its bracket, so the font is asked for `)`");
 			if (line != NULL) CFRelease(line);
 			if (ts != NULL) CFRelease(ts);
 			CFRelease(astr);
@@ -6094,19 +6115,26 @@ static int case_typesetter_bidi_options(void)
 			CTRunRef run = (runs != NULL && CFArrayGetCount(runs) > 0)
 				? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
 			CTRunStatus status = (run != NULL) ? CTRunGetStatus(run) : kCTRunStatusNoStatus;
-			const CGGlyph *glyphs = (run != NULL) ? CTRunGetGlyphsPtr(run) : NULL;
+			CGGlyph bracket = glyph_for_character(run, 2);	/* character 2 is the `(` */
 
 			printf("  (both given: status %u, the bracket is glyph %u)\n", (unsigned)status,
-			       (unsigned)((glyphs != NULL) ? glyphs[2] : 0));
+			       (unsigned)bracket);
 			/* **DISABLING WINS OVER THE FORCED LEVEL, AND THE WAY IT WINS IS RATHER THAN BY DISCARDING IT.** The
 			 * forced level is the CALLER STATING THE PARAGRAPH'S DIRECTION — the same kind of fact as a paragraph
 			 * style's base writing direction — so it still decides the direction; what disabling stops is the
 			 * ALGORITHM. A stopped algorithm is exactly "no NonMonotonic and no mirroring", so a caller that asked
 			 * for both gets the direction it asked for with nothing moved. */
+			/* **AND THE FLAG IS NOW APPLE'S OWN FACT RATHER THAN THE PIPELINE'S**: `kCTRunStatusNonMonotonic` says
+			 * the run's STRING INDICES do not ascend, and with the pipeline off the shaper is still told the line's
+			 * direction — it has no levels to read — so a Hebrew run comes back in the shaper's visual order and its
+			 * indices DESCEND. The flag is therefore SET, and what says the algorithm was off is the MIRRORING
+			 * below rather than the flag. Before shaping these two answers were the same; they are not any more,
+			 * and the case records the difference instead of hiding it. */
 			check(run != NULL && (status & kCTRunStatusRightToLeft) != 0
-			      && (status & kCTRunStatusNonMonotonic) == 0,
-			      "with both given the forced DIRECTION stands and nothing moved (status %u)", (unsigned)status);
-			check(glyphs != NULL && glyphs[2] == openGlyph,
+			      && (status & kCTRunStatusNonMonotonic) != 0,
+			      "with both given the forced DIRECTION stands, and the SHAPER's descending order sets the flag "
+			      "(status %u)", (unsigned)status);
+			check(bracket == openGlyph,
 			      "and the algorithm really was off, because the bracket is NOT mirrored");
 			if (line != NULL) CFRelease(line);
 			if (ts != NULL) CFRelease(ts);

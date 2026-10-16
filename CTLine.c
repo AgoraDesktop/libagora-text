@@ -48,6 +48,7 @@
  * line — a line made over a RANGE, and the name of the font key — and including it here is what makes the
  * declarations and the definitions below the SAME functions rather than two files agreeing by convention. */
 #include <CoreText/CTLine_internal.h>
+#include <CoreText/CTShaping_internal.h>
 #include <CoreText/CTBidi_internal.h>
 #include <CoreText/CTBidi_internal.h>
 
@@ -69,8 +70,9 @@
 struct ct_line_run {
 	CTFontRef font;
 	CFIndex start;		/* character offset within the LINE's range */
-	CFIndex count;
-	CFIndex glyphStart;
+	CFIndex count;		/* HOW MANY CHARACTERS, which is no longer how many glyphs */
+	CFIndex glyphStart;	/* offset within the LINE's glyph arrays */
+	CFIndex glyphCount;	/* HOW MANY GLYPHS the shaper made of those characters */
 	CGFloat ascent, descent, leading;
 };
 
@@ -404,6 +406,11 @@ static CFIndex fn_font_runs(CFAttributedStringRef string, CFRange range, CTFontR
 }
 
 /* THE RUN A CHARACTER BELONGS TO, by binary search over runs that are CONTIGUOUS and in order. */
+/* THE TWO CLUSTER QUESTIONS A CARET ASKS, declared here because `ct_line_create_with_font` fills the boxes and the
+ * tabs through them and their bodies live beside the caret doors, which are below it. */
+static CFIndex fn_line_cluster_owner(const struct __CTLine *line, CFIndex charIndex);
+static CFIndex fn_line_next_cluster(const struct __CTLine *line, CFIndex charIndex);
+
 static CFIndex fn_run_index(const struct __CTLine *line, CFIndex charIndex)
 {
 	CFIndex lo = 0;
@@ -498,39 +505,21 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 	}
 
 	chars = (UniChar *)malloc((size_t)n * sizeof(UniChar));
-	line->glyphs = (CGGlyph *)malloc((size_t)n * sizeof(CGGlyph));
-	line->positions = (CGPoint *)malloc((size_t)n * sizeof(CGPoint));
-	advances = (CGSize *)malloc((size_t)n * sizeof(CGSize));
-	line->isBox = (bool *)calloc((size_t)n, sizeof(bool));
-	/* **THE CLUSTER MAP, IDENTITY-FILLED, WHICH IS WHAT ONE GLYPH PER CHARACTER MEANS.** Shaping replaces this fill
-	 * with what the shaper answers (see the header's note on what is still owed); until then every other door in this
-	 * file reads the map and gets exactly the index it used to compute. */
-	line->clusters = (CFIndex *)malloc((size_t)n * sizeof(CFIndex));
-	if (chars == NULL || line->glyphs == NULL || line->positions == NULL || advances == NULL || line->isBox == NULL
-	    || line->clusters == NULL) {
-		free(chars);
-		free(advances);
-		/* THE LINE IS RELEASED RATHER THAN FIXED UP: it is a fresh Core Foundation object with one reference, so
-		 * releasing it runs the finalizer, which frees whichever arrays DID arrive — one place that knows what a
-		 * line owns, instead of a second list of frees here. */
+	if (chars == NULL) {
 		CFRelease((CFTypeRef)line);
 		return NULL;
 	}
 	CFStringGetCharacters(text, range, chars);
-	for (i = 0; i < n; i++) {
-		line->clusters[i] = i;
-	}
 
-	/* **AND THE BIDI PIPELINE RUNS HERE, BEFORE THE GLYPHS ARE LOOKED UP**, because L4 MIRRORS a character whose level
-	 * is odd and the MIRRORED character is the one the font has to be asked for: `(` in Arabic text is `)`. The visual
-	 * order is kept for the placement at the END of this function; `levels` is only needed for the mirroring. */
+	/* **AND THE BIDI PIPELINE RUNS HERE, BEFORE THE GLYPHS ARE SHAPED**, because L4 MIRRORS a character whose level is
+	 * odd and the MIRRORED character is the one the shaper has to be given: `(` in Arabic text is `)`. The visual order
+	 * is kept for the placement at the END of this function; `levels` is what both the mirroring and the SHAPING
+	 * DIRECTION are read from. */
 	if (bidi.disabled) {
 		/* **NOTHING RUNS AND NOTHING MOVES, AND THE ARRAYS ARE NOT EVEN ALLOCATED.** A NULL `levels` and a NULL
 		 * `visualOrder` are already this function's spelling for "logical order" — the placement at the end and the
 		 * caret doors both read them that way — so bidi processing turned off needs no second path through the rest of
-		 * the function. What that means concretely is measured in the suite: the glyphs keep their string order, the run
-		 * does not report `kCTRunStatusNonMonotonic`, and L4's MIRRORING does not happen either, so a `(` in Hebrew text
-		 * is still the font's `(`. */
+		 * the function. L4's MIRRORING does not happen either, so a `(` in Hebrew text is still the font's `(`. */
 	} else {
 		int paragraphLevel = (line->direction == kCTWritingDirectionRightToLeft) ? 1 : 0;
 
@@ -547,38 +536,193 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 		}
 	}
 
-	/* **EACH RUN'S GLYPHS ARE INDEXED IN ITS OWN FONT, WHICH IS THE WHOLE POINT OF A RUN.** Apple's contract for the
-	 * glyph step is a BOOLEAN and a line does not need it: a character the font cannot encode becomes glyph 0, which IS
-	 * `.notdef`, and Apple DRAWS that rather than dropping it. */
-	memset(advances, 0, (size_t)n * sizeof(CGSize));
+	/* =============================================================================================
+	 * SHAPING: WHAT GLYPHS THE FACE ACTUALLY SETS THESE CHARACTERS IN.
+	 * =============================================================================================
+	 *
+	 * **THE GLYPH COUNT IS NOT THE CHARACTER COUNT AND CANNOT BE ASSUMED EITHER WAY.** A face with an `ffi` ligature
+	 * sets three characters in ONE glyph; a Devanagari conjunct sets three in one; and a base with a mark it does not
+	 * compose sets ONE character in TWO. So the arrays cannot be sized from `n`, and the run is shaped in SEGMENTS
+	 * before anything is allocated: a segment is a piece of one FONT run at ONE resolved LEVEL, which is the unit
+	 * HarfBuzz is given, because its DIRECTION is the segment's and a level run inside a right-to-left paragraph is
+	 * left-to-right.
+	 *
+	 * **A SEGMENT IS ALSO WHERE A FACE THE SHAPER CANNOT READ IS HANDLED**, and it is handled by doing what this line
+	 * did before there was a shaper: one glyph per character, straight from the font. That is the right answer for a
+	 * face with no `GSUB` at all and an honest degradation for one whose tables HarfBuzz will not take — and the whole
+	 * LINE is refused only when even that fails. */
 	{
-		CFIndex r;
+		struct ct_line_segment {
+			CFIndex run;
+			CFIndex start;		/* character offset within the LINE's range */
+			CTShapedRun shaped;
+			bool fromShaper;	/* false = the one-glyph-per-character fallback */
+		};
+		struct ct_line_segment *segments;
+		CFIndex segmentCount = 0, glyphTotal = 0, r;
+		bool failed = false;
 
-		for (r = 0; r < line->runCount; r++) {
-			struct ct_line_run *run = &line->runInfo[r];
-
-			(void)CTFontGetGlyphsForCharacters(run->font, chars + run->start, line->glyphs + run->start,
-							   run->count);
-			(void)CTFontGetAdvancesForGlyphs(run->font, kCTFontHorizontalOrientation,
-							 line->glyphs + run->start, advances + run->start, run->count);
+		segments = (struct ct_line_segment *)calloc((size_t)n, sizeof(struct ct_line_segment));
+		if (segments == NULL) {
+			free(chars);
+			free(levels);
+			free(visualOrder);
+			CFRelease((CFTypeRef)line);
+			return NULL;
 		}
+		for (r = 0; r < line->runCount && !failed; r++) {
+			struct ct_line_run *run = &line->runInfo[r];
+			CTShaperRef shaper = CTShaperCreate(run->font);
+			CFIndex at = 0;
+
+			while (at < run->count && !failed) {
+				CFIndex end = at;
+				int level = (levels != NULL) ? (int)levels[run->start + at]
+							     : ((line->direction == kCTWritingDirectionRightToLeft) ? 1 : 0);
+				CTShapedRun shaped;
+				bool ok;
+
+				if (levels != NULL) {
+					while (end < run->count && (int)levels[run->start + end] == level) {
+						end++;
+					}
+				} else {
+					end = run->count;	/* no levels at all: the LINE's direction is the only one there is */
+				}
+				CTShapedRunZero(&shaped);
+				if (shaper != NULL) {
+					ok = CTShaperShape(shaper, chars + run->start + at, end - at,
+							   ((level % 2) != 0) ? kCTWritingDirectionRightToLeft
+									      : kCTWritingDirectionLeftToRight,
+							   NULL, NULL, &shaped);
+				} else {
+					ok = false;
+				}
+				if (!ok) {
+					/* THE FALLBACK: one glyph per character, which is what a line did before shaping. */
+					CFIndex c, count = end - at;
+					CGSize *adv = (CGSize *)malloc((size_t)count * sizeof(CGSize));
+					CGGlyph *gl = (CGGlyph *)malloc((size_t)count * sizeof(CGGlyph));
+					CFIndex *cl = (CFIndex *)malloc((size_t)count * sizeof(CFIndex));
+
+					if (adv == NULL || gl == NULL || cl == NULL) {
+						free(adv);
+						free(gl);
+						free(cl);
+						failed = true;
+						break;
+					}
+					(void)CTFontGetGlyphsForCharacters(run->font, chars + run->start + at, gl, count);
+					(void)CTFontGetAdvancesForGlyphs(run->font, kCTFontHorizontalOrientation, gl, adv, count);
+					for (c = 0; c < count; c++) {
+						cl[c] = at + c;
+					}
+					CTShapedRunZero(&shaped);
+					shaped.glyphs = gl;
+					shaped.advances = adv;
+					shaped.clusters = cl;
+					shaped.offsets = (CGPoint *)calloc((size_t)count, sizeof(CGPoint));
+					shaped.glyphCount = count;
+					segments[segmentCount].fromShaper = false;
+				} else {
+					segments[segmentCount].fromShaper = true;
+				}
+				segments[segmentCount].run = r;
+				segments[segmentCount].start = run->start + at;
+				segments[segmentCount].shaped = shaped;
+				glyphTotal += shaped.glyphCount;
+				segmentCount++;
+				at = end;
+			}
+			CTShaperRelease(shaper);
+		}
+		if (failed || glyphTotal <= 0) {
+			CFIndex d;
+
+			for (d = 0; d < segmentCount; d++) {
+				CTShapedRunFree(&segments[d].shaped);
+			}
+			free(segments);
+			free(chars);
+			free(levels);
+			free(visualOrder);
+			CFRelease((CFTypeRef)line);
+			return NULL;
+		}
+
+		/* **NOW THE ARRAYS CAN BE SIZED, BY THE SHAPER'S ANSWER RATHER THAN BY THE TEXT'S.** */
+		line->glyphs = (CGGlyph *)malloc((size_t)glyphTotal * sizeof(CGGlyph));
+		line->positions = (CGPoint *)malloc((size_t)glyphTotal * sizeof(CGPoint));
+		advances = (CGSize *)malloc((size_t)glyphTotal * sizeof(CGSize));
+		line->isBox = (bool *)calloc((size_t)glyphTotal, sizeof(bool));
+		line->clusters = (CFIndex *)malloc((size_t)glyphTotal * sizeof(CFIndex));
+		line->glyphCount = glyphTotal;
+		if (line->glyphs == NULL || line->positions == NULL || advances == NULL || line->isBox == NULL
+		    || line->clusters == NULL) {
+			CFIndex d;
+
+			for (d = 0; d < segmentCount; d++) {
+				CTShapedRunFree(&segments[d].shaped);
+			}
+			free(segments);
+			free(chars);
+			free(levels);
+			free(visualOrder);
+			CFRelease((CFTypeRef)line);
+			return NULL;
+		}
+		/* AND THE SEGMENTS ARE COPIED IN LOGICAL ORDER, which is the order they were made in: a font run's characters
+		 * ascending, and within a font run a level run's. Each run records WHERE ITS GLYPHS LAND, which is what the
+		 * draw and the `CTRun` doors slice by. */
+		{
+			CFIndex g = 0, d, runIndex = -1;
+
+			for (d = 0; d < segmentCount; d++) {
+				CTShapedRun *shaped = &segments[d].shaped;
+				CFIndex k;
+
+				if (segments[d].run != runIndex) {
+					runIndex = segments[d].run;
+					line->runInfo[runIndex].glyphStart = g;
+					line->runInfo[runIndex].glyphCount = 0;
+				}
+				for (k = 0; k < shaped->glyphCount; k++) {
+					line->glyphs[g] = shaped->glyphs[k];
+					advances[g] = shaped->advances[k];
+					/* **THE CLUSTER IS AN OFFSET INTO THE LINE'S OWN RANGE**, which is what every door below reads:
+					 * the shaper answers an index into the characters it was given, and the segment knows where
+					 * those began. */
+					line->clusters[g] = segments[d].start + shaped->clusters[k];
+					g++;
+				}
+				line->runInfo[runIndex].glyphCount += shaped->glyphCount;
+			}
+		}
+		for (r = 0; r < segmentCount; r++) {
+			CTShapedRunFree(&segments[r].shaped);
+		}
+		free(segments);
 	}
+
 	/* **AND A CHARACTER CARRYING A RUN DELEGATE IS A BOX, NOT A GLYPH.** Its advance is what the delegate answers rather
 	 * than what the placeholder glyph measured, no ink is drawn for it, and the line grows to cover the delegate's
-	 * ascent and descent — so a picture taller than the font's line makes the line taller. THE KERN IS SKIPPED AROUND A
-	 * BOX in the position loop below, because there is no pair of glyphs to adjust. */
+	 * ascent and descent — so a picture taller than the font's line makes the line taller. ITS GLYPH IS THE ONE THAT
+	 * STANDS FOR THAT CHARACTER, which the cluster map answers: shaping does not change which character a box is. */
 	for (i = 0; i < n; i++) {
 		CFTypeRef value = CFAttributedStringGetAttribute(string, range.location + i,
 								 kCTRunDelegateAttributeName, NULL);
 
 		if (value != NULL && CFGetTypeID(value) == CTRunDelegateGetTypeID()) {
 			CTRunDelegateRef delegate = (CTRunDelegateRef)value;
+			CFIndex owner = fn_line_cluster_owner(line, i);
 			CGFloat boxAscent = CTRunDelegateAscent(delegate);
 			CGFloat boxDescent = CTRunDelegateDescent(delegate);
 
-			line->isBox[i] = true;
-			line->glyphs[i] = 0;
-			advances[i] = CGSizeMake(CTRunDelegateWidth(delegate), 0.0);
+			if (owner >= 0) {
+				line->isBox[owner] = true;
+				line->glyphs[owner] = 0;
+				advances[owner] = CGSizeMake(CTRunDelegateWidth(delegate), 0.0);
+			}
 			if (boxAscent > line->ascent) {
 				line->ascent = boxAscent;
 			}
@@ -587,22 +731,19 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 			}
 		}
 	}
-	/* **AND THE PAIR'S OWN ADJUSTMENT AFTER EACH GLYPH, WHICH IS WHAT KERNING IS.** An advance is what a glyph
-	 * asks for on its own; a KERN is what the font's typographer said about the two glyphs TOGETHER — that an `o`
-	 * belongs closer under a `T` than their advances put it — and a line that sums advances and stops has thrown
-	 * that opinion away. MEASURED, the face this desktop draws with asks for `To` to close by 348 units of 2048:
-	 * an em's sixth, TWO PIXELS of daylight at 13 points, which is the width of a stem.
-	 *
-	 * IT IS APPLIED TO THE LINE'S OWN WIDTH AS WELL, because it is applied to `x` — so a line measures and draws
-	 * the same string, and every door that reads a position (`CTLineGetOffsetForStringIndex` and the hit test
-	 * above it) is reading the kerned ones because the kern is already inside the difference between two
-	 * positions. */
-	for (i = 0; i < n; i++) {
+	/* **AND THE POSITIONS ARE CUMULATIVE, IN GLYPH ORDER.** **THE KERN LOOP THAT USED TO LIVE HERE IS GONE, AND ITS
+	 * WORK IS THE SHAPER'S**: the pair adjustment is already inside the advance a shaped glyph carries — MEASURED, the
+	 * shaper's answer for `To` in this suite's face is the `kern` table's own -1.00928 points — so applying it again
+	 * here would apply it twice. What that costs is named rather than compensated for: a face the shaper cannot read
+	 * falls back to one glyph per character and is NOT kerned, which is a degradation of a case that has no `GSUB` to
+	 * be degraded from. A TAB still needs this loop, because a tab's width depends on where the pen already is. */
+	for (i = 0; i < line->glyphCount; i++) {
 		line->positions[i] = CGPointMake((CGFloat)x, 0.0);
 		/* **AND A TAB ADVANCES TO ITS STOP, WHICH DEPENDS ON WHERE THE PEN ALREADY IS.** It is a BOX — no ink — whose
 		 * width is the distance from here to the next stop, so the two halves of a document line up in columns the way a
-		 * typewriter's did. A tab with no stop ahead and no default interval is zero-width, which is the honest answer. */
-		if (chars[i] == '\t') {
+		 * typewriter's did. A tab with no stop ahead and no default interval is zero-width, which is the honest answer.
+		 * The character a glyph stands for is what says whether it is a tab, and the cluster map is what says that. */
+		if (chars[line->clusters[i]] == '\t') {
 			double stop = ct_line_next_tab_stop(tabs, tabCount, tabInterval, (double)x);
 
 			line->isBox[i] = true;
@@ -613,61 +754,107 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 			}
 		}
 		x += advances[i].width;
-		/* **A KERN IS A PAIR IN ONE FACE**: two glyphs from DIFFERENT runs have no shared typographer, so the pair
-		 * across a run boundary is not asked about. */
-		if (i + 1 < n && !line->isBox[i] && !line->isBox[i + 1]
-		    && fn_run_index(line, i) == fn_run_index(line, i + 1)) {
-			x += (CGFloat)CTFontGetKerningBetweenGlyphs(fn_run_font(line, i), line->glyphs[i],
-								    line->glyphs[i + 1]);
+	}
+	line->width = x;
+	/* **THE LEVELS BECOME PER-GLYPH, BECAUSE THE CARET DOORS ASK A GLYPH WHAT DIRECTION IT IS.** A glyph's direction is
+	 * its character's, so the array is re-indexed through the map; a line that never ran the pipeline has none. */
+	if (levels != NULL) {
+		uint8_t *glyphLevels = (uint8_t *)malloc((size_t)line->glyphCount * sizeof(uint8_t));
+
+		if (glyphLevels != NULL) {
+			for (i = 0; i < line->glyphCount; i++) {
+				glyphLevels[i] = levels[line->clusters[i]];
+			}
+			free(levels);
+			levels = glyphLevels;
 		}
 	}
-	line->glyphCount = n;
-	line->width = x;
-	/* THE TRAILING WHITESPACE IS MEASURED BACKWARDS OVER THE CHARACTERS THIS LINE HAS, because that is what the door
-	 * is about: the part of the line's width that is invisible at its end. */
+	/* **AND THE TRAILING WHITESPACE IS MEASURED BACKWARDS OVER THE CHARACTERS THIS LINE HAS**, adding each whitespace
+	 * CHARACTER's glyph advance ONCE — which is what `clusters[owner] == i` says: that glyph begins here, so the
+	 * characters it also covers have already been counted with it. */
 	for (i = n - 1; i >= 0 && ct_line_is_whitespace(chars[i]); i--) {
-		line->trailingWhitespace += advances[i].width;
+		CFIndex owner = fn_line_cluster_owner(line, i);
+
+		if (owner >= 0 && line->clusters[owner] == i) {
+			line->trailingWhitespace += advances[owner].width;
+		}
 	}
 	/* **AND THE GLYPHS ARE PLACED IN THE VISUAL ORDER THE PIPELINE IMPLIES.** The advances are KEPT — a reordered
 	 * glyph's advance is not recoverable from its neighbours' positions — and when the order is not the identity the
 	 * positions are REWRITTEN so that the glyphs run in visual order, which is what the draw reads: a glyph array
-	 * indexed by LOGICAL character with a position that says where it GOES. Kerning is taken between VISUAL
-	 * neighbours, because that is the pair the eye sees. */
+	 * indexed by LOGICAL GLYPH with a position that says where it GOES.
+	 *
+	 * **AND THE ORDER IS BUILT OVER GLYPHS FROM THE ORDER OVER CHARACTERS**, which is the one step that lets the whole
+	 * bidi pipeline stay exactly as it was: walking the character-level order and emitting each glyph ONCE, at the
+	 * first character it covers, gives the visual sequence of glyphs for every case — a ligature emitted at its first
+	 * character, a right-to-left run already ordered by the shaper and kept so, and a line of plain left-to-right text
+	 * left exactly as it was. */
 	line->advances = advances;
 	if (visualOrder != NULL && moved) {
-		CGPoint *placed = (CGPoint *)malloc((size_t)n * sizeof(CGPoint));
+		CFIndex *glyphOrder = (CFIndex *)malloc((size_t)line->glyphCount * sizeof(CFIndex));
+		bool *emitted = (bool *)calloc((size_t)line->glyphCount, sizeof(bool));
+		CGPoint *placed = (CGPoint *)malloc((size_t)line->glyphCount * sizeof(CGPoint));
 
-		if (placed != NULL) {
+		if (glyphOrder != NULL && emitted != NULL && placed != NULL) {
+			CFIndex filled = 0, k;
 			double placedX = 0.0;
-			CFIndex k;
 
-			for (k = 0; k < n; k++) {
-				CFIndex logical = visualOrder[k];
+			for (k = 0; k < n && filled < line->glyphCount; k++) {
+				CFIndex owner = fn_line_cluster_owner(line, visualOrder[k]);
 
-				placed[logical] = CGPointMake((CGFloat)placedX, 0.0);
-				placedX += advances[logical].width;
-				if (k + 1 < n && !line->isBox[logical] && !line->isBox[visualOrder[k + 1]]
-				    && fn_run_index(line, logical) == fn_run_index(line, visualOrder[k + 1])) {
-					placedX += (CGFloat)CTFontGetKerningBetweenGlyphs(fn_run_font(line, logical),
-										line->glyphs[logical],
-										line->glyphs[visualOrder[k + 1]]);
+				if (owner >= 0 && !emitted[owner]) {
+					emitted[owner] = true;
+					glyphOrder[filled++] = owner;
 				}
 			}
-			for (k = 0; k < n; k++) {
+			/* A GLYPH THE WALK DID NOT REACH — which cannot happen for a well-formed map — is APPENDED rather than
+			 * dropped, because a dropped glyph is a character that vanishes from the layout. */
+			for (k = 0; k < line->glyphCount && filled < line->glyphCount; k++) {
+				if (!emitted[k]) {
+					emitted[k] = true;
+					glyphOrder[filled++] = k;
+				}
+			}
+			for (k = 0; k < line->glyphCount; k++) {
+				CFIndex g = glyphOrder[k];
+
+				placed[g] = CGPointMake((CGFloat)placedX, 0.0);
+				placedX += advances[g].width;
+			}
+			for (k = 0; k < line->glyphCount; k++) {
 				line->positions[k] = placed[k];
 			}
 			line->width = placedX;
-			line->visualOrder = visualOrder;
-			line->nonMonotonic = true;
+			free(visualOrder);	/* the CHARACTER-level order is not the line's; the GLYPH one is */
 			visualOrder = NULL;
-			free(placed);
+			line->visualOrder = glyphOrder;
+			glyphOrder = NULL;
 		}
+		free(glyphOrder);
+		free(emitted);
+		free(placed);
 	}
+	line->advances = advances;
 	line->levels = levels;	/* the caret doors read it; NULL when the pipeline could not run */
+	/* **AND `NonMonotonic` IS THE STRING INDICES' OWN FACT**, which is what Apple's flag is about: a run is
+	 * non-monotonic when its glyphs' string indices do not ascend. The pipeline moving the characters is one reason
+	 * that happens and THE SHAPER IS A SECOND — a right-to-left run comes back in visual order whether or not the
+	 * pipeline ran at all — so both are asked rather than just the first. */
+	{
+		bool ascending = true;
+
+		for (i = 1; i < line->glyphCount; i++) {
+			if (line->clusters[i] < line->clusters[i - 1]) {
+				ascending = false;
+			}
+		}
+		line->nonMonotonic = moved || !ascending;
+	}
 	free(visualOrder);
 	free(chars);
 	return (CTLineRef)line;
 }
+
 
 /* =================================================================================================
  * CREATION.
@@ -875,8 +1062,8 @@ void CTLineDraw(CTLineRef line, CGContextRef context)
 	 * run, so the boxes come out once per font run. */
 	for (r = 0; r < ((l->runCount > 0) ? l->runCount : 1); r++) {
 		CTFontRef runFont = (l->runCount > 0) ? l->runInfo[r].font : l->font;
-		CFIndex start = (l->runCount > 0) ? l->runInfo[r].start : 0;
-		CFIndex count = (l->runCount > 0) ? l->runInfo[r].count : l->glyphCount;
+		CFIndex start = (l->runCount > 0) ? l->runInfo[r].glyphStart : 0;
+		CFIndex count = (l->runCount > 0) ? l->runInfo[r].glyphCount : l->glyphCount;
 		CGFontRef graphics = CTFontCopyGraphicsFont(runFont, NULL);
 		CGGlyph *drawGlyphs;
 		CGPoint *drawPositions;
@@ -1116,8 +1303,8 @@ CFArrayRef CTLineGetGlyphRuns(CTLineRef line)
 		return NULL;
 	}
 	for (r = 0; r < ((l->runCount > 0) ? l->runCount : 1); r++) {
-		CFIndex start = (l->runCount > 0) ? l->runInfo[r].start : 0;
-		CFIndex count = (l->runCount > 0) ? l->runInfo[r].count : l->glyphCount;
+		CFIndex start = (l->runCount > 0) ? l->runInfo[r].glyphStart : 0;
+		CFIndex count = (l->runCount > 0) ? l->runInfo[r].glyphCount : l->glyphCount;
 		CTFontRef font = (l->runCount > 0) ? l->runInfo[r].font : l->font;
 		CFDictionaryRef attributes;
 		CFIndex *indices;
