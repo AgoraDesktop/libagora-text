@@ -5739,6 +5739,127 @@ static int case_bidi_mirroring(void)
 	return g_fail - before;
 }
 
+/* **AND A LINE IS NOT ALWAYS ONE FACE.** The run array's whole point is that a line holds AS MANY FONTS AS ITS
+ * ATTRIBUTES ASK FOR, so this case sets four characters in TWO faces and reads the partition back three ways: the run
+ * COUNT, each run's OWN font out of its attributes, and each run's glyphs INDEXED IN THAT FONT — the last is what
+ * separates a real second run from a first font drawing glyphs that face never made. The width closes it: a line of two
+ * runs is as wide as the two lines it is made of, measured separately. The two faces are a MONOSPACE and a PROPORTIONAL
+ * one so that they cannot agree by accident. */
+static int case_line_font_runs(void)
+{
+	int before = g_fail;
+	const char *pathB = "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf";
+	CTFontRef fontA = test_font(20.0);
+	CGDataProviderRef providerB = (access(pathB, R_OK) == 0) ? CGDataProviderCreateWithFilename(pathB) : NULL;
+	CGFontRef faceB = (providerB != NULL) ? CGFontCreateWithDataProvider(providerB) : NULL;
+	CTFontRef fontB = NULL;
+
+	if (faceB != NULL) {
+		check(cg_font_register(pathB) != 0 || cg_font_is_registered(pathB),
+		      "the second face at %s could not be registered", pathB);
+		fontB = CTFontCreateWithName(CFSTR("DejaVuSerif"), 20.0, NULL);
+		if (fontB == NULL) {
+			fontB = CTFontCreateWithGraphicsFont(faceB, 20.0, NULL, NULL);
+		}
+	}
+	check(fontA != NULL && fontB != NULL, "the two faces of the font-run case could not be made");
+	if (fontA != NULL && fontB != NULL) {
+		UniChar chars[] = { 'A', 'A', 'A', 'A' };
+		UniChar pair[] = { 'A', 'A' };
+		UniChar cap = 'A';
+		CFStringRef text = CFStringCreateWithCharacters(kCFAllocatorDefault, chars, 4);
+		CFStringRef two = CFStringCreateWithCharacters(kCFAllocatorDefault, pair, 2);
+		CFMutableDictionaryRef attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
+			&kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+		CFAttributedStringRef base = NULL, runA = NULL, runB = NULL;
+		CFMutableAttributedStringRef astr = NULL;
+		CTLineRef mixed = NULL, lineA = NULL, lineB = NULL;
+		CGGlyph glyphA = 0, glyphB = 0;
+
+		if (attrs != NULL && text != NULL && two != NULL) {
+			CFDictionarySetValue(attrs, kCTFontAttributeName, fontA);
+			base = CFAttributedStringCreate(kCFAllocatorDefault, text, attrs);
+			if (base != NULL) {
+				astr = CFAttributedStringCreateMutableCopy(kCFAllocatorDefault, 0, base);
+			}
+			if (astr != NULL) {
+				/* THE SECOND FACE COVERS THE SECOND HALF: that is the whole input to the partition. */
+				CFAttributedStringSetAttribute(astr, CFRangeMake(2, 2), kCTFontAttributeName, fontB);
+				mixed = CTLineCreateWithAttributedString(astr);
+			}
+			CFDictionarySetValue(attrs, kCTFontAttributeName, fontB);
+			runB = CFAttributedStringCreate(kCFAllocatorDefault, two, attrs);
+			lineB = (runB != NULL) ? CTLineCreateWithAttributedString(runB) : NULL;
+			CFDictionarySetValue(attrs, kCTFontAttributeName, fontA);
+			runA = CFAttributedStringCreate(kCFAllocatorDefault, two, attrs);
+			lineA = (runA != NULL) ? CTLineCreateWithAttributedString(runA) : NULL;
+		}
+		(void)CTFontGetGlyphsForCharacters(fontA, &cap, &glyphA, 1);
+		(void)CTFontGetGlyphsForCharacters(fontB, &cap, &glyphB, 1);
+		check(mixed != NULL && lineA != NULL && lineB != NULL, "the font-run lines were made");
+		if (mixed != NULL && lineA != NULL && lineB != NULL) {
+			CFArrayRef runs = CTLineGetGlyphRuns(mixed);
+			CFIndex count = (runs != NULL) ? CFArrayGetCount(runs) : 0;
+			double wMixed = CTLineGetTypographicBounds(mixed, NULL, NULL, NULL);
+			double wA = CTLineGetTypographicBounds(lineA, NULL, NULL, NULL);
+			double wB = CTLineGetTypographicBounds(lineB, NULL, NULL, NULL);
+
+			printf("  (font runs: %ld; the two faces apart %g and %g, together %g; `A` is glyph %u then %u)\n",
+			       (long)count, wA, wB, wMixed, (unsigned)glyphA, (unsigned)glyphB);
+			check(count == 2, "a two-font line reports TWO runs");
+			if (count == 2) {
+				CTRunRef r0 = (CTRunRef)CFArrayGetValueAtIndex(runs, 0);
+				CTRunRef r1 = (CTRunRef)CFArrayGetValueAtIndex(runs, 1);
+				CFDictionaryRef a0 = CTRunGetAttributes(r0);
+				CFDictionaryRef a1 = CTRunGetAttributes(r1);
+				const void *f0 = (a0 != NULL) ? CFDictionaryGetValue(a0, kCTFontAttributeName) : NULL;
+				const void *f1 = (a1 != NULL) ? CFDictionaryGetValue(a1, kCTFontAttributeName) : NULL;
+				const CGGlyph *g0 = CTRunGetGlyphsPtr(r0);
+				const CGGlyph *g1 = CTRunGetGlyphsPtr(r1);
+				const CGSize *adv0 = CTRunGetAdvancesPtr(r0);
+				const CGSize *adv1 = CTRunGetAdvancesPtr(r1);
+				CGSize advA = CGSizeMake(0.0, 0.0), advB = CGSizeMake(0.0, 0.0);
+				CFRange sr0 = CTRunGetStringRange(r0);
+				CFRange sr1 = CTRunGetStringRange(r1);
+
+				(void)CTFontGetAdvancesForGlyphs(fontA, kCTFontHorizontalOrientation, &glyphA, &advA, 1);
+				(void)CTFontGetAdvancesForGlyphs(fontB, kCTFontHorizontalOrientation, &glyphB, &advB, 1);
+				check(f0 == (const void *)fontA && f1 == (const void *)fontB,
+				      "each run's attributes name its OWN face");
+				check(sr0.location == 0 && sr0.length == 2 && sr1.location == 2 && sr1.length == 2,
+				      "and its own half of the string");
+				check(CTRunGetGlyphCount(r0) == 2 && CTRunGetGlyphCount(r1) == 2,
+				      "two glyphs each, one per character");
+				check(g0 != NULL && g1 != NULL && g0[0] == glyphA && g1[0] == glyphB,
+				      "each run's glyphs are the ones ITS OWN face maps the character to");
+				check(adv0 != NULL && adv1 != NULL && fabs(adv0[0].width - advA.width) < 0.001
+				      && fabs(adv1[0].width - advB.width) < 0.001 && advA.width != advB.width,
+				      "and each run's advance is its own face's, a difference no single face could show");
+				check((CTRunGetStatus(r0) & kCTRunStatusNonMonotonic) == 0
+				      && (CTRunGetStatus(r1) & kCTRunStatusNonMonotonic) == 0,
+				      "while two running left-to-right are still monotonic");
+				check(fabs((wA + wB) - wMixed) < 0.01,
+				      "and the mixed line is exactly as wide as the two faces measured apart");
+			}
+		}
+		if (mixed != NULL) CFRelease(mixed);
+		if (lineA != NULL) CFRelease(lineA);
+		if (lineB != NULL) CFRelease(lineB);
+		if (runA != NULL) CFRelease(runA);
+		if (runB != NULL) CFRelease(runB);
+		if (astr != NULL) CFRelease(astr);
+		if (base != NULL) CFRelease(base);
+		if (text != NULL) CFRelease(text);
+		if (two != NULL) CFRelease(two);
+		if (attrs != NULL) CFRelease(attrs);
+	}
+	if (fontA != NULL) CFRelease(fontA);
+	if (fontB != NULL) CFRelease(fontB);
+	if (faceB != NULL) CGFontRelease(faceB);
+	if (providerB != NULL) CGDataProviderRelease(providerB);
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -5781,6 +5902,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The reordering L1 and L2", case_bidi_reordering },
 	{ "A right-to-left line's glyphs are placed right to left", case_line_bidi_reorder },
 	{ "The mirrored glyph L4", case_bidi_mirroring },
+	{ "A line holds two fonts, and each run is indexed in its own", case_line_font_runs },
 	{ "And the FRAMESETTER path is kerned too, which is where the AppKit draws", case_frame_kerning },
 	{ "Matching finds the faces a query describes, in a stable order", case_font_matching },
 	{ "A disabled face leaves every matching answer, and comes back", case_font_visibility },

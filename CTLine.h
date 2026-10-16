@@ -12,30 +12,38 @@
  *
  * A LINE IS ONE PASS OVER THE STRING, AND THAT IS THE BOUNDARY THIS TIER DRAWS. Apple's own sentence for the
  * main creator is that "without a typesetter object, the line cannot be properly broken" — the line is the
- * SIMPLE case, and the breaking is the typesetter's. WHAT THIS TIER BUILDS IS ONE RUN: the characters mapped to
- * glyphs through the font the attributed string names (`CTFontGetGlyphsForCharacters` — the door this library
- * exists for), positioned by that font's own advances (`CTFontGetAdvancesForGlyphs`), measured with its
- * ascent, descent and leading. SO EVERY CHARACTER IN THE STRING IS IN THE LINE, the string range is the whole
- * string, and the width is the sum of the advances.
+ * SIMPLE case, and the breaking is the typesetter's. WHAT THIS TIER BUILDS IS ONE GLYPH PER CHARACTER, MAPPED
+ * THROUGH THE FACE THAT CHARACTER IS SET IN (`CTFontGetGlyphsForCharacters` — the door this library exists for),
+ * positioned by that font's own advances (`CTFontGetAdvancesForGlyphs`), measured with its ascent, descent and
+ * leading. SO EVERY CHARACTER IN THE STRING IS IN THE LINE, the string range is the whole string, and the width is
+ * the sum of the advances.
  *
- * WHAT IS THEREFORE NOT ATTEMPTED, SAID PLAINLY: MULTI-RUN LINES AND SHAPING. A line with two fonts, or a script
- * needing ligatures or contextual forms, is NOT laid out correctly here. **AND THE GLYPHS ARE REORDERED, WHICH IS THE
- * BIDI MILESTONE'S PAYOFF**: the line runs the whole pipeline over its own characters, PLACES each glyph where the
- * visual order says, and reports `kCTRunStatusNonMonotonic` — so a Hebrew letter in a Latin paragraph is drawn to the
- * right of the one before it. THE CARET DOORS SPEAK VISUAL ORDER, and an offset is the character's LEADING edge — its
- * LEFT one at an even level and its RIGHT one at an odd level. The multi-run model is named as owed. Multi-run and
- * complex scripts are the HarfBuzz milestone this project's Core Text plan already names.
+ * **AND THE LINE IS PARTITIONED INTO FONT RUNS, ONE PER FACE THE STRING ASKS FOR.** A string set entirely in one
+ * face is ONE run, which is the common case and the one every other door was written against; a string that changes
+ * face in the middle is TWO or more, each with its own font, its own slice of the string, and glyphs INDEXED IN THAT
+ * FACE — because a glyph index means nothing without the face it came from. `CTLineGetGlyphRuns` is where the
+ * partition is visible, and `CTLine.c` records that a run boundary is where the FONT changes and not where the
+ * attribute dictionary does, so a run delegate or a tab in the middle does NOT split a run.
+ *
+ * WHAT IS THEREFORE NOT ATTEMPTED, SAID PLAINLY: SHAPING. A script needing ligatures or contextual forms is NOT laid
+ * out correctly here, and neither is a line whose glyphs are not one per character. **AND THE GLYPHS ARE REORDERED,
+ * WHICH IS THE BIDI MILESTONE'S PAYOFF**: the line runs the whole pipeline over its own characters, PLACES each glyph
+ * where the visual order says, and reports `kCTRunStatusNonMonotonic` — so a Hebrew letter in a Latin paragraph is
+ * drawn to the right of the one before it. THE CARET DOORS SPEAK VISUAL ORDER, and an offset is the character's
+ * LEADING edge — its LEFT one at an even level and its RIGHT one at an odd level. Shaping and complex scripts are the
+ * HarfBuzz milestone this project's Core Text plan already names.
  *
  * **A RUN DELEGATE, THOUGH, IS HONORED.** A character whose attributes carry `kCTRunDelegateAttributeName` is a BOX:
  * its advance is the delegate's width rather than the placeholder glyph's, the line's ascent and descent grow to cover
  * the delegate's, and no ink is drawn for it — which is how an attachment, an inline picture or a tab occupies space
- * without being a glyph. It is still ONE run (see `CTRunDelegate.h`), so it neither needs nor claims the multi-run
- * machinery above.
+ * without being a glyph. It changes the ADVANCE and not the FACE (see `CTRunDelegate.h`), so it does not split a run.
  *
- * AND THREE DOORS ARE OWED, EACH DECLARED AND NOT DEFINED, so a caller who reaches for one gets a link error
- * rather than an invented answer. `CTLine.c` carries the reason for each; the shortest of the three is the one
- * worth knowing before reading on: A LINE'S RUNS ARE `CTRunRef`s, AND `CTRun` DOES NOT EXIST YET — Apple's own
- * include order puts its header after this one, which is why this header never mentions it.
+ * **AND EVERY DOOR THIS HEADER DECLARES IS NOW IMPLEMENTED**: nothing here is left declared-and-not-defined, so a
+ * caller cannot reach a LINK ERROR through this file. The doors that once waited — `CTLineGetGlyphRuns` and
+ * `CTLineCreateTruncatedLine` among them — have all landed, and `CTLine.c` records the reason each one waited where
+ * that reason is still worth knowing. THE ONE NAMING FACT TO KEEP: `CTRun` arrived WITH `CTLineGetGlyphRuns`, and this
+ * header still names no run type, because Apple's include order puts `CTRun.h` AFTER this one — which is why the door
+ * answers a `CFArrayRef` and its comment says so.
  */
 #ifndef CORE_TEXT_CTLINE_H
 #define CORE_TEXT_CTLINE_H
@@ -65,7 +73,8 @@ CFTypeID CTLineGetTypeID(void);
 /* ---------------------------------------------------------------------------------------
  * CREATION. One door is answered and two are owed.
  * ------------------------------------------------------------------------------------- */
-/* THE WHOLE STRING, AS ONE RUN, IN THE FONT THE ATTRIBUTED STRING NAMES. NULL when there is no such font: a
+/* THE WHOLE STRING, IN THE FACES THE ATTRIBUTED STRING NAMES — ONE RUN PER FACE. NULL when there is no font at the
+ * line's first character: a
  * line has no default face to fall back to, because Apple's contract is that the caller supplies one AS AN
  * ATTRIBUTE, and substituting a face the caller did not ask for is exactly the inventing this library refuses.
  * AND A STRING OF LENGTH ZERO ANSWERS NULL for the same reason: there is no character to carry the attribute, so
@@ -131,8 +140,9 @@ CGFloat CTLineGetOffsetForStringIndex(CTLineRef line, CFIndex charIndex, CGFloat
 /* THE RUNS THAT MAKE THE LINE UP, which is where this header meets `CTRun` — a type whose OWN header comes AFTER
  * this one in Apple's include order, and which is therefore not named here at all: what comes back is a
  * `CFArrayRef` of them. THE REFERENCE IS BORROWED, owned by the line — Apple's name for this door is `Get` and not
- * `Copy`, and its documentation says nothing about releasing. THIS TIER'S LINES HAVE ONE RUN EACH (see this file's
- * head), and `CTLine.c` records what changes the day a line can hold two fonts. */
+ * `Copy`, and its documentation says nothing about releasing. **THIS TIER'S LINES HAVE ONE RUN PER FACE THEY ARE SET
+ * IN** (see this file's head): a string in one font is ONE run, and a string that changes face is TWO, each run
+ * carrying its own font and the glyphs indexed in it. */
 CFArrayRef CTLineGetGlyphRuns(CTLineRef line);
 
 /* ---------------------------------------------------------------------------------------

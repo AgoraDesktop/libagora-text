@@ -10,13 +10,15 @@
  * descent and leading are the line's heights. Everything else in this file is arithmetic over those, or a call to
  * Core Graphics to put the ink on a page.
  *
- * SO IT IS ONE RUN, AND THE HEADER SAYS WHAT THAT COSTS. No line breaking, no two fonts in one line and no SHAPING.
+ * SO A LINE IS AS MANY RUNS AS ITS STRING HAS FACES, AND THE HEADER SAYS WHAT THAT STILL COSTS. No line breaking and
+ * no SHAPING: one glyph per character, each mapped through the face THAT CHARACTER is set in.
  * **AND THE GLYPHS ARE REORDERED WHEN THE TEXT CALLS FOR IT**: the line runs the WHOLE bidirectional pipeline
  * (`CTBidi_internal.h`) over its own characters and, when the visual order is not the logical one, PLACES each glyph
  * where the reordering says — a Hebrew letter in a Latin paragraph is drawn to the RIGHT of the Latin one before it
- * — and the run reports `kCTRunStatusNonMonotonic`. THE CARET DOORS SPEAK VISUAL ORDER: the hit test walks the visual
+ * — and the runs report `kCTRunStatusNonMonotonic`. THE CARET DOORS SPEAK VISUAL ORDER: the hit test walks the visual
  * slots, and an offset is the character's LEADING edge — its LEFT one at an even level and its RIGHT one at an odd
- * level. What is still owed is the MULTI-RUN model a non-monotonic line wants.
+ * level. What is still owed is the SHAPING the HarfBuzz milestone names, which is a line whose glyphs are not one per
+ * character.
  */
 #include <CoreText/CTLine.h>
 
@@ -56,10 +58,24 @@
 /* =================================================================================================
  * THE OBJECT.
  * =============================================================================================== */
+/* **ONE FONT RUN OF A LINE: the face, the characters it is set in, and where its glyphs begin.** A line is one or
+ * more of these; a line with one face has EXACTLY one, which is why every door that read `line->font` still has an
+ * answer. The fonts are retained by the line's `runFonts` array and BORROWED here. */
+struct ct_line_run {
+	CTFontRef font;
+	CFIndex start;		/* character offset within the LINE's range */
+	CFIndex count;
+	CFIndex glyphStart;
+	CGFloat ascent, descent, leading;
+};
+
 struct __CTLine {
 	CFRuntimeBase base;
 	CFAttributedStringRef string;	/* RETAINED: the string this line was made from */
-	CTFontRef font;			/* RETAINED: the face the whole line is set in */
+	CTFontRef font;			/* RETAINED: the FIRST run's face, for the doors that want one */
+	CFArrayRef runFonts;		/* RETAINED: one font per run */
+	struct ct_line_run *runInfo;	/* malloc'd, runCount entries */
+	CFIndex runCount;
 	CFRange range;			/* the characters that spawned the glyphs */
 	CGGlyph *glyphs;		/* malloc'd, glyphCount entries */
 	CGPoint *positions;		/* malloc'd, glyphCount entries, relative to the LINE's own origin */
@@ -85,11 +101,10 @@ struct __CTLine {
 	/* **AND THE DIRECTION THE PARAGRAPH RUNS IN**, read once at the line's first character and RESOLVED by P2/P3 when
 	 * the caller left it natural: `kCTRunStatusRightToLeft` is what a run reports from it. */
 	CTWritingDirection direction;
-	/* AND ITS ONE RUN, BUILT ON FIRST ASK RATHER THAN AT CREATION: a line that is only measured never pays for a
-	 * run, and a line whose runs are asked for pays for exactly one. `runs` is the ARRAY the door hands out, kept
-	 * so that two calls give a caller the same object rather than two arrays holding the same run. */
-	CTRunRef run;			/* RETAINED once built */
-	CFArrayRef runs;		/* RETAINED once built: one array holding that one run */
+	/* AND ITS RUNS, BUILT ON FIRST ASK RATHER THAN AT CREATION: a line that is only measured never pays for a run, and a
+	 * line whose runs are asked for pays for one per FONT run. `runs` is the ARRAY the door hands out, kept so that two
+	 * calls give a caller the same object rather than two arrays holding the same runs. */
+	CFArrayRef runs;		/* RETAINED once built: one array holding one run per font run */
 };
 
 static void ct_line_finalize(CFTypeRef cf)
@@ -102,9 +117,10 @@ static void ct_line_finalize(CFTypeRef cf)
 	if (line->font != NULL) {
 		CFRelease(line->font);
 	}
-	if (line->run != NULL) {
-		CFRelease(line->run);
+	if (line->runFonts != NULL) {
+		CFRelease(line->runFonts);
 	}
+	free(line->runInfo);
 	if (line->runs != NULL) {
 		CFRelease(line->runs);
 	}
@@ -116,20 +132,22 @@ static void ct_line_finalize(CFTypeRef cf)
 	free(line->isBox);
 }
 
-/* TWO LINES ARE EQUAL WHEN THEY WERE MADE FROM THE SAME STRING IN THE SAME FONT: the glyphs and their positions are
- * a FUNCTION of those two, so comparing them would be comparing the same fact twice. */
+/* TWO LINES ARE EQUAL WHEN THEY WERE MADE FROM THE SAME STRING, WITH THE SAME FACES OVER THE SAME RANGES, AND COVER
+ * THE SAME CHARACTERS: the glyphs and their positions are a FUNCTION of those facts, so comparing them would be
+ * comparing the same thing twice. **THE FACES ARE COMPARED AS THE WHOLE SEQUENCE AND NOT AS THE FIRST ONE** —
+ * `runFonts` is one entry per font run, so two lines that share a first face but differ in a later one are two lines. */
 static Boolean ct_line_equal(CFTypeRef cf1, CFTypeRef cf2)
 {
 	const struct __CTLine *a = (const struct __CTLine *)cf1;
 	const struct __CTLine *b = (const struct __CTLine *)cf2;
 
-	if ((a->string == NULL) != (b->string == NULL) || (a->font == NULL) != (b->font == NULL)) {
+	if ((a->string == NULL) != (b->string == NULL) || (a->runFonts == NULL) != (b->runFonts == NULL)) {
 		return false;
 	}
 	if (a->string != NULL && !CFEqual(a->string, b->string)) {
 		return false;
 	}
-	if (a->font != NULL && !CFEqual(a->font, b->font)) {
+	if (a->runFonts != NULL && !CFEqual(a->runFonts, b->runFonts)) {
 		return false;
 	}
 	return a->range.location == b->range.location && a->range.length == b->range.length;
@@ -143,8 +161,8 @@ static CFHashCode ct_line_hash(CFTypeRef cf)
 	if (line->string != NULL) {
 		h = h * 31u + CFHash(line->string);
 	}
-	if (line->font != NULL) {
-		h = h * 31u + CFHash(line->font);
+	if (line->runFonts != NULL) {
+		h = h * 31u + CFHash(line->runFonts);
 	}
 	return h * 31u + (CFHashCode)line->range.length;
 }
@@ -172,7 +190,7 @@ CFTypeID CTLineGetTypeID(void)
 }
 
 /* =================================================================================================
- * THE BUILD. One pass over the string, in one font.
+ * THE BUILD. One pass over the string, one glyph per character, in EACH CHARACTER'S OWN FACE.
  * =============================================================================================== */
 /* WHETHER A CHARACTER IS WHITESPACE, BY CORE FOUNDATION'S OWN ANSWER rather than by a list written here: the
  * trailing-whitespace door asks a typographic question and the character set is where the answer already lives. A
@@ -307,6 +325,79 @@ static double ct_line_next_tab_stop(CFArrayRef tabs, CFIndex count, double inter
 	return x;
 }
 
+/* **THE FONT RUNS OF A LINE'S RANGE.** A run is a maximal span whose `kCTFontAttributeName` is the SAME font — `CFEqual`
+ * compares two equal faces as one run — and a character with NO font attribute falls back to the face the caller passed,
+ * which is what a line built from an attribution with no font at all is made of. `runs` must hold `range.length`
+ * entries; `fonts` collects each run's face, which the runs BORROW. */
+static CFIndex fn_font_runs(CFAttributedStringRef string, CFRange range, CTFontRef fallback, CFMutableArrayRef fonts,
+			    struct ct_line_run *runs)
+{
+	CFIndex runCount = 0;
+	CFIndex pos = 0;
+
+	while (pos < range.length) {
+		CFRange effective = CFRangeMake(0, 0);
+		CFRange limit = CFRangeMake(range.location, range.length);
+		/* **THE LONGEST RANGE WITH THE SAME FACE**, NOT the effective range of the RUN the character sits in: a run says
+		 * where the ATTRIBUTE DICTIONARY changes, and a line's font runs must be where the FONT changes — a string that
+		 * sets a run delegate or a tab attribute in the middle would otherwise split into runs that share one face. */
+		CTFontRef font = (CTFontRef)CFAttributedStringGetAttributeAndLongestEffectiveRange(string,
+				range.location + pos, kCTFontAttributeName, limit, &effective);
+		CFIndex end;
+
+		if (font == NULL || CFGetTypeID(font) != CTFontGetTypeID()) {
+			font = fallback;
+		}
+		end = effective.location + effective.length - range.location;
+		if (end > range.length) {
+			end = range.length;
+		}
+		if (end <= pos) {
+			end = pos + 1;
+		}
+		runs[runCount].font = font;
+		runs[runCount].start = pos;
+		runs[runCount].count = end - pos;
+		runs[runCount].glyphStart = pos;
+		runs[runCount].ascent = CTFontGetAscent(font);
+		runs[runCount].descent = CTFontGetDescent(font);
+		runs[runCount].leading = CTFontGetLeading(font);
+		CFArrayAppendValue(fonts, font);
+		runCount++;
+		pos = end;
+	}
+	return runCount;
+}
+
+/* THE RUN A CHARACTER BELONGS TO, by binary search over runs that are CONTIGUOUS and in order. */
+static CFIndex fn_run_index(const struct __CTLine *line, CFIndex charIndex)
+{
+	CFIndex lo = 0;
+	CFIndex hi = line->runCount;
+
+	while (lo < hi) {
+		CFIndex mid = lo + (hi - lo) / 2;
+
+		if (charIndex < line->runInfo[mid].start) {
+			hi = mid;
+		} else if (charIndex >= line->runInfo[mid].start + line->runInfo[mid].count) {
+			lo = mid + 1;
+		} else {
+			return mid;
+		}
+	}
+	return (line->runCount > 0) ? line->runCount - 1 : 0;
+}
+
+/* AND THE FACE OF THE RUN A CHARACTER BELONGS TO, for a kerning pair and for the draw. */
+static CTFontRef fn_run_font(const struct __CTLine *line, CFIndex charIndex)
+{
+	if (line->runCount == 0) {
+		return line->font;
+	}
+	return line->runInfo[fn_run_index(line, charIndex)].font;
+}
+
 /* THE ONE PLACE A LINE IS MADE, AND IT IS ALWAYS MADE OVER A RANGE. A whole-string line and a typeset line differ in
  * ONE number — where the glyphs begin — so they are one function with the range as a parameter rather than two
  * functions that could drift apart. `font` is BORROWED by the callers and RETAINED here. */
@@ -332,18 +423,39 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 		return NULL;
 	}
 	line->string = (CFAttributedStringRef)CFRetain(string);
-	line->font = (CTFontRef)CFRetain(font);
 	/* THE RANGE IS THE STRING'S OWN AND STAYS THE STRING'S OWN, which is the whole point of the parameter: a line cut
 	 * out of the MIDDLE of a document reports the range it covers THERE, so a caller laying out line after line never
 	 * has to translate between the line's coordinates and the string's. */
 	line->range = range;
 	line->direction = ct_line_base_direction(string, range);
-	/* THE HEIGHTS ARE THE FONT'S AND NOT THE GLYPHS', which is what a framesetter needs: line after line placed
-	 * without measuring glyph by glyph. They are read even for a line of nothing, so that a line still has a
-	 * baseline to sit on. */
-	line->ascent = CTFontGetAscent(font);
-	line->descent = CTFontGetDescent(font);
-	line->leading = CTFontGetLeading(font);
+	/* **THE FONT RUNS, WHICH IS WHAT MAKES A LINE MORE THAN ONE FACE.** */
+	line->runFonts = CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks);
+	line->runInfo = (struct ct_line_run *)malloc((size_t)((range.length > 0) ? range.length : 1)
+						     * sizeof(struct ct_line_run));
+	if (line->runFonts == NULL || line->runInfo == NULL) {
+		CFRelease((CFTypeRef)line);	/* the finalizer frees whichever arrived */
+		return NULL;
+	}
+	line->runCount = fn_font_runs(string, range, font, (CFMutableArrayRef)line->runFonts, line->runInfo);
+	line->font = (CTFontRef)CFRetain((line->runCount > 0) ? line->runInfo[0].font : font);
+	/* THE HEIGHTS ARE THE RUNS' UNION — the tallest ascent, the deepest descent — which is what a framesetter needs:
+	 * line after line placed without measuring glyph by glyph. They are read even for a line of nothing. */
+	if (line->runCount == 0) {
+		line->ascent = CTFontGetAscent(font);
+		line->descent = CTFontGetDescent(font);
+		line->leading = CTFontGetLeading(font);
+	} else {
+		CFIndex r;
+
+		line->ascent = line->runInfo[0].ascent;
+		line->descent = line->runInfo[0].descent;
+		line->leading = line->runInfo[0].leading;
+		for (r = 1; r < line->runCount; r++) {
+			if (line->runInfo[r].ascent > line->ascent) line->ascent = line->runInfo[r].ascent;
+			if (line->runInfo[r].descent > line->descent) line->descent = line->runInfo[r].descent;
+			if (line->runInfo[r].leading > line->leading) line->leading = line->runInfo[r].leading;
+		}
+	}
 	tabs = ct_line_tab_stops(string, range.location, &tabInterval);
 	tabCount = (tabs != NULL) ? CFArrayGetCount(tabs) : 0;
 	if (n <= 0) {
@@ -385,13 +497,22 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 		}
 	}
 
-	/* APPLE'S CONTRACT FOR THE GLYPH STEP IS A BOOLEAN, AND A LINE DOES NOT NEED IT: a character the font cannot
-	 * encode becomes glyph 0, which IS `.notdef`, and Apple DRAWS `.notdef` for such a character rather than
-	 * dropping it. So the answer is deliberately not checked, and the slot is drawn like any other. */
-	(void)CTFontGetGlyphsForCharacters(font, chars, line->glyphs, n);
-
+	/* **EACH RUN'S GLYPHS ARE INDEXED IN ITS OWN FONT, WHICH IS THE WHOLE POINT OF A RUN.** Apple's contract for the
+	 * glyph step is a BOOLEAN and a line does not need it: a character the font cannot encode becomes glyph 0, which IS
+	 * `.notdef`, and Apple DRAWS that rather than dropping it. */
 	memset(advances, 0, (size_t)n * sizeof(CGSize));
-	(void)CTFontGetAdvancesForGlyphs(font, kCTFontHorizontalOrientation, line->glyphs, advances, n);
+	{
+		CFIndex r;
+
+		for (r = 0; r < line->runCount; r++) {
+			struct ct_line_run *run = &line->runInfo[r];
+
+			(void)CTFontGetGlyphsForCharacters(run->font, chars + run->start, line->glyphs + run->start,
+							   run->count);
+			(void)CTFontGetAdvancesForGlyphs(run->font, kCTFontHorizontalOrientation,
+							 line->glyphs + run->start, advances + run->start, run->count);
+		}
+	}
 	/* **AND A CHARACTER CARRYING A RUN DELEGATE IS A BOX, NOT A GLYPH.** Its advance is what the delegate answers rather
 	 * than what the placeholder glyph measured, no ink is drawn for it, and the line grows to cover the delegate's
 	 * ascent and descent — so a picture taller than the font's line makes the line taller. THE KERN IS SKIPPED AROUND A
@@ -442,8 +563,12 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 			}
 		}
 		x += advances[i].width;
-		if (i + 1 < n && !line->isBox[i] && !line->isBox[i + 1]) {
-			x += (CGFloat)CTFontGetKerningBetweenGlyphs(font, line->glyphs[i], line->glyphs[i + 1]);
+		/* **A KERN IS A PAIR IN ONE FACE**: two glyphs from DIFFERENT runs have no shared typographer, so the pair
+		 * across a run boundary is not asked about. */
+		if (i + 1 < n && !line->isBox[i] && !line->isBox[i + 1]
+		    && fn_run_index(line, i) == fn_run_index(line, i + 1)) {
+			x += (CGFloat)CTFontGetKerningBetweenGlyphs(fn_run_font(line, i), line->glyphs[i],
+								    line->glyphs[i + 1]);
 		}
 	}
 	line->glyphCount = n;
@@ -471,8 +596,10 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 
 				placed[logical] = CGPointMake((CGFloat)placedX, 0.0);
 				placedX += advances[logical].width;
-				if (k + 1 < n && !line->isBox[logical] && !line->isBox[visualOrder[k + 1]]) {
-					placedX += (CGFloat)CTFontGetKerningBetweenGlyphs(font, line->glyphs[logical],
+				if (k + 1 < n && !line->isBox[logical] && !line->isBox[visualOrder[k + 1]]
+				    && fn_run_index(line, logical) == fn_run_index(line, visualOrder[k + 1])) {
+					placedX += (CGFloat)CTFontGetKerningBetweenGlyphs(fn_run_font(line, logical),
+										line->glyphs[logical],
 										line->glyphs[visualOrder[k + 1]]);
 				}
 			}
@@ -670,85 +797,63 @@ double CTLineGetPenOffsetForFlush(CTLineRef line, CGFloat flushFactor, double fl
 void CTLineDraw(CTLineRef line, CGContextRef context)
 {
 	const struct __CTLine *l = (const struct __CTLine *)line;
-	CGFontRef graphics;
-	CGPoint *absolute;
 	CGPoint pen;
-	CFIndex i;
+	CFIndex r;
 
 	if (l == NULL || context == NULL || l->glyphCount <= 0) {
 		return;
 	}
-	graphics = CTFontCopyGraphicsFont(l->font, NULL);
-	if (graphics == NULL) {
-		return;
-	}
 	/* THE LINE'S ORIGIN IS THE CONTEXT'S TEXT POSITION, AND APPLYING IT IS THIS DOOR'S JOB BECAUSE *THIS* CORE
-	 * GRAPHICS DOES NOT: `CGContextShowGlyphsAtPositions` takes positions that are "specified in user space" and
-	 * says in its own header that "the CTM alone places the pen" — UNLIKE the three advance doors, whose pen
-	 * "starts at the TEXT POSITION". So the pen offset is added here, and the suite MEASURES it by drawing the same
-	 * line at two text positions and looking at where the ink landed: a comment cannot tell those two readings
-	 * apart, and a picture can. */
+	 * GRAPHICS DOES NOT: `CGContextShowGlyphsAtPositions` takes positions that are "specified in user space" and says
+	 * in its own header that "the CTM alone places the pen" — UNLIKE the three advance doors, whose pen "starts at
+	 * the TEXT POSITION". So the pen offset is added here, and the suite MEASURES it by drawing the same line at two
+	 * text positions and looking at where the ink landed: a comment cannot tell those two readings apart, and a
+	 * picture can. */
 	pen = CGContextGetTextPosition(context);
-	absolute = (CGPoint *)malloc((size_t)l->glyphCount * sizeof(CGPoint));
-	if (absolute == NULL) {
-		CGFontRelease(graphics);
-		return;
-	}
-	/* **AND A BOX IS SKIPPED: IT OCCUPIES SPACE AND DRAWS NO INK.** The glyphs and their positions are collected
-	 * WITHOUT the boxes first — `CGContextShowGlyphsAtPositions` takes one contiguous run, so a box in the middle
-	 * has to come out rather than be drawn as a `.notdef` — and a line with no boxes keeps its arrays as they are. */
-	{
-		CGGlyph *drawGlyphs = l->glyphs;
-		CGPoint *drawPositions = absolute;
-		CFIndex drawCount = l->glyphCount;
-		CFIndex k = 0;
+	/* **EACH RUN IS DRAWN IN ITS OWN FACE**, because a glyph index means nothing without the face it was indexed in.
+	 * A BOX IS SKIPPED: it occupies space and draws no ink, and `CGContextShowGlyphsAtPositions` takes one contiguous
+	 * run, so the boxes come out once per font run. */
+	for (r = 0; r < ((l->runCount > 0) ? l->runCount : 1); r++) {
+		CTFontRef runFont = (l->runCount > 0) ? l->runInfo[r].font : l->font;
+		CFIndex start = (l->runCount > 0) ? l->runInfo[r].start : 0;
+		CFIndex count = (l->runCount > 0) ? l->runInfo[r].count : l->glyphCount;
+		CGFontRef graphics = CTFontCopyGraphicsFont(runFont, NULL);
+		CGGlyph *drawGlyphs;
+		CGPoint *drawPositions;
+		CFIndex drawCount = 0;
+		CFIndex i;
 
-		if (l->isBox != NULL) {
-			bool anyBox = false;
-
-			for (i = 0; i < l->glyphCount; i++) {
-				if (l->isBox[i]) {
-					anyBox = true;
-					break;
-				}
-			}
-			if (anyBox) {
-				drawGlyphs = (CGGlyph *)malloc((size_t)l->glyphCount * sizeof(CGGlyph));
-				drawPositions = (CGPoint *)malloc((size_t)l->glyphCount * sizeof(CGPoint));
-				if (drawGlyphs == NULL || drawPositions == NULL) {
-					free(drawGlyphs);
-					free(drawPositions);
-					free(absolute);
-					CGFontRelease(graphics);
-					return;
-				}
-				for (i = 0; i < l->glyphCount; i++) {
-					if (!l->isBox[i]) {
-						drawGlyphs[k] = l->glyphs[i];
-						drawPositions[k] = CGPointMake(l->positions[i].x + pen.x, l->positions[i].y + pen.y);
-						k++;
-					}
-				}
-				drawCount = k;
-			}
+		if (graphics == NULL) {
+			continue;
 		}
-		if (k == 0 && drawCount == l->glyphCount) {
-			for (i = 0; i < l->glyphCount; i++) {
-				absolute[i] = CGPointMake(l->positions[i].x + pen.x, l->positions[i].y + pen.y);
+		drawGlyphs = (CGGlyph *)malloc((size_t)((count > 0) ? count : 1) * sizeof(CGGlyph));
+		drawPositions = (CGPoint *)malloc((size_t)((count > 0) ? count : 1) * sizeof(CGPoint));
+		if (drawGlyphs == NULL || drawPositions == NULL) {
+			free(drawGlyphs);
+			free(drawPositions);
+			CGFontRelease(graphics);
+			continue;
+		}
+		for (i = 0; i < count; i++) {
+			if (l->isBox != NULL && l->isBox[start + i]) {
+				continue;
 			}
+			drawGlyphs[drawCount] = l->glyphs[start + i];
+			drawPositions[drawCount] = CGPointMake(l->positions[start + i].x + pen.x,
+							       l->positions[start + i].y + pen.y);
+			drawCount++;
 		}
 		/* THE FONT AND ITS SIZE GO ON THE CONTEXT because the glyphs are drawn BY Core Graphics and not by this
 		 * library: a glyph index means nothing without the face and the size it was indexed in. */
-		CGContextSetFont(context, graphics);
-		CGContextSetFontSize(context, CTFontGetSize(l->font));
-		CGContextShowGlyphsAtPositions(context, drawGlyphs, drawPositions, (size_t)drawCount);
-		if (drawGlyphs != l->glyphs) {
-			free(drawGlyphs);
-			free(drawPositions);
+		if (drawCount > 0) {
+			CGContextSetFont(context, graphics);
+			CGContextSetFontSize(context, CTFontGetSize(runFont));
+			CGContextShowGlyphsAtPositions(context, drawGlyphs, drawPositions, (size_t)drawCount);
 		}
+		free(drawGlyphs);
+		free(drawPositions);
+		CGFontRelease(graphics);
 	}
-	free(absolute);
-	CGFontRelease(graphics);
 }
 
 /* =================================================================================================
@@ -864,29 +969,26 @@ CGFloat CTLineGetOffsetForStringIndex(CTLineRef line, CFIndex charIndex, CGFloat
 /* =================================================================================================
  * THE RUNS, WHICH IS WHERE THIS TYPE MEETS `CTRun`.
  * =============================================================================================== */
-/* ONE ARRAY, ONE RUN, BUILT ON FIRST ASK AND KEPT. APPLE'S NAME FOR THIS DOOR IS `Get` AND NOT `Copy`, and its
- * documentation says nothing about releasing — so what comes back is BORROWED, owned by the line, which is the
+/* ONE ARRAY, ONE RUN PER FONT RUN, BUILT ON FIRST ASK AND KEPT. APPLE'S NAME FOR THIS DOOR IS `Get` AND NOT `Copy`,
+ * and its documentation says nothing about releasing — so what comes back is BORROWED, owned by the line, which is the
  * reading the name and the silence agree on. The array is built once and cached for exactly that reason: two calls
- * hand a caller the SAME object rather than two arrays holding the same run.
+ * hand a caller the SAME object rather than two arrays holding the same runs.
  *
- * AND THERE IS ONE RUN BECAUSE THERE IS ONE FONT. A run is, in CTRun.h's own words, "the piece of a line that shares
- * one set of attributes", and this tier lays a line out in one pass with one face — so the single run covers every
- * character the line does and its string range IS the line's. What a caller must NOT conclude from that is that a
- * line's runs are always one: the day a line can hold two fonts, THIS function is where that changes and nothing
- * else in the library has to.
+ * AND A RUN IS WHERE THE FACE CHANGES. A run is, in CTRun.h's own words, "the piece of a line that shares one set of
+ * attributes", and the attribute this tier partitions on is the FONT: a string that sets a run delegate or a tab in
+ * the middle is still ONE font run, and a string that changes face in the middle is two. Each run carries its own
+ * face, its own slice of the string, and glyphs INDEXED IN THAT FACE — which is the whole difference, because a glyph
+ * index means nothing without the face it came from, so a second face cannot be drawn with the first face's indices.
  *
- * THE ADVANCES ARE RECOVERED FROM THE POSITIONS, because the line does not store them — it stores where each glyph
- * goes and how wide the whole thing is. For this tier's one-pass layout an advance IS the distance to the next
- * glyph's origin, which is the same rule the caret doors already use, so it is taken from that one place rather
- * than written a second time. */
+ * THE ADVANCES COME FROM THE LINE'S OWN ARRAY WHEN IT KEEPS ONE, which a REORDERED line does because its next
+ * POSITION is a different character; otherwise they are recovered from the positions, which is the same rule the caret
+ * doors already use, so it is taken from that one place rather than written a second time. */
 CFArrayRef CTLineGetGlyphRuns(CTLineRef line)
 {
 	struct __CTLine *l = (struct __CTLine *)line;
-	CFDictionaryRef attributes;
-	CFIndex *indices;
-	CGSize *advances;
 	CTRunStatus status;
-	CFIndex i;
+	CFMutableArrayRef runs;
+	CFIndex r;
 
 	if (l == NULL) {
 		return NULL;
@@ -894,38 +996,53 @@ CFArrayRef CTLineGetGlyphRuns(CTLineRef line)
 	if (l->runs != NULL) {
 		return l->runs;
 	}
-	/* THE STRING INDICES ARE THE RUN'S FACT AND ARE BUILT HERE: one glyph per character, in order, so the index
-	 * array is 0..glyphCount-1. A line that shaped its text would read them from the shaper instead, and this is
-	 * the place that would change. */
-	indices = (CFIndex *)malloc((size_t)((l->glyphCount > 0) ? l->glyphCount : 1) * sizeof(CFIndex));
-	advances = (CGSize *)malloc((size_t)((l->glyphCount > 0) ? l->glyphCount : 1) * sizeof(CGSize));
-	if (indices == NULL || advances == NULL) {
-		free(indices);
-		free(advances);
-		return NULL;
-	}
-	for (i = 0; i < l->glyphCount; i++) {
-		indices[i] = i;
-		advances[i] = CGSizeMake(ct_line_advance_at(l, i), 0.0);
-	}
-	/* THE ATTRIBUTES ARE THE STRING'S OWN FOR THE RUN'S RANGE — Apple's sentence allows either that or a dictionary
-	 * "manufactured by the layout engine" for font substitution or missing keys, and THIS TIER HAS NOTHING TO
-	 * MANUFACTURE: the font came from these very attributes. */
-	attributes = (l->string == NULL) ? NULL
-					 : CFAttributedStringGetAttributes(l->string, l->range.location, NULL);
+	/* **ONE RUN PER FONT RUN.** The string indices are the run's fact and are built here: one glyph per character,
+	 * RELATIVE TO THE LINE, so a run's index array is its own slice of the line's. The attributes are the string's own
+	 * for the run's range — Apple's sentence allows either that or a dictionary "manufactured by the layout engine", and
+	 * this tier has nothing to manufacture: the font came from these very attributes. */
 	status = ((l->direction == kCTWritingDirectionRightToLeft) ? kCTRunStatusRightToLeft : kCTRunStatusNoStatus)
 	       | (l->nonMonotonic ? kCTRunStatusNonMonotonic : 0);
-	l->run = CTRunCreateWithAttributesAndGlyphs(attributes, l->font, status, l->range, indices, l->glyphs,
-						    l->positions, advances, l->isBox, l->glyphCount);
-	free(indices);
-	free(advances);
-	if (l->run == NULL) {
+	runs = CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks);
+	if (runs == NULL) {
 		return NULL;
 	}
-	l->runs = CFArrayCreate(kCFAllocatorDefault, (const void **)&l->run, 1, &kCFTypeArrayCallBacks);
-	if (l->runs == NULL) {
-		return NULL;
+	for (r = 0; r < ((l->runCount > 0) ? l->runCount : 1); r++) {
+		CFIndex start = (l->runCount > 0) ? l->runInfo[r].start : 0;
+		CFIndex count = (l->runCount > 0) ? l->runInfo[r].count : l->glyphCount;
+		CTFontRef font = (l->runCount > 0) ? l->runInfo[r].font : l->font;
+		CFDictionaryRef attributes;
+		CFIndex *indices;
+		CGSize *advances;
+		CTRunRef created;
+		CFIndex k;
+
+		indices = (CFIndex *)malloc((size_t)((count > 0) ? count : 1) * sizeof(CFIndex));
+		advances = (CGSize *)malloc((size_t)((count > 0) ? count : 1) * sizeof(CGSize));
+		if (indices == NULL || advances == NULL) {
+			free(indices);
+			free(advances);
+			CFRelease(runs);
+			return NULL;
+		}
+		for (k = 0; k < count; k++) {
+			indices[k] = start + k;
+			advances[k] = CGSizeMake(ct_line_advance_at(l, start + k), 0.0);
+		}
+		attributes = (l->string == NULL) ? NULL
+			: CFAttributedStringGetAttributes(l->string, l->range.location + start, NULL);
+		created = CTRunCreateWithAttributesAndGlyphs(attributes, font, status,
+			CFRangeMake(l->range.location + start, count), indices, l->glyphs + start, l->positions + start,
+			advances, (l->isBox != NULL) ? l->isBox + start : NULL, count);
+		free(indices);
+		free(advances);
+		if (created == NULL) {
+			CFRelease(runs);
+			return NULL;
+		}
+		CFArrayAppendValue(runs, created);
+		CFRelease(created);
 	}
+	l->runs = runs;
 	return l->runs;
 }
 
@@ -939,12 +1056,12 @@ CFArrayRef CTLineGetGlyphRuns(CTLineRef line)
  * return NULL if truncation is needed". The three types are Apple's own descriptions of which end stays visible, and
  * they are the three branches below.
  *
- * ONE BOUNDARY IS RECORDED RATHER THAN GUESSED, AND IT IS THE FONT. A LINE HERE HOLDS ONE FONT, so a TOKEN DRAWN IN
- * ANOTHER FACE cannot be added to it: the token's glyph INDICES are indices IN ITS OWN FONT, and inserting them into a
- * line drawn with the other one would put garbage where an ellipsis belongs — a wrong answer that LOOKS like a
- * truncation, which is the kind this tree refuses. Apple's answer is a line with several runs, and this tier's is to
- * REFUSE; the case holds the refusal. A token in the SAME face — the ellipsis it usually is — works, and that is the
- * case the door was written for.
+ * ONE BOUNDARY IS RECORDED RATHER THAN GUESSED, AND IT IS THE FONT. A LINE CAN HOLD SEVERAL FACES, BUT TRUNCATION ADDS
+ * NONE OF ITS OWN: a TOKEN DRAWN IN ANOTHER FACE cannot be appended to it, because the token's glyph INDICES are
+ * indices IN ITS OWN FONT and drawing them with the line's would put garbage where an ellipsis belongs — a wrong
+ * answer that LOOKS like a truncation, which is the kind this tree refuses. Apple's answer is a line the FRAMESETTER
+ * builds with runs of its own, and this tier's is to REFUSE; the case holds the refusal. A token in the SAME face —
+ * the ellipsis it usually is — works, and that is the case the door was written for.
  *
  * AND ONE NUMBER APPLE DOES NOT PRINT, WHICH IS NAMED WHERE IT IS CHOSEN: for a MIDDLE truncation the available room is
  * SPLIT BETWEEN THE TWO ENDS, and how it splits is this tier's (half for the head, then whatever is left for the

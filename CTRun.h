@@ -12,8 +12,9 @@
  *
  * A RUN IS INDEPENDENTLY RETAINABLE, WHICH DECIDES HOW IT IS BUILT. A caller can hold a run after releasing the
  * line it came from, so a run CANNOT be a view over its line's storage: it OWNS its glyphs, positions, advances
- * and string indices. That is why this tier's lines carry their glyph data twice — once for the line and once for
- * its single run — and why that cost is worth paying rather than answering a retained run with a dangling pointer.
+ * and string indices. That is why every glyph a line sets is carried TWICE — once in the line's own arrays and
+ * once in the run that slices them, per run — and why that cost is worth paying rather than answering a retained
+ * run with a dangling pointer.
  *
  * AND IT IS WHY THE "Ptr" DOORS HERE NEVER ANSWER NULL. Apple documents each of them as possibly returning NULL
  * "even if there are glyphs in the stream", with the caller obliged to fall back to the copying door; that is a

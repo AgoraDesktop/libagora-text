@@ -252,19 +252,21 @@ ctest --test-dir build
   exists yet. The default is answered as an **EMPTY ARRAY** of the right type, the case asserts both halves of
   that (the type, and the emptiness), and `ct_para_tab_fallback` is where the twelve tabs will be built.
 - **`CTLine` IS DECLARED AND IMPLEMENTED — THE FIRST THING HERE THAT IS BUILT RATHER THAN STORED, AND THE FIRST
-  THAT DRAWS.** `CTLineCreateWithAttributedString` makes **one run**: the string's characters become glyphs through
-  `CTFontGetGlyphsForCharacters` (the door this library was started for), each glyph is placed by
-  `CTFontGetAdvancesForGlyphs`, and the font's own ascent, descent and leading are the line's heights. Every
+  THAT DRAWS.** `CTLineCreateWithAttributedString` makes **one font run per face the string names** — one, for a
+  string set in a single face: the characters become glyphs through `CTFontGetGlyphsForCharacters` (the door this
+  library was started for), each glyph is placed by `CTFontGetAdvancesForGlyphs`, and the faces' ascent, descent and
+  leading are the line's heights. Every
   measuring door is arithmetic over those — glyph count, string range, typographic bounds, flush offset, trailing
   whitespace, image bounds — the caret pair inverts, and **`CTLineDraw` puts the ink on a page** through
   `CGContextShowGlyphsAtPositions`. MEASURED: `text: 17 of 17 cases passed, 0 failed`.
-- **THE SINGLE-RUN BOUNDARY IS STATED RATHER THAN LEFT TO BE DISCOVERED FROM A WRONG LAYOUT.** Apple's own sentence
+- **THE LINE'S BOUNDARY IS STATED RATHER THAN LEFT TO BE DISCOVERED FROM A WRONG LAYOUT.** Apple's own sentence
   for the creator is that "without a typesetter object, the line cannot be properly broken", so this is the simple
-  case and it says what it is: **no line breaking, no two fonts in one line, no GLYPH REORDERING and no shaping** —
-  a character's glyph is drawn where its own advance puts it, in the order the characters appeared. **AND THE BASE
+  case and it says what it is: **no line breaking and no shaping** — a character's glyph is drawn where its own
+  advance puts it. (TWO FONTS IN ONE LINE and GLYPH REORDERING, refused here at the time, were both built later — see
+  the bidi and multi-run bullets far below.) **AND THE BASE
   WRITING DIRECTION IS READ NOW**, the first piece of the bidi milestone: the paragraph's direction reaches the run
   (`CTRunGetStatus` reports `kCTRunStatusRightToLeft`), while the Unicode Bidirectional Algorithm that would reorder
-  the glyphs — and multi-run and complex scripts — are the HarfBuzz milestone the Core Text plan already names.
+  the glyphs — and complex scripts — are the HarfBuzz milestone the Core Text plan already names.
 - **AND A RUN DELEGATE IS THE ONE NON-GLYPH THE LINE HONORS** (`CTRunDelegate.h`, `kCTRunDelegateAttributeName`): a
   character carrying one is a BOX — its advance is the delegate's width, the line's ascent and descent grow to cover
   the delegate's, and `CTLineDraw` and `CTRunDraw` skip it, so an attachment or a tab occupies space without being a
@@ -438,9 +440,9 @@ ctest --test-dir build
   back whole, the token goes where the cutting happened, a **NULL** token cuts the line off, and a token **wider than the
   width** answers NULL — with the three types as Apple's own descriptions of which end stays visible, which the case
   MEASURES (an END truncation keeps the line's first characters, a START keeps its last, a MIDDLE spans both).
-  **AND ONE REFUSAL IS HELD**: a token drawn in **another face** answers NULL, because a line here holds one font and the
-  token's glyph indices mean nothing in the other — Apple's answer is a multi-run line, and this tier refuses rather than
-  putting garbage where an ellipsis belongs. The result needed one thing the library did not have — **a line over GLYPHS
+  **AND ONE REFUSAL IS HELD**: a token drawn in **another face** answers NULL, because truncation appends no run of its
+  own and the token's glyph indices mean nothing in the line's faces — Apple's answer is a line the framesetter builds
+  with runs of its own, and this tier refuses rather than putting garbage where an ellipsis belongs. The result needed one thing the library did not have — **a line over GLYPHS
   rather than over a string range** (`CTLineCreateWithGlyphs`), because a MIDDLE truncation keeps a prefix **and** a
   suffix and so cannot be made from any one range. MEASURED: `text: 26 of 26 cases passed, 0 failed`, with `owed` down to **5** names.
 - **AND ITS CASE'S FIRST RUN WAS WRONG IN THE INSTRUCTIVE DIRECTION.** It asserted that a token in another font was
@@ -732,4 +734,17 @@ the user's decision is that they stay owed), the ATS pair (permanent), and the f
   level's is its RIGHT one, so a Hebrew line's carets run RIGHT to LEFT — MEASURED, `23.48 > 15.65 > 7.83 > 0` with the
   width `23.48` — and one past the last character is its TRAILING edge. THE HIT TEST FOLLOWS: the half of a glyph the
   point fell in decides which side of the character the caret is on, by that character's OWN direction. **AND WHAT IS
-  STILL NAMED**: the MULTI-RUN model a non-monotonic line wants. MEASURED: `text: 57 of 57 cases passed, 0 failed`.
+  STILL NAMED**: the SHAPING a line whose glyphs are not one per character wants. MEASURED: `text: 57 of 57 cases passed, 0 failed`.
+- **AND THE MULTI-RUN MODEL THE REORDERING ASKED FOR IS BUILT: A LINE IS AS MANY RUNS AS ITS STRING HAS FACES.**
+  `struct __CTLine` carries a FONT RUN per maximal span of one face, and `fn_font_runs` finds them by asking for the
+  LONGEST range over which `kCTFontAttributeName` is the SAME VALUE — **not** the effective range of the attribute RUN
+  the character sits in, which is a different question: a string that sets a run delegate or a tab in the middle would
+  otherwise split into runs that share ONE face, and the delegate case caught exactly that. Each run's glyphs are looked
+  up in ITS OWN font, the advances come from that font too, and a kerning pair is only asked about when **both** glyphs
+  are in the same run, because two faces have no shared typographer. The line's ascent, descent and leading are the
+  runs' UNION rather than the first font's. `CTLineGetGlyphRuns` now returns one `CTRun` per font run — each with its own
+  font, its own slice of the string, and its glyphs INDEXED IN THAT FACE — and `CTLineDraw` sets the face (and its size)
+  on the context once per run, because a glyph index means nothing without the face it came from. MEASURED: a
+  four-character line set in `DejaVuSansMono-Bold` and then `DejaVuSerif` reports **2** runs, each run's attributes name
+  its OWN face, and the mixed line's width is **52.9688** — the two faces measured apart, **24.082** and **28.8867**,
+  summed. MEASURED: `100% tests passed, 0 tests failed out of 2` over `text: 58 of 58 cases passed, 0 failed`.
