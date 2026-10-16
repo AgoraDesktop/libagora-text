@@ -28,6 +28,7 @@
  * against the order itself rather than against a family name this machine happens to hold first. */
 #include <CoreText/CTFontMatching_internal.h>
 #include <CoreText/CTFont_internal.h>
+#include <CoreText/CTBidi_internal.h>
 #include <CoreText/CTFont.h>
 /* AND THE ENGINE'S INTERNAL HEADER, FOR THE DOORS CORE TEXT OWNS BUT DOES NOT IMPLEMENT: the Unicode
  * glyph step and the face registry. */
@@ -5193,6 +5194,76 @@ static int case_base_writing_direction(void)
 	return g_fail - before;
 }
 
+/* **AND THE BIDI DATA AND THE PARAGRAPH LEVEL — UAX #9 P2 AND P3.** The class of a code point comes from the
+ * generated table, and the paragraph's level from the FIRST STRONG character while stepping over isolate runs. It is
+ * the whole of the algorithm built so far: the X/W/N/I rules and the L1/L2 reordering are the next slices. */
+static int case_bidi_paragraph_level(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(13.0);
+	CFMutableDictionaryRef attrs = NULL;
+	CFAttributedStringRef astr = NULL;
+	CTLineRef line = NULL;
+	CFArrayRef runs;
+	CTRunRef run;
+
+	/* THE CLASSES, from the generated table. */
+	check(ct_bidi_class('a') == kCTBidiL, "a Latin letter is L");
+	check(ct_bidi_class(0x05D0) == kCTBidiR, "a Hebrew letter is R");
+	check(ct_bidi_class(0x0627) == kCTBidiAL, "an Arabic letter is AL");
+	check(ct_bidi_class('0') == kCTBidiEN, "a digit is EN");
+	check(ct_bidi_class(' ') == kCTBidiWS, "a space is WS");
+	check(ct_bidi_class(0x2066) == kCTBidiLRI && ct_bidi_class(0x2069) == kCTBidiPDI,
+	      "an isolate initiator and its PDI are their own classes");
+	check(ct_bidi_class(0x10FFFF) == kCTBidiL, "a code point the table does not name is L");
+
+	/* P2 AND P3. */
+	{
+		UniChar latin[] = { 'a', 'b', 'c' };
+		UniChar hebrew[] = { 0x05D0, 0x05D1, 0x05D2 };
+		UniChar arabic[] = { 0x0627, 0x0628 };
+		UniChar latinFirst[] = { 'a', ' ', 0x05D0 };
+		UniChar rtlFirst[] = { 0x05D0, ' ', 'a' };
+		UniChar digits[] = { '1', '2', '3' };
+		UniChar isolated[] = { 0x2066, 0x05D0, 0x2069, 'a' };
+
+		check(ct_bidi_paragraph_level(latin, 3, 0) == 0, "a Latin paragraph is level 0");
+		check(ct_bidi_paragraph_level(hebrew, 3, 0) == 1, "a Hebrew paragraph is level 1");
+		check(ct_bidi_paragraph_level(arabic, 2, 0) == 1, "an Arabic (AL) paragraph is level 1");
+		check(ct_bidi_paragraph_level(latinFirst, 3, 1) == 0,
+		      "the FIRST strong character decides: Latin first is level 0");
+		check(ct_bidi_paragraph_level(rtlFirst, 3, 0) == 1, "and a right-to-left strong character first is level 1");
+		check(ct_bidi_paragraph_level(digits, 3, 0) == 0 && ct_bidi_paragraph_level(digits, 3, 1) == 1,
+		      "a paragraph with NO strong character answers the caller's fallback");
+		check(ct_bidi_paragraph_level(isolated, 4, 1) == 0,
+		      "P2 STEPS OVER an isolate run, so the `a` after the PDI decides");
+	}
+
+	/* AND THE LINE RESOLVES A NATURAL DIRECTION BY P2/P3, which the run then reports. */
+	attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					  &kCFTypeDictionaryValueCallBacks);
+	CFDictionarySetValue(attrs, kCTFontAttributeName, font);
+	{
+		UniChar hebrew[] = { 0x05D0, 0x05D1, 0x05D2 };
+		CFStringRef h = CFStringCreateWithCharacters(kCFAllocatorDefault, hebrew, 3);
+
+		astr = (h != NULL) ? CFAttributedStringCreate(kCFAllocatorDefault, h, attrs) : NULL;
+		line = (astr != NULL) ? CTLineCreateWithAttributedString(astr) : NULL;
+		runs = (line != NULL) ? CTLineGetGlyphRuns(line) : NULL;
+		run = (runs != NULL && CFArrayGetCount(runs) > 0) ? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
+		printf("  (a NATURAL paragraph of Hebrew reports status %u)\n",
+		       (unsigned)((run != NULL) ? CTRunGetStatus(run) : 0));
+		check(run != NULL && CTRunGetStatus(run) == kCTRunStatusRightToLeft,
+		      "a NATURAL paragraph of Hebrew RESOLVES to right to left (P2/P3)");
+		if (line != NULL) CFRelease(line);
+		if (astr != NULL) CFRelease(astr);
+		if (h != NULL) CFRelease(h);
+	}
+	CFRelease(attrs);
+	CFRelease(font);
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -5225,6 +5296,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "A run delegate is a box: the line reserves its width and draws no ink", case_run_delegate },
 	{ "A tab lands at its stop, and the fit follows it there", case_text_tab_stops },
 	{ "The base writing direction reaches the run as a status", case_base_writing_direction },
+	{ "The bidi classes, and the paragraph level P2/P3 reads", case_bidi_paragraph_level },
 	{ "And the FRAMESETTER path is kerned too, which is where the AppKit draws", case_frame_kerning },
 	{ "Matching finds the faces a query describes, in a stable order", case_font_matching },
 	{ "A disabled face leaves every matching answer, and comes back", case_font_visibility },

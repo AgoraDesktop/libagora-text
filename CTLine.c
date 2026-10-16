@@ -40,6 +40,7 @@
  * line — a line made over a RANGE, and the name of the font key — and including it here is what makes the
  * declarations and the definitions below the SAME functions rather than two files agreeing by convention. */
 #include <CoreText/CTLine_internal.h>
+#include <CoreText/CTBidi_internal.h>
 
 #include <CoreFoundation/CFCharacterSet.h>
 #include <CoreFoundation/CFRuntime.h>
@@ -179,24 +180,41 @@ static struct __CTLine *ct_line_alloc(void)
  * the line's own start, which is right for a single-paragraph line; a line spanning paragraphs with different tab
  * vocabularies is named as owed. */
 /* **AND THE DIRECTION THE PARAGRAPH RUNS IN, WHICH THE RUN REPORTS.** The paragraph style's
- * `kCTParagraphStyleSpecifierBaseWritingDirection` is read at the line's FIRST character; a NATURAL direction is
- * answered LEFT-TO-RIGHT, because resolving it needs the Unicode Bidirectional Algorithm and this tier does not
- * reorder yet — so a run reports the caller's STATED direction, and a natural one is the tier's default. See
- * `CTRun.h`'s status flags; the REORDERING is the next slice of the bidi milestone. */
-static CTWritingDirection ct_line_base_direction(CFAttributedStringRef string, CFIndex index)
+ * `kCTParagraphStyleSpecifierBaseWritingDirection` is read at the line's FIRST character. A STATED direction is kept;
+ * a NATURAL one is RESOLVED rather than guessed — UAX #9 P2 and P3 over the line's own characters — so a paragraph of
+ * Hebrew runs right to left and one that starts with a Latin letter does not. See `CTRun.h`'s status flags; the
+ * REORDERING is the next slice of the bidi milestone. */
+static CTWritingDirection ct_line_base_direction(CFAttributedStringRef string, CFRange range)
 {
 	CFTypeRef style;
 	CTWritingDirection direction = kCTWritingDirectionNatural;
 
 	if (string == NULL) {
-		return direction;
+		return kCTWritingDirectionLeftToRight;
 	}
-	style = CFAttributedStringGetAttribute(string, index, kCTParagraphStyleAttributeName, NULL);
+	style = CFAttributedStringGetAttribute(string, range.location, kCTParagraphStyleAttributeName, NULL);
 	if (style != NULL && CFGetTypeID(style) == CTParagraphStyleGetTypeID()) {
 		(void)CTParagraphStyleGetValueForSpecifier((CTParagraphStyleRef)style,
 			kCTParagraphStyleSpecifierBaseWritingDirection, sizeof direction, &direction);
 	}
-	return direction;
+	if (direction != kCTWritingDirectionNatural) {
+		return direction;
+	}
+	/* P2/P3 DECIDE THE NATURAL CASE, over the characters the line covers. */
+	if (range.length > 0) {
+		UniChar *chars = (UniChar *)malloc((size_t)range.length * sizeof(UniChar));
+
+		if (chars != NULL) {
+			int level;
+
+			CFStringGetCharacters(CFAttributedStringGetString(string), range, chars);
+			level = ct_bidi_paragraph_level(chars, range.length, 0);
+			free(chars);
+			return (level == 1) ? kCTWritingDirectionRightToLeft : kCTWritingDirectionLeftToRight;
+		}
+	}
+	/* NO CHARACTERS AT ALL IS LEFT TO RIGHT, which is P3's answer with nothing to read. */
+	return kCTWritingDirectionLeftToRight;
 }
 
 static CFArrayRef ct_line_tab_stops(CFAttributedStringRef string, CFIndex index, double *interval)
@@ -262,7 +280,7 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 	 * out of the MIDDLE of a document reports the range it covers THERE, so a caller laying out line after line never
 	 * has to translate between the line's coordinates and the string's. */
 	line->range = range;
-	line->direction = ct_line_base_direction(string, range.location);
+	line->direction = ct_line_base_direction(string, range);
 	/* THE HEIGHTS ARE THE FONT'S AND NOT THE GLYPHS', which is what a framesetter needs: line after line placed
 	 * without measuring glyph by glyph. They are read even for a line of nothing, so that a line still has a
 	 * baseline to sit on. */
@@ -792,7 +810,7 @@ CTLineRef CTLineCreateWithGlyphs(CFAttributedStringRef string, CFRange range, CT
 	line->string = (string == NULL) ? NULL : (CFAttributedStringRef)CFRetain(string);
 	line->font = (CTFontRef)CFRetain(font);
 	line->range = range;
-	line->direction = ct_line_base_direction(string, range.location);
+	line->direction = ct_line_base_direction(string, range);
 	line->ascent = CTFontGetAscent(font);
 	line->descent = CTFontGetDescent(font);
 	line->leading = CTFontGetLeading(font);
@@ -985,7 +1003,7 @@ static struct __CTLine *ct_line_with_positions(CFAttributedStringRef string, CFR
 	line->string = (string == NULL) ? NULL : (CFAttributedStringRef)CFRetain(string);
 	line->font = (CTFontRef)CFRetain(font);
 	line->range = range;
-	line->direction = ct_line_base_direction(string, range.location);
+	line->direction = ct_line_base_direction(string, range);
 	line->ascent = CTFontGetAscent(font);
 	line->descent = CTFontGetDescent(font);
 	line->leading = CTFontGetLeading(font);
