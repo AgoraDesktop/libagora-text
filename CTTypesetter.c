@@ -30,11 +30,13 @@
 #include <CoreText/CTRunDelegate.h>
 #include <CoreText/CTRunDelegate_internal.h>
 #include <CoreText/CTStringAttributes.h>
+#include <CoreText/CTTextTab.h>
 
 #include <CoreFoundation/CFCharacterSet.h>
 #include <CoreFoundation/CFRuntime.h>
 
 #include <stdbool.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -71,6 +73,10 @@ struct __CTTypesetter {
 	bool *isBox;			/* malloc'd, count, or NULL */
 	CFIndex count;
 	CTLineBreakMode mode;		/* the paragraph style's mode, or the default when it has none */
+	/* **AND THE TAB STOPS THE FIT OBEYS**, borrowed from the paragraph style the string carries (which the typesetter's
+	 * own retained string keeps alive) — the same list `CTLine` reads, so a line breaks where it will actually end. */
+	CFArrayRef tabs;		/* BORROWED, or NULL */
+	double tabInterval;
 };
 
 static void ct_ts_finalize(CFTypeRef cf)
@@ -219,6 +225,17 @@ CTTypesetterRef CTTypesetterCreateWithAttributedStringAndOptions(CFAttributedStr
 							 kCTParagraphStyleSpecifierLineBreakMode, sizeof mode, &mode)) {
 			ts->mode = mode;
 		}
+		{
+			CFArrayRef tabs = NULL;
+			CGFloat interval = 0.0;
+
+			(void)CTParagraphStyleGetValueForSpecifier((CTParagraphStyleRef)style_value,
+					kCTParagraphStyleSpecifierTabStops, sizeof tabs, &tabs);
+			(void)CTParagraphStyleGetValueForSpecifier((CTParagraphStyleRef)style_value,
+					kCTParagraphStyleSpecifierDefaultTabInterval, sizeof interval, &interval);
+			ts->tabs = tabs;
+			ts->tabInterval = (double)interval;
+		}
 	}
 	if (n <= 0) {
 		return (CTTypesetterRef)ts;
@@ -295,15 +312,37 @@ static CFIndex ct_ts_fit(const struct __CTTypesetter *ts, CFIndex start, double 
 	CFIndex i = start;
 
 	while (i < ts->count) {
-		double step = ts->advances[i].width;
+		double step;
 
-		/* **AND THE PAIR'S ADJUSTMENT, BECAUSE THE LINE'S OWN WIDTH HAS IT AND THE TWO MUST AGREE.** An advance
-		 * is what a glyph asks for on its own; a KERN is what the font says about the two glyphs TOGETHER, and
-		 * `CTLine` applies it (see `CTLine.c`). A typesetter that measured without it would break a line at a
-		 * DIFFERENT place than the line then draws it — MEASURED, a menu bar's title measured to its own kerned
-		 * width and then laid out to its unkerned one WRAPPED, and a whole word's worth of ink left the frame. */
-		if (i > start && !(ts->isBox != NULL && (ts->isBox[i - 1] || ts->isBox[i]))) {
-			step += (double)CTFontGetKerningBetweenGlyphs(ts->font, ts->glyphs[i - 1], ts->glyphs[i]);
+		/* **AND A TAB TAKES THE FIT TO ITS STOP.** A tab's advance is not in `ts->advances` — it depends on where the
+		 * pen already is — so the fit computes it the same way `CTLine` does, from the same stops, and the two agree
+		 * about where the line ends. */
+		if (ts->chars[i] == '\t') {
+			double stop = x;
+			CFIndex t;
+
+			for (t = 0; ts->tabs != NULL && t < CFArrayGetCount(ts->tabs); t++) {
+				CTTextTabRef tab = (CTTextTabRef)CFArrayGetValueAtIndex(ts->tabs, t);
+				double location = (tab != NULL) ? CTTextTabGetLocation(tab) : 0.0;
+
+				if (location > x) {
+					stop = location;
+					break;
+				}
+			}
+			if (stop == x && ts->tabInterval > 0.0) {
+				stop = (floor(x / ts->tabInterval) + 1.0) * ts->tabInterval;
+			}
+			step = stop - x;
+		} else {
+			step = ts->advances[i].width;
+			/* **AND THE PAIR'S ADJUSTMENT, BECAUSE THE LINE's OWN WIDTH HAS IT AND THE TWO MUST AGREE.** An advance
+			 * is what a glyph asks for on its own; a KERN is what the font says about the two glyphs TOGETHER, and
+			 * `CTLine` applies it (see `CTLine.c`). A typesetter that measured without it would break a line at a
+			 * DIFFERENT place than the line then draws it. A box has no glyph to adjust, so the kern is skipped. */
+			if (i > start && !(ts->isBox != NULL && (ts->isBox[i - 1] || ts->isBox[i]))) {
+				step += (double)CTFontGetKerningBetweenGlyphs(ts->font, ts->glyphs[i - 1], ts->glyphs[i]);
+			}
 		}
 		if (x + step > width) {
 			break;

@@ -5043,6 +5043,76 @@ static int case_run_delegate(void)
 	return g_fail - before;
 }
 
+/* **A TAB LANDS AT ITS STOP, WHICH IS A PLACE RATHER THAN A WIDTH.** The paragraph style carries `CTTextTab`s, and a
+ * `\t` character advances to the first stop past the pen — no ink, like a run-delegate box, but the width is decided
+ * while the positions are walked. So the probe sets stops at 50 and 100 over `a\tb\tc` and reads the offsets back: the
+ * character after a tab begins AT the stop, and the fit breaks where the tab actually takes the pen. */
+static int case_text_tab_stops(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(13.0);
+	CFMutableArrayRef tabs = CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks);
+	CTTextTabRef t50 = CTTextTabCreate(kCTLeftTextAlignment, 50.0, NULL);
+	CTTextTabRef t100 = CTTextTabCreate(kCTLeftTextAlignment, 100.0, NULL);
+	CTParagraphStyleSetting setting;
+	CTParagraphStyleRef style;
+	CFMutableDictionaryRef attrs;
+	CFAttributedStringRef astr;
+	CTLineRef line;
+
+	check(font != NULL && tabs != NULL && t50 != NULL && t100 != NULL, "the tab stops could not be made");
+	if (font == NULL || tabs == NULL || t50 == NULL || t100 == NULL) {
+		return g_fail - before;
+	}
+	CFArrayAppendValue(tabs, t50);
+	CFArrayAppendValue(tabs, t100);
+	setting.spec = kCTParagraphStyleSpecifierTabStops;
+	setting.valueSize = sizeof(CFArrayRef);
+	setting.value = &tabs;
+	style = CTParagraphStyleCreate(&setting, 1);
+	attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					  &kCFTypeDictionaryValueCallBacks);
+	CFDictionarySetValue(attrs, kCTFontAttributeName, font);
+	CFDictionarySetValue(attrs, kCTParagraphStyleAttributeName, style);
+	astr = CFAttributedStringCreate(kCFAllocatorDefault, CFSTR("a\tb\tc"), attrs);
+	line = (astr != NULL) ? CTLineCreateWithAttributedString(astr) : NULL;
+	check(line != NULL, "the line with tabs could not be made");
+	if (line != NULL) {
+		CGFloat bX = CTLineGetOffsetForStringIndex(line, 2, NULL);
+		CGFloat cX = CTLineGetOffsetForStringIndex(line, 4, NULL);
+		CGFloat tabX = CTLineGetOffsetForStringIndex(line, 1, NULL);
+
+		printf("  (tab at x=%.3f, `b` at x=%.3f, `c` at x=%.3f)\n", (double)tabX, (double)bX, (double)cX);
+		check(CTLineGetGlyphCount(line) == 5, "the line keeps one entry per character, tabs included");
+		check(fabs(bX - 50.0) < 0.01, "the character after the first tab begins AT the 50-point stop");
+		check(fabs(cX - 100.0) < 0.01, "and the one after the second at the 100-point stop");
+	}
+	{
+		CTTypesetterRef ts = (astr != NULL) ? CTTypesetterCreateWithAttributedString(astr) : NULL;
+		CFIndex count = (ts != NULL) ? CTTypesetterSuggestLineBreak(ts, 0, 60.0) : 0;
+
+		/* THE FIT REACHED THE FIRST TAB AND THE WORD-WRAP BACKOFF STOPPED THERE, which is the answer the stops drive:
+		 * a tab is whitespace, so word wrapping may break at it — and WITHOUT the stops the fit would have run on to
+		 * the last tab and answered 4. */
+		printf("  (a 60-point width broke after %ld character(s))\n", (long)count);
+		check(ts != NULL && count == 2,
+		      "the fit followed the first tab to its stop and the word backoff stopped there");
+		if (ts != NULL) {
+			CFRelease(ts);
+		}
+	}
+	if (line != NULL) {
+		CFRelease(line);
+	}
+	CFRelease(astr);
+	CFRelease(attrs);
+	CFRelease(style);
+	CFRelease(t100);
+	CFRelease(t50);
+	CFRelease(tabs);
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -5073,6 +5143,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "A line justifies at the spaces, by the fraction it is given", case_line_justification },
 	{ "A line is kerned: the font's pair adjustments reach the positions", case_line_kerning },
 	{ "A run delegate is a box: the line reserves its width and draws no ink", case_run_delegate },
+	{ "A tab lands at its stop, and the fit follows it there", case_text_tab_stops },
 	{ "And the FRAMESETTER path is kerned too, which is where the AppKit draws", case_frame_kerning },
 	{ "Matching finds the faces a query describes, in a stable order", case_font_matching },
 	{ "A disabled face leaves every matching answer, and comes back", case_font_visibility },

@@ -21,6 +21,7 @@
  * Core Text's; `CTRunDelegate_internal.h` is this library's own seam to the three answers it asks. */
 #include <CoreText/CTRunDelegate.h>
 #include <CoreText/CTRunDelegate_internal.h>
+#include <CoreText/CTTextTab.h>
 
 /* THE FONT OBJECT AND ITS DOORS, WHICH THIS FILE'S HEADER DOES NOT DECLARE AND MUST NOT: Apple's CTLine.h does not
  * include CTFont.h either — a LINE's surface mentions no font at all. The IMPLEMENTATION is a different question,
@@ -40,6 +41,8 @@
 
 #include <CoreFoundation/CFCharacterSet.h>
 #include <CoreFoundation/CFRuntime.h>
+
+#include <math.h>
 
 #include <stdbool.h>
 #include <stdlib.h>
@@ -166,6 +169,46 @@ static struct __CTLine *ct_line_alloc(void)
 		(CFIndex)(sizeof(struct __CTLine) - sizeof(CFRuntimeBase)), NULL);
 }
 
+/* **THE TAB STOPS A LINE OBEYS, TAKEN FROM ITS PARAGRAPH STYLE.** A tab is not a glyph and not a fixed box: where it
+ * lands depends on where the pen ALREADY is, so the stop is chosen while the positions are being walked. Read once at
+ * the line's own start, which is right for a single-paragraph line; a line spanning paragraphs with different tab
+ * vocabularies is named as owed. */
+static CFArrayRef ct_line_tab_stops(CFAttributedStringRef string, CFIndex index, double *interval)
+{
+	CFTypeRef style = CFAttributedStringGetAttribute(string, index, kCTParagraphStyleAttributeName, NULL);
+	CFArrayRef tabs = NULL;
+
+	*interval = 0.0;
+	if (style == NULL || CFGetTypeID(style) != CTParagraphStyleGetTypeID()) {
+		return NULL;
+	}
+	(void)CTParagraphStyleGetValueForSpecifier((CTParagraphStyleRef)style,
+			kCTParagraphStyleSpecifierTabStops, sizeof tabs, &tabs);
+	(void)CTParagraphStyleGetValueForSpecifier((CTParagraphStyleRef)style,
+			kCTParagraphStyleSpecifierDefaultTabInterval, sizeof *interval, interval);
+	return tabs;
+}
+
+/* THE FIRST STOP PAST THE PEN, OR THE NEXT MULTIPLE OF THE DEFAULT INTERVAL when the list has run out — and when
+ * neither exists the tab is zero-width rather than a guess. */
+static double ct_line_next_tab_stop(CFArrayRef tabs, CFIndex count, double interval, double x)
+{
+	CFIndex i;
+
+	for (i = 0; tabs != NULL && i < count; i++) {
+		CTTextTabRef tab = (CTTextTabRef)CFArrayGetValueAtIndex(tabs, i);
+		double location = (tab != NULL) ? CTTextTabGetLocation(tab) : 0.0;
+
+		if (location > x) {
+			return location;
+		}
+	}
+	if (interval > 0.0) {
+		return (floor(x / interval) + 1.0) * interval;
+	}
+	return x;
+}
+
 /* THE ONE PLACE A LINE IS MADE, AND IT IS ALWAYS MADE OVER A RANGE. A whole-string line and a typeset line differ in
  * ONE number — where the glyphs begin — so they are one function with the range as a parameter rather than two
  * functions that could drift apart. `font` is BORROWED by the callers and RETAINED here. */
@@ -177,6 +220,9 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 	CGSize *advances;
 	CFIndex n, i;
 	double x = 0.0;
+	CFArrayRef tabs;
+	CFIndex tabCount;
+	double tabInterval = 0.0;
 
 	text = CFAttributedStringGetString(string);
 	n = range.length;
@@ -196,6 +242,8 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 	line->ascent = CTFontGetAscent(font);
 	line->descent = CTFontGetDescent(font);
 	line->leading = CTFontGetLeading(font);
+	tabs = ct_line_tab_stops(string, range.location, &tabInterval);
+	tabCount = (tabs != NULL) ? CFArrayGetCount(tabs) : 0;
 	if (n <= 0) {
 		return (CTLineRef)line;
 	}
@@ -259,6 +307,19 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 	 * positions. */
 	for (i = 0; i < n; i++) {
 		line->positions[i] = CGPointMake((CGFloat)x, 0.0);
+		/* **AND A TAB ADVANCES TO ITS STOP, WHICH DEPENDS ON WHERE THE PEN ALREADY IS.** It is a BOX — no ink — whose
+		 * width is the distance from here to the next stop, so the two halves of a document line up in columns the way a
+		 * typewriter's did. A tab with no stop ahead and no default interval is zero-width, which is the honest answer. */
+		if (chars[i] == '\t') {
+			double stop = ct_line_next_tab_stop(tabs, tabCount, tabInterval, (double)x);
+
+			line->isBox[i] = true;
+			line->glyphs[i] = 0;
+			advances[i].width = (CGFloat)(stop - (double)x);
+			if (advances[i].width < 0.0) {
+				advances[i].width = 0.0;
+			}
+		}
 		x += advances[i].width;
 		if (i + 1 < n && !line->isBox[i] && !line->isBox[i + 1]) {
 			x += (CGFloat)CTFontGetKerningBetweenGlyphs(font, line->glyphs[i], line->glyphs[i + 1]);

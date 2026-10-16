@@ -272,6 +272,13 @@ ctest --test-dir build
   **12** and **3**; and `CTTypesetterSuggestLineBreak` at **40** points stops BEFORE the box, because the fit counted
   its width. WHAT IS STILL OWED: a box in a JUSTIFIED or TRUNCATED line keeps its place but not its delegate
   (`ct_line_with_positions` copies glyphs and positions, not the flags).
+- **AND A TAB GOES TO ITS STOP, WHICH THE PARAGRAPH STYLE NAMES** (`CTTextTab`, the `kCTParagraphStyleSpecifierTabStops`
+  and `…DefaultTabInterval` settings): a `\t` is a box whose width is the distance from the pen to the first stop past
+  it, so `CTLine` and `CTTypesetter` compute it while they walk the positions — the same stops, so a line breaks where
+  it will actually end. MEASURED (`case_text_tab_stops`): stops at **50** and **100** over `a\tb\tc` put the characters
+  after the tabs exactly at **50** and **100**; and `CTTypesetterSuggestLineBreak` at **60** points reached the first
+  tab (the word backoff then stopped there). WHAT IS OWED: a line spanning paragraphs with DIFFERENT tab vocabularies
+  reads the stops at its own start; and `CTTextTab`'s options dictionary is carried and not read.
 - **`CTLineDraw`'S ONE CROSS-FRAMEWORK SEMANTIC IS MEASURED RATHER THAN ASSUMED.** This Core Graphics' own header
   says `CGContextShowGlyphsAtPositions` takes positions "specified in user space" and that "the CTM alone places
   the pen" — unlike the three advance doors, whose pen "starts at the TEXT POSITION" — so the line's origin is
