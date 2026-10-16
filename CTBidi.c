@@ -12,6 +12,8 @@
  */
 #include <CoreText/CTBidi_internal.h>
 
+#include <stdlib.h>
+
 /* **THE CLASS OF A CODE POINT.** The table holds only the ranges whose class is NOT the default, so a miss is L —
  * which is also the answer for the unassigned code points the table deliberately does not carry. */
 CTBidiClass ct_bidi_class(uint32_t codePoint)
@@ -292,26 +294,17 @@ static CTBidiClass fn_last_strong_before(const CTBidiClass *classes, CFIndex run
 	return fallback;
 }
 
-void ct_bidi_resolve_weak(CTBidiClass *classes, const uint8_t *levels, CFIndex count, int paragraphLevel)
+/* **THE WEAK RULES OVER ONE SEQUENCE.** `sos` is the sequence's start-of-sequence type and the ARRAY IS the sequence
+ * — inside an isolating run sequence there is no run boundary left to find, which is what X10's join buys. */
+static void fn_apply_weak(CTBidiClass *classes, CFIndex count, CTBidiClass sos)
 {
-	CFIndex runStart = 0;
+	const CFIndex runStart = 0;
+	const CFIndex runEnd = count;
+	CFIndex i;
 
-	if (classes == NULL || levels == NULL || count <= 0) {
+	if (count <= 0) {
 		return;
 	}
-	while (runStart < count) {
-		int runLevel = levels[runStart];
-		CFIndex runEnd = runStart + 1;
-		int previousLevel = (runStart > 0) ? levels[runStart - 1] : paragraphLevel;
-		int nextLevel;
-		CTBidiClass sos;
-		CFIndex i;
-
-		while (runEnd < count && levels[runEnd] == runLevel) {
-			runEnd++;
-		}
-		nextLevel = (runEnd < count) ? levels[runEnd] : paragraphLevel;
-		sos = fn_sequence_boundary(runLevel, previousLevel);
 
 		/* W1: a NON-SPACING MARK takes the type of what it follows, or sos at the run's start. */
 		for (i = runStart; i < runEnd; i++) {
@@ -384,8 +377,6 @@ void ct_bidi_resolve_weak(CTBidiClass *classes, const uint8_t *levels, CFIndex c
 				classes[i] = kCTBidiL;
 			}
 		}
-		runStart = runEnd;
-	}
 }
 
 /* =================================================================================================
@@ -416,29 +407,17 @@ static CTBidiClass fn_strong_for_neutral(CTBidiClass bidiClass)
 	return kCTBidiON;
 }
 
-void ct_bidi_resolve_neutral(CTBidiClass *classes, const uint8_t *levels, CFIndex count, int paragraphLevel)
+/* **THE NEUTRAL RULES OVER ONE SEQUENCE**, with the sequence's `sos`, `eos` and EMBEDDING direction given. */
+static void fn_apply_neutral(CTBidiClass *classes, CFIndex count, CTBidiClass sos, CTBidiClass eos,
+			     CTBidiClass embedding)
 {
-	CFIndex runStart = 0;
+	const CFIndex runStart = 0;
+	const CFIndex runEnd = count;
+	CFIndex i;
 
-	if (classes == NULL || levels == NULL || count <= 0) {
+	if (count <= 0) {
 		return;
 	}
-	while (runStart < count) {
-		int runLevel = levels[runStart];
-		CFIndex runEnd = runStart + 1;
-		int previousLevel = (runStart > 0) ? levels[runStart - 1] : paragraphLevel;
-		int nextLevel;
-		CTBidiClass sos;
-		CTBidiClass eos;
-		CTBidiClass embedding = ((runLevel % 2) != 0) ? kCTBidiR : kCTBidiL;
-		CFIndex i;
-
-		while (runEnd < count && levels[runEnd] == runLevel) {
-			runEnd++;
-		}
-		nextLevel = (runEnd < count) ? levels[runEnd] : paragraphLevel;
-		sos = fn_sequence_boundary(runLevel, previousLevel);
-		eos = fn_sequence_boundary(runLevel, nextLevel);
 
 		/* **N1 WOULD JOIN, N2 DECIDES.** Walk the run's NEUTRAL RUNS — the maximal stretches of NI — and for each read
 		 * the strong type on either side (a number counting as R, and `sos`/`eos` at the ends). */
@@ -466,6 +445,292 @@ void ct_bidi_resolve_neutral(CTBidiClass *classes, const uint8_t *levels, CFInde
 				i++;
 			}
 		}
-		runStart = runEnd;
+}
+
+/* =================================================================================================
+ * UAX #9 X10: THE ISOLATING RUN SEQUENCES.
+ * =============================================================================================== */
+
+/* THE THREE, AND THE THIRD IS THE ONE THAT JOINS: an isolate initiator's MATCHING PDI begins the next level run of
+ * the SAME sequence, which is how the text on both sides of an isolate comes to see each other. */
+static bool fn_is_isolate_initiator(CTBidiClass bidiClass)
+{
+	return bidiClass == kCTBidiLRI || bidiClass == kCTBidiRLI || bidiClass == kCTBidiFSI;
+}
+
+/* **THE SEQUENCES OF A PARAGRAPH.** Level runs first, then each run whose LAST character is an isolate initiator is
+ * chained to the run its matching PDI STARTS; a chain is one isolating run sequence. What comes back is an ARRAY OF
+ * SEQUENCE IDS per character (`seqId`), which is all the drivers need — the characters of a sequence appear in
+ * INCREASING text order, so a walk over the text filtered by the id IS the sequence. Also filled: each sequence's
+ * `sos`, `eos` (from the higher of its level and the level just outside the sequence) and its level. The caller frees
+ * all four arrays. */
+static CFIndex fn_sequences(const CTBidiClass *classes, const uint8_t *levels, CFIndex count, int paragraphLevel,
+			    int **seqIdOut, CTBidiClass **sosOut, CTBidiClass **eosOut, int **levelOut)
+{
+	CFIndex *match;
+	CFIndex *stack;
+	CFIndex *runStart;
+	CFIndex *runEnd;
+	CFIndex *runNext;
+	CFIndex *runPrev;
+	CFIndex *seqOfRun;
+	CFIndex *firstRun;
+	CFIndex *lastRun;
+	int *seqId;
+	CTBidiClass *sos;
+	CTBidiClass *eos;
+	int *seqLevel;
+	CFIndex runCount = 0;
+	CFIndex seqCount = 0;
+	CFIndex sp = 0;
+	CFIndex i, r, s;
+
+	*seqIdOut = NULL;
+	*sosOut = NULL;
+	*eosOut = NULL;
+	*levelOut = NULL;
+	if (count <= 0) {
+		return 0;
 	}
+	match = (CFIndex *)malloc((size_t)count * sizeof(CFIndex));
+	stack = (CFIndex *)malloc((size_t)count * sizeof(CFIndex));
+	runStart = (CFIndex *)malloc((size_t)count * sizeof(CFIndex));
+	runEnd = (CFIndex *)malloc((size_t)count * sizeof(CFIndex));
+	runNext = (CFIndex *)malloc((size_t)count * sizeof(CFIndex));
+	runPrev = (CFIndex *)malloc((size_t)count * sizeof(CFIndex));
+	seqOfRun = (CFIndex *)malloc((size_t)count * sizeof(CFIndex));
+	firstRun = (CFIndex *)malloc((size_t)count * sizeof(CFIndex));
+	lastRun = (CFIndex *)malloc((size_t)count * sizeof(CFIndex));
+	seqId = (int *)malloc((size_t)count * sizeof(int));
+	if (match == NULL || stack == NULL || runStart == NULL || runEnd == NULL || runNext == NULL
+	    || runPrev == NULL || seqOfRun == NULL || firstRun == NULL || lastRun == NULL || seqId == NULL) {
+		goto done;
+	}
+	/* THE MATCHING PDIs: a stack of initiators, and a PDI closes the innermost one. */
+	for (i = 0; i < count; i++) {
+		match[i] = -1;
+	}
+	for (i = 0; i < count; i++) {
+		if (fn_is_isolate_initiator(classes[i])) {
+			stack[sp++] = i;
+		} else if (classes[i] == kCTBidiPDI && sp > 0) {
+			CFIndex open = stack[--sp];
+
+			match[open] = i;
+			match[i] = open;
+		}
+	}
+	/* THE LEVEL RUNS. */
+	for (i = 0; i < count; ) {
+		CFIndex j = i + 1;
+
+		while (j < count && levels[j] == levels[i]) {
+			j++;
+		}
+		runStart[runCount] = i;
+		runEnd[runCount] = j;
+		runCount++;
+		i = j;
+	}
+	/* THE CHAINS: a run whose last character is an isolate initiator whose matching PDI STARTS a LATER run. */
+	for (r = 0; r < runCount; r++) {
+		runNext[r] = -1;
+	}
+	for (r = 0; r < runCount; r++) {
+		CFIndex last = runEnd[r] - 1;
+
+		if (match[last] >= 0) {
+			for (s = r + 1; s < runCount; s++) {
+				if (runStart[s] == match[last]) {
+					runNext[r] = s;
+					break;
+				}
+			}
+		}
+	}
+	for (r = 0; r < runCount; r++) {
+		runPrev[r] = -1;
+	}
+	for (r = 0; r < runCount; r++) {
+		if (runNext[r] >= 0) {
+			runPrev[runNext[r]] = r;
+		}
+	}
+	/* THE SEQUENCES: every chain start (a run with no predecessor) walks its chain. */
+	for (r = 0; r < runCount; r++) {
+		seqOfRun[r] = -1;
+	}
+	for (r = 0; r < runCount; r++) {
+		CFIndex q;
+
+		if (runPrev[r] >= 0) {
+			continue;
+		}
+		q = r;
+		while (q >= 0 && seqOfRun[q] < 0) {
+			seqOfRun[q] = seqCount;
+			q = runNext[q];
+		}
+		seqCount++;
+	}
+	sos = (CTBidiClass *)malloc((size_t)((seqCount > 0) ? seqCount : 1) * sizeof(CTBidiClass));
+	eos = (CTBidiClass *)malloc((size_t)((seqCount > 0) ? seqCount : 1) * sizeof(CTBidiClass));
+	seqLevel = (int *)malloc((size_t)((seqCount > 0) ? seqCount : 1) * sizeof(int));
+	if (sos == NULL || eos == NULL || seqLevel == NULL) {
+		goto done;	/* the cleanup below frees whichever of the three arrived */
+	}
+	for (s = 0; s < seqCount; s++) {
+		firstRun[s] = -1;
+		lastRun[s] = -1;
+	}
+	for (r = 0; r < runCount; r++) {
+		if (firstRun[seqOfRun[r]] < 0) {
+			firstRun[seqOfRun[r]] = r;
+		}
+		lastRun[seqOfRun[r]] = r;
+	}
+	for (s = 0; s < seqCount; s++) {
+		CFIndex fr = firstRun[s];
+		CFIndex lr = lastRun[s];
+		int level = levels[runStart[fr]];
+		int before = (runStart[fr] > 0) ? levels[runStart[fr] - 1] : paragraphLevel;
+		int after = (runEnd[lr] < count) ? levels[runEnd[lr]] : paragraphLevel;
+
+		seqLevel[s] = level;
+		sos[s] = fn_sequence_boundary(level, before);
+		eos[s] = fn_sequence_boundary(level, after);
+	}
+	for (r = 0; r < runCount; r++) {
+		for (i = runStart[r]; i < runEnd[r]; i++) {
+			seqId[i] = (int)seqOfRun[r];
+		}
+	}
+	*seqIdOut = seqId;
+	*sosOut = sos;
+	*eosOut = eos;
+	*levelOut = seqLevel;
+	seqId = NULL;
+	sos = NULL;
+	eos = NULL;
+	seqLevel = NULL;
+done:
+	free(match);
+	free(stack);
+	free(runStart);
+	free(runEnd);
+	free(runNext);
+	free(runPrev);
+	free(seqOfRun);
+	free(firstRun);
+	free(lastRun);
+	free(seqId);	/* NULL once they have been handed over, which is what makes this one cleanup */
+	free(sos);
+	free(eos);
+	free(seqLevel);
+	return (*seqIdOut != NULL) ? seqCount : 0;
+}
+
+/* **AND THE TWO DRIVERS** — written out rather than through a callback, because a callback per sequence would hide
+ * the one thing worth reading: which boundaries go with which array. Each builds the sequences, gathers ONE
+ * sequence's classes into a contiguous array (the characters are in increasing text order, so a walk filtered by the
+ * id IS the sequence), applies the rules with the sequence's own boundaries, and writes the answer back. */
+
+void ct_bidi_resolve_weak(CTBidiClass *classes, const uint8_t *levels, CFIndex count, int paragraphLevel)
+{
+	int *seqId = NULL;
+	CTBidiClass *sos = NULL;
+	CTBidiClass *eos = NULL;
+	int *seqLevel = NULL;
+	CFIndex seqCount;
+	CFIndex s, k;
+
+	if (classes == NULL || levels == NULL || count <= 0) {
+		return;
+	}
+	seqCount = fn_sequences(classes, levels, count, paragraphLevel, &seqId, &sos, &eos, &seqLevel);
+	for (s = 0; s < seqCount; s++) {
+		CTBidiClass *sequence = NULL;
+		CFIndex n = 0;
+
+		for (k = 0; k < count; k++) {
+			if (seqId[k] == (int)s) {
+				n++;
+			}
+		}
+		if (n == 0) {
+			continue;
+		}
+		sequence = (CTBidiClass *)malloc((size_t)n * sizeof(CTBidiClass));
+		if (sequence == NULL) {
+			break;
+		}
+		n = 0;
+		for (k = 0; k < count; k++) {
+			if (seqId[k] == (int)s) {
+				sequence[n++] = classes[k];
+			}
+		}
+		fn_apply_weak(sequence, n, sos[s]);
+		n = 0;
+		for (k = 0; k < count; k++) {
+			if (seqId[k] == (int)s) {
+				classes[k] = sequence[n++];
+			}
+		}
+		free(sequence);
+	}
+	free(seqId);
+	free(sos);
+	free(eos);
+	free(seqLevel);
+}
+
+void ct_bidi_resolve_neutral(CTBidiClass *classes, const uint8_t *levels, CFIndex count, int paragraphLevel)
+{
+	int *seqId = NULL;
+	CTBidiClass *sos = NULL;
+	CTBidiClass *eos = NULL;
+	int *seqLevel = NULL;
+	CFIndex seqCount;
+	CFIndex s, k;
+
+	if (classes == NULL || levels == NULL || count <= 0) {
+		return;
+	}
+	seqCount = fn_sequences(classes, levels, count, paragraphLevel, &seqId, &sos, &eos, &seqLevel);
+	for (s = 0; s < seqCount; s++) {
+		CTBidiClass *sequence = NULL;
+		CFIndex n = 0;
+
+		for (k = 0; k < count; k++) {
+			if (seqId[k] == (int)s) {
+				n++;
+			}
+		}
+		if (n == 0) {
+			continue;
+		}
+		sequence = (CTBidiClass *)malloc((size_t)n * sizeof(CTBidiClass));
+		if (sequence == NULL) {
+			break;
+		}
+		n = 0;
+		for (k = 0; k < count; k++) {
+			if (seqId[k] == (int)s) {
+				sequence[n++] = classes[k];
+			}
+		}
+		fn_apply_neutral(sequence, n, sos[s], eos[s], ((seqLevel[s] % 2) != 0) ? kCTBidiR : kCTBidiL);
+		n = 0;
+		for (k = 0; k < count; k++) {
+			if (seqId[k] == (int)s) {
+				classes[k] = sequence[n++];
+			}
+		}
+		free(sequence);
+	}
+	free(seqId);
+	free(sos);
+	free(eos);
+	free(seqLevel);
 }

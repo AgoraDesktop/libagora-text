@@ -83,17 +83,15 @@ int ct_bidi_paragraph_level(const UniChar *text, CFIndex count, int fallbackLeve
 bool ct_bidi_explicit_levels(const UniChar *text, CFIndex count, int paragraphLevel,
 			     uint8_t *levels, CTBidiClass *classes);
 
-/* **UAX #9 W1-W7: THE WEAK TYPES.** Applied over the LEVEL RUNS of the text (maximal runs of one embedding level),
- * each with its own `sos`/`eos` computed from the higher of its level and its neighbour's — which is the start of
- * X10's machinery without the isolates: an ISOLATING RUN SEQUENCE may join several level runs through an isolate,
- * and that join is the next slice. `classes` is edited in place and `levels` is read. */
+/* **UAX #9 W1-W7: THE WEAK TYPES, over the ISOLATING RUN SEQUENCES of X10.** A sequence is a chain of level runs
+ * joined through an isolate, with its own `sos`/`eos`; the rules run over each sequence in turn. `classes` is edited
+ * in place and `levels` is read. */
 void ct_bidi_resolve_weak(CTBidiClass *classes, const uint8_t *levels, CFIndex count, int paragraphLevel);
 
-/* **UAX #9 N1 AND N2: THE NEUTRAL TYPES.** Over the LEVEL RUNS, like the weak rules — a run of neutrals between two
- * strong types of the SAME direction takes that direction (a NUMBER counting as R), and any other run of neutrals
- * takes the EMBEDDING direction of its run. WHAT IS NOT HERE IS TWO THINGS, BOTH NAMED: **X10**, the isolating run
- * sequences, which JOIN level runs through an isolate so the neutrals AROUND an isolate see each other; and **N0**,
- * the bracket pairs, which need Unicode's `BidiBrackets` data. Each is the next slice. */
+/* **UAX #9 N1 AND N2: THE NEUTRAL TYPES**, over the ISOLATING RUN SEQUENCES (X10) like the weak rules — a run of
+ * neutrals between two strong types of the SAME direction takes that direction (a NUMBER counting as R), and any
+ * other run of neutrals takes the EMBEDDING direction of its sequence. WHAT IS NOT HERE IS **N0**, the bracket pairs,
+ * which need Unicode's `BidiBrackets` data — the next slice. */
 void ct_bidi_resolve_neutral(CTBidiClass *classes, const uint8_t *levels, CFIndex count, int paragraphLevel);
 
 #endif /* CORE_TEXT_CTBIDI_INTERNAL_H */

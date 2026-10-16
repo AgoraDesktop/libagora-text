@@ -703,9 +703,11 @@ the user's decision is that they stay owed), the ATS pair (permanent), and the f
   becomes one, a European terminator adjacent to a number becomes one, what is left of them is OTHER NEUTRAL, and a
   European number after a Latin strong type becomes L. **AND THE NEUTRALS ARE BUILT ON THOSE**
   (`ct_bidi_resolve_neutral`, N1/N2): a run of neutrals between two strong types of the SAME direction takes that
-  direction — a NUMBER counting as R — and anything else takes the EMBEDDING direction of its run. **AND THE REST IS
-  THE NEXT SLICE, NAMED**: X10's ISOLATING RUN SEQUENCES (a run sequence may JOIN several level runs through an
-  isolate, so the neutrals AROUND an isolate see each other), N0's BRACKET PAIRS (which need Unicode's `BidiBrackets`
-  data), the I rules, and L1/L2 — nothing is REORDERED yet, which is exactly what keeps a Latin run inside a
-  right-to-left paragraph from being reversed, the mistake a whole-line flip would make. MEASURED: `text: 51 of 51
-  cases passed, 0 failed`.
+  direction — a NUMBER counting as R — and anything else takes the EMBEDDING direction of its run. **AND X10 BUILT THE
+  JOIN THEY NEED**: `fn_sequences` chains each level run whose LAST character is an isolate initiator to the run its
+  MATCHING PDI STARTS, so the text on BOTH SIDES of an isolate is ONE isolating run sequence — and the W and N rules
+  now run over SEQUENCES rather than raw runs, which is BEHAVIOUR-PRESERVING where there are no isolates (every case
+  before this one is unchanged). **AND THE REST IS THE NEXT SLICE, NAMED**: N0's BRACKET PAIRS (which need Unicode's
+  `BidiBrackets` data), the I rules, and L1/L2 — nothing is REORDERED yet, which is exactly what keeps a Latin run
+  inside a right-to-left paragraph from being reversed, the mistake a whole-line flip would make. MEASURED:
+  `text: 52 of 52 cases passed, 0 failed`.

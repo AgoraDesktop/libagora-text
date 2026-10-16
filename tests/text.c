@@ -5444,6 +5444,26 @@ static int case_bidi_neutrals(void)
 	return g_fail - before;
 }
 
+/* **AND X10: THE ISOLATING RUN SEQUENCES.** `R LRI a PDI R` — the isolate initiator and its PDI are on the OUTSIDE
+ * level, and X10 joins the runs they sit in into ONE sequence, so those two neutrals see the R on BOTH sides and N1
+ * makes them R. Without the join each would see only `sos`/`eos` — L, from the level-2 content between them — and N2
+ * would make them L, which is what makes this the case that MEASURES the join. */
+static int case_bidi_isolating_sequences(void)
+{
+	int before = g_fail;
+	uint8_t levels[16];
+	CTBidiClass classes[16];
+	UniChar text[] = { 0x05D0, 0x2066, 'a', 0x2069, 0x05D1 };
+
+	check(ct_bidi_explicit_levels(text, 5, 0, levels, classes), "the isolating walk runs");
+	check(levels[2] == 2, "the isolate's content has its OWN level, from X5b");
+	ct_bidi_resolve_weak(classes, levels, 5, 0);
+	ct_bidi_resolve_neutral(classes, levels, 5, 0);
+	check(classes[1] == kCTBidiR && classes[3] == kCTBidiR,
+	      "X10: the initiator and its PDI are one sequence with the R's, so N1 makes them R");
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -5480,6 +5500,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The explicit levels: embeddings, overrides and isolates", case_bidi_explicit_levels },
 	{ "The weak types W1-W7 over the level runs", case_bidi_weak_types },
 	{ "The neutral types N1 and N2", case_bidi_neutrals },
+	{ "The isolating run sequences X10 joins", case_bidi_isolating_sequences },
 	{ "And the FRAMESETTER path is kerned too, which is where the AppKit draws", case_frame_kerning },
 	{ "Matching finds the faces a query describes, in a stable order", case_font_matching },
 	{ "A disabled face leaves every matching answer, and comes back", case_font_visibility },
