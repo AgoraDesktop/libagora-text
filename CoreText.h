@@ -34,6 +34,7 @@
 #include <CoreText/CTLine.h>
 #include <CoreText/CTParagraphStyle.h>
 #include <CoreText/CTRun.h>
+#include <CoreText/CTRunDelegate.h>
 #include <CoreText/CTStringAttributes.h>
 #include <CoreText/CTTextTab.h>
 #include <CoreText/CTTypesetter.h>

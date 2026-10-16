@@ -34,6 +34,9 @@ struct __CTRun {
 	CGGlyph *glyphs;		/* malloc'd, count entries */
 	CGPoint *positions;		/* malloc'd, count entries, relative to the LINE's origin */
 	CGSize *advances;		/* malloc'd, count entries */
+	/* **AND WHICH GLYPHS ARE BOXES, COPIED FROM THE LINE.** A box occupies its delegate's width and draws no ink; the
+	 * flag is NULL when the line has none, and `CTRunDraw` skips the ones that are set. */
+	bool *isBox;			/* malloc'd, count entries, or NULL */
 	CFIndex count;
 };
 
@@ -51,6 +54,7 @@ static void ct_run_finalize(CFTypeRef cf)
 	free(run->glyphs);
 	free(run->positions);
 	free(run->advances);
+	free(run->isBox);
 }
 
 /* TWO RUNS ARE EQUAL WHEN THEY WERE LAID OUT WITH THE SAME ATTRIBUTES, IN THE SAME FONT, OVER THE SAME STRING
@@ -114,7 +118,8 @@ CFTypeID CTRunGetTypeID(void)
  * =============================================================================================== */
 CTRunRef CTRunCreateWithAttributesAndGlyphs(CFDictionaryRef attributes, CTFontRef font, CFRange stringRange,
 					    const CFIndex *stringIndices, const CGGlyph *glyphs,
-					    const CGPoint *positions, const CGSize *advances, CFIndex count)
+					    const CGPoint *positions, const CGSize *advances,
+					    const bool *isBox, CFIndex count)
 {
 	struct __CTRun *run;
 
@@ -147,6 +152,14 @@ CTRunRef CTRunCreateWithAttributesAndGlyphs(CFDictionaryRef attributes, CTFontRe
 	memcpy(run->glyphs, glyphs, (size_t)count * sizeof(CGGlyph));
 	memcpy(run->positions, positions, (size_t)count * sizeof(CGPoint));
 	memcpy(run->advances, advances, (size_t)count * sizeof(CGSize));
+	if (isBox != NULL) {
+		run->isBox = (bool *)malloc((size_t)count * sizeof(bool));
+		if (run->isBox == NULL) {
+			CFRelease((CFTypeRef)run);
+			return NULL;
+		}
+		memcpy(run->isBox, isBox, (size_t)count * sizeof(bool));
+	}
 	return (CTRunRef)run;
 }
 
@@ -405,13 +418,51 @@ void CTRunDraw(CTRunRef run, CGContextRef context, CFRange range)
 		CGFontRelease(graphics);
 		return;
 	}
-	for (i = 0; i < r2.length; i++) {
-		absolute[i] = CGPointMake(r->positions[r2.location + i].x + pen.x,
-					  r->positions[r2.location + i].y + pen.y);
+	/* **AND A BOX IS SKIPPED, AS IN `CTLineDraw`: IT OCCUPIES SPACE AND DRAWS NO INK.** The glyphs and positions are
+	 * collected without the boxes, because `CGContextShowGlyphsAtPositions` takes one contiguous run. */
+	{
+		const CGGlyph *drawGlyphs = r->glyphs + r2.location;
+		CFIndex drawCount = r2.length;
+		CFIndex k = 0;
+
+		for (i = 0; i < r2.length; i++) {
+			if (r->isBox != NULL && r->isBox[r2.location + i]) {
+				CGGlyph *filteredGlyphs = (CGGlyph *)malloc((size_t)r2.length * sizeof(CGGlyph));
+				CGPoint *filteredPositions = (CGPoint *)malloc((size_t)r2.length * sizeof(CGPoint));
+
+				if (filteredGlyphs == NULL || filteredPositions == NULL) {
+					free(filteredGlyphs);
+					free(filteredPositions);
+					free(absolute);
+					CGFontRelease(graphics);
+					return;
+				}
+				for (i = 0; i < r2.length; i++) {
+					if (!(r->isBox != NULL && r->isBox[r2.location + i])) {
+						filteredGlyphs[k] = r->glyphs[r2.location + i];
+						filteredPositions[k] = CGPointMake(r->positions[r2.location + i].x + pen.x,
+										   r->positions[r2.location + i].y + pen.y);
+						k++;
+					}
+				}
+				CGContextSetFont(context, graphics);
+				CGContextSetFontSize(context, CTFontGetSize(r->font));
+				CGContextShowGlyphsAtPositions(context, filteredGlyphs, filteredPositions, (size_t)k);
+				free(filteredGlyphs);
+				free(filteredPositions);
+				free(absolute);
+				CGFontRelease(graphics);
+				return;
+			}
+		}
+		for (i = 0; i < r2.length; i++) {
+			absolute[i] = CGPointMake(r->positions[r2.location + i].x + pen.x,
+						  r->positions[r2.location + i].y + pen.y);
+		}
+		CGContextSetFont(context, graphics);
+		CGContextSetFontSize(context, CTFontGetSize(r->font));
+		CGContextShowGlyphsAtPositions(context, drawGlyphs, absolute, (size_t)drawCount);
 	}
-	CGContextSetFont(context, graphics);
-	CGContextSetFontSize(context, CTFontGetSize(r->font));
-	CGContextShowGlyphsAtPositions(context, r->glyphs + r2.location, absolute, (size_t)r2.length);
 	free(absolute);
 	CGFontRelease(graphics);
 }

@@ -20,11 +20,14 @@
 
 #include <CoreText/CTFont.h>
 
-/* MAKE ONE. `attributes` and `font` are RETAINED; the four arrays are COPIED. `count` is the glyph count, and the
- * arrays are all `count` long. A count of zero is legal and yields a run with nothing in it — which is what a line
- * that was asked for nothing owns. */
+#include <stdbool.h>
+
+/* MAKE ONE. `attributes` and `font` are RETAINED; the five arrays are COPIED. `count` is the glyph count, and the
+ * arrays are all `count` long; `isBox` is NULL when no glyph is a run-delegate box, and otherwise one flag per glyph
+ * saying which ones draw no ink. A count of zero is legal and yields a run with nothing in it. */
 CTRunRef CTRunCreateWithAttributesAndGlyphs(CFDictionaryRef attributes, CTFontRef font, CFRange stringRange,
 					    const CFIndex *stringIndices, const CGGlyph *glyphs,
-					    const CGPoint *positions, const CGSize *advances, CFIndex count);
+					    const CGPoint *positions, const CGSize *advances,
+					    const bool *isBox, CFIndex count);
 
 #endif /* CORE_TEXT_CTRUN_INTERNAL_H */

@@ -27,6 +27,8 @@
 #include <CoreText/CTLine_internal.h>
 #include <CoreText/CTFont_internal.h>
 #include <CoreText/CTParagraphStyle.h>
+#include <CoreText/CTRunDelegate.h>
+#include <CoreText/CTRunDelegate_internal.h>
 #include <CoreText/CTStringAttributes.h>
 
 #include <CoreFoundation/CFCharacterSet.h>
@@ -64,6 +66,9 @@ struct __CTTypesetter {
 	UniChar *chars;			/* malloc'd, count: the characters, for newlines and spaces */
 	CGGlyph *glyphs;		/* malloc'd, count */
 	CGSize *advances;		/* malloc'd, count */
+	/* **AND WHICH CHARACTERS ARE BOXES**, so the fit does not kern a box against its neighbour — a box has no glyph to
+	 * adjust. Copied from the delegate attribute each character carries. */
+	bool *isBox;			/* malloc'd, count, or NULL */
 	CFIndex count;
 	CTLineBreakMode mode;		/* the paragraph style's mode, or the default when it has none */
 };
@@ -84,6 +89,7 @@ static void ct_ts_finalize(CFTypeRef cf)
 	free(ts->chars);
 	free(ts->glyphs);
 	free(ts->advances);
+	free(ts->isBox);
 }
 
 /* TWO TYPESETTERS ARE EQUAL WHEN THEY TYPESET THE SAME STRING IN THE SAME FACE: the options are RECORDED and change
@@ -222,7 +228,8 @@ CTTypesetterRef CTTypesetterCreateWithAttributedStringAndOptions(CFAttributedStr
 	ts->chars = (UniChar *)malloc((size_t)n * sizeof(UniChar));
 	ts->glyphs = (CGGlyph *)malloc((size_t)n * sizeof(CGGlyph));
 	ts->advances = (CGSize *)malloc((size_t)n * sizeof(CGSize));
-	if (ts->chars == NULL || ts->glyphs == NULL || ts->advances == NULL) {
+	ts->isBox = (bool *)calloc((size_t)n, sizeof(bool));
+	if (ts->chars == NULL || ts->glyphs == NULL || ts->advances == NULL || ts->isBox == NULL) {
 		CFRelease((CFTypeRef)ts);	/* the finalizer frees whichever arrays did arrive */
 		return NULL;
 	}
@@ -230,6 +237,21 @@ CTTypesetterRef CTTypesetterCreateWithAttributedStringAndOptions(CFAttributedStr
 	(void)CTFontGetGlyphsForCharacters(ts->font, ts->chars, ts->glyphs, n);
 	memset(ts->advances, 0, (size_t)n * sizeof(CGSize));
 	(void)CTFontGetAdvancesForGlyphs(ts->font, kCTFontHorizontalOrientation, ts->glyphs, ts->advances, n);
+	/* **AND EACH BOX MEASURES WHAT ITS DELEGATE SAYS, NOT WHAT THE PLACEHOLDER GLYPH DID**, so the fit and the line
+	 * agree about the width — the same rule `CTLine` applies when it builds the glyphs. */
+	{
+		CFIndex i;
+
+		for (i = 0; i < n; i++) {
+			CFTypeRef value = CFAttributedStringGetAttribute(string, i, kCTRunDelegateAttributeName, NULL);
+
+			if (value != NULL && CFGetTypeID(value) == CTRunDelegateGetTypeID()) {
+				ts->isBox[i] = true;
+				ts->glyphs[i] = 0;
+				ts->advances[i] = CGSizeMake(CTRunDelegateWidth((CTRunDelegateRef)value), 0.0);
+			}
+		}
+	}
 	return (CTTypesetterRef)ts;
 }
 
@@ -280,7 +302,7 @@ static CFIndex ct_ts_fit(const struct __CTTypesetter *ts, CFIndex start, double 
 		 * `CTLine` applies it (see `CTLine.c`). A typesetter that measured without it would break a line at a
 		 * DIFFERENT place than the line then draws it — MEASURED, a menu bar's title measured to its own kerned
 		 * width and then laid out to its unkerned one WRAPPED, and a whole word's worth of ink left the frame. */
-		if (i > start) {
+		if (i > start && !(ts->isBox != NULL && (ts->isBox[i - 1] || ts->isBox[i]))) {
 			step += (double)CTFontGetKerningBetweenGlyphs(ts->font, ts->glyphs[i - 1], ts->glyphs[i]);
 		}
 		if (x + step > width) {

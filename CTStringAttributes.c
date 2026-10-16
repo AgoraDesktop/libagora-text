@@ -54,4 +54,9 @@ const CFStringRef kCTVerticalFormsAttributeName = CFSTR("NSVerticalFormsAttribut
 
 const CFStringRef kCTGlyphInfoAttributeName = CFSTR("NSGlyphInfoAttributeName");
 
+/* THE ONE KEY WITH NO APPKIT COUNTERPART IN THIS GROUP, so its literal is this tier's and is spelled the way the
+ * others are. The AppKit half sets the SAME constant (its `NSLayoutManager` includes this header) rather than a
+ * literal of its own, so the two frameworks read the box by one name. */
+const CFStringRef kCTRunDelegateAttributeName = CFSTR("CTRunDelegateAttributeName");
+
 const CFStringRef kCTCharacterShapeAttributeName = CFSTR("NSCharacterShapeAttributeName");

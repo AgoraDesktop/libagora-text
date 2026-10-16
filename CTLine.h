@@ -23,6 +23,12 @@
  * is NOT laid out correctly here — every glyph is drawn in the order its character appeared. That is the
  * HarfBuzz milestone this project's Core Text plan already names, and it is not a signature's problem.
  *
+ * **A RUN DELEGATE, THOUGH, IS HONORED.** A character whose attributes carry `kCTRunDelegateAttributeName` is a BOX:
+ * its advance is the delegate's width rather than the placeholder glyph's, the line's ascent and descent grow to cover
+ * the delegate's, and no ink is drawn for it — which is how an attachment, an inline picture or a tab occupies space
+ * without being a glyph. It is still ONE run (see `CTRunDelegate.h`), so it neither needs nor claims the multi-run
+ * machinery above.
+ *
  * AND THREE DOORS ARE OWED, EACH DECLARED AND NOT DEFINED, so a caller who reaches for one gets a link error
  * rather than an invented answer. `CTLine.c` carries the reason for each; the shortest of the three is the one
  * worth knowing before reading on: A LINE'S RUNS ARE `CTRunRef`s, AND `CTRun` DOES NOT EXIST YET — Apple's own

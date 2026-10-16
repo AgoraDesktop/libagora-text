@@ -17,6 +17,11 @@
  */
 #include <CoreText/CTLine.h>
 
+/* **AND THE RUN DELEGATE, WHICH IS HOW A CHARACTER THAT IS NOT A GLYPH GETS A WIDTH.** The key and the object are
+ * Core Text's; `CTRunDelegate_internal.h` is this library's own seam to the three answers it asks. */
+#include <CoreText/CTRunDelegate.h>
+#include <CoreText/CTRunDelegate_internal.h>
+
 /* THE FONT OBJECT AND ITS DOORS, WHICH THIS FILE'S HEADER DOES NOT DECLARE AND MUST NOT: Apple's CTLine.h does not
  * include CTFont.h either — a LINE's surface mentions no font at all. The IMPLEMENTATION is a different question,
  * and this is where it answers it. */
@@ -50,6 +55,10 @@ struct __CTLine {
 	CFRange range;			/* the characters that spawned the glyphs */
 	CGGlyph *glyphs;		/* malloc'd, glyphCount entries */
 	CGPoint *positions;		/* malloc'd, glyphCount entries, relative to the LINE's own origin */
+	/* **AND WHICH OF THE GLYPHS IS NOT A GLYPH BUT A BOX.** A character carrying a run delegate occupies the width its
+	 * delegate answers and draws no ink; this flag is the one thing that tells the two apart, and it is carried
+	 * alongside the glyphs so a DRAW can skip a box and the `CTRun` built from the line can too. */
+	bool *isBox;			/* malloc'd, glyphCount entries; NULL when the line has no box */
 	CFIndex glyphCount;
 	double width;			/* the sum of the advances */
 	CGFloat ascent, descent, leading;
@@ -79,6 +88,7 @@ static void ct_line_finalize(CFTypeRef cf)
 	}
 	free(line->glyphs);
 	free(line->positions);
+	free(line->isBox);
 }
 
 /* TWO LINES ARE EQUAL WHEN THEY WERE MADE FROM THE SAME STRING IN THE SAME FONT: the glyphs and their positions are
@@ -194,7 +204,8 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 	line->glyphs = (CGGlyph *)malloc((size_t)n * sizeof(CGGlyph));
 	line->positions = (CGPoint *)malloc((size_t)n * sizeof(CGPoint));
 	advances = (CGSize *)malloc((size_t)n * sizeof(CGSize));
-	if (chars == NULL || line->glyphs == NULL || line->positions == NULL || advances == NULL) {
+	line->isBox = (bool *)calloc((size_t)n, sizeof(bool));
+	if (chars == NULL || line->glyphs == NULL || line->positions == NULL || advances == NULL || line->isBox == NULL) {
 		free(chars);
 		free(advances);
 		/* THE LINE IS RELEASED RATHER THAN FIXED UP: it is a fresh Core Foundation object with one reference, so
@@ -212,6 +223,30 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 
 	memset(advances, 0, (size_t)n * sizeof(CGSize));
 	(void)CTFontGetAdvancesForGlyphs(font, kCTFontHorizontalOrientation, line->glyphs, advances, n);
+	/* **AND A CHARACTER CARRYING A RUN DELEGATE IS A BOX, NOT A GLYPH.** Its advance is what the delegate answers rather
+	 * than what the placeholder glyph measured, no ink is drawn for it, and the line grows to cover the delegate's
+	 * ascent and descent — so a picture taller than the font's line makes the line taller. THE KERN IS SKIPPED AROUND A
+	 * BOX in the position loop below, because there is no pair of glyphs to adjust. */
+	for (i = 0; i < n; i++) {
+		CFTypeRef value = CFAttributedStringGetAttribute(string, range.location + i,
+								 kCTRunDelegateAttributeName, NULL);
+
+		if (value != NULL && CFGetTypeID(value) == CTRunDelegateGetTypeID()) {
+			CTRunDelegateRef delegate = (CTRunDelegateRef)value;
+			CGFloat boxAscent = CTRunDelegateAscent(delegate);
+			CGFloat boxDescent = CTRunDelegateDescent(delegate);
+
+			line->isBox[i] = true;
+			line->glyphs[i] = 0;
+			advances[i] = CGSizeMake(CTRunDelegateWidth(delegate), 0.0);
+			if (boxAscent > line->ascent) {
+				line->ascent = boxAscent;
+			}
+			if (boxDescent > line->descent) {
+				line->descent = boxDescent;
+			}
+		}
+	}
 	/* **AND THE PAIR'S OWN ADJUSTMENT AFTER EACH GLYPH, WHICH IS WHAT KERNING IS.** An advance is what a glyph
 	 * asks for on its own; a KERN is what the font's typographer said about the two glyphs TOGETHER — that an `o`
 	 * belongs closer under a `T` than their advances put it — and a line that sums advances and stops has thrown
@@ -225,7 +260,7 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 	for (i = 0; i < n; i++) {
 		line->positions[i] = CGPointMake((CGFloat)x, 0.0);
 		x += advances[i].width;
-		if (i + 1 < n) {
+		if (i + 1 < n && !line->isBox[i] && !line->isBox[i + 1]) {
 			x += (CGFloat)CTFontGetKerningBetweenGlyphs(font, line->glyphs[i], line->glyphs[i + 1]);
 		}
 	}
@@ -443,14 +478,59 @@ void CTLineDraw(CTLineRef line, CGContextRef context)
 		CGFontRelease(graphics);
 		return;
 	}
-	for (i = 0; i < l->glyphCount; i++) {
-		absolute[i] = CGPointMake(l->positions[i].x + pen.x, l->positions[i].y + pen.y);
+	/* **AND A BOX IS SKIPPED: IT OCCUPIES SPACE AND DRAWS NO INK.** The glyphs and their positions are collected
+	 * WITHOUT the boxes first — `CGContextShowGlyphsAtPositions` takes one contiguous run, so a box in the middle
+	 * has to come out rather than be drawn as a `.notdef` — and a line with no boxes keeps its arrays as they are. */
+	{
+		CGGlyph *drawGlyphs = l->glyphs;
+		CGPoint *drawPositions = absolute;
+		CFIndex drawCount = l->glyphCount;
+		CFIndex k = 0;
+
+		if (l->isBox != NULL) {
+			bool anyBox = false;
+
+			for (i = 0; i < l->glyphCount; i++) {
+				if (l->isBox[i]) {
+					anyBox = true;
+					break;
+				}
+			}
+			if (anyBox) {
+				drawGlyphs = (CGGlyph *)malloc((size_t)l->glyphCount * sizeof(CGGlyph));
+				drawPositions = (CGPoint *)malloc((size_t)l->glyphCount * sizeof(CGPoint));
+				if (drawGlyphs == NULL || drawPositions == NULL) {
+					free(drawGlyphs);
+					free(drawPositions);
+					free(absolute);
+					CGFontRelease(graphics);
+					return;
+				}
+				for (i = 0; i < l->glyphCount; i++) {
+					if (!l->isBox[i]) {
+						drawGlyphs[k] = l->glyphs[i];
+						drawPositions[k] = CGPointMake(l->positions[i].x + pen.x, l->positions[i].y + pen.y);
+						k++;
+					}
+				}
+				drawCount = k;
+			}
+		}
+		if (k == 0 && drawCount == l->glyphCount) {
+			for (i = 0; i < l->glyphCount; i++) {
+				absolute[i] = CGPointMake(l->positions[i].x + pen.x, l->positions[i].y + pen.y);
+			}
+		}
+		/* THE FONT AND ITS SIZE GO ON THE CONTEXT because the glyphs are drawn BY Core Graphics and not by this
+		 * library: a glyph index means nothing without the face and the size it was indexed in. */
+		CGContextSetFont(context, graphics);
+		CGContextSetFontSize(context, CTFontGetSize(l->font));
+		CGContextShowGlyphsAtPositions(context, drawGlyphs, drawPositions, (size_t)drawCount);
+		if (drawGlyphs != l->glyphs) {
+			free(drawGlyphs);
+			free(drawPositions);
+		}
 	}
-	/* THE FONT AND ITS SIZE GO ON THE CONTEXT because the glyphs are drawn BY Core Graphics and not by this
-	 * library: a glyph index means nothing without the face and the size it was indexed in. */
-	CGContextSetFont(context, graphics);
-	CGContextSetFontSize(context, CTFontGetSize(l->font));
-	CGContextShowGlyphsAtPositions(context, l->glyphs, absolute, (size_t)l->glyphCount);
 	free(absolute);
 	CGFontRelease(graphics);
 }
@@ -569,7 +649,7 @@ CFArrayRef CTLineGetGlyphRuns(CTLineRef line)
 	attributes = (l->string == NULL) ? NULL
 					 : CFAttributedStringGetAttributes(l->string, l->range.location, NULL);
 	l->run = CTRunCreateWithAttributesAndGlyphs(attributes, l->font, l->range, indices, l->glyphs,
-						    l->positions, advances, l->glyphCount);
+						    l->positions, advances, l->isBox, l->glyphCount);
 	free(indices);
 	free(advances);
 	if (l->run == NULL) {

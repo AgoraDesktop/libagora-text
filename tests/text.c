@@ -4955,6 +4955,94 @@ static int case_frame_kerning(void)
 	return g_fail - before;
 }
 
+/* **A RUN DELEGATE IS A BOX: A CHARACTER THAT OCCUPIES WIDTH AND DRAWS NO INK.** The three callbacks answer for a
+ * reference constant, the delegate is set as the value of `kCTRunDelegateAttributeName` over the character, and the
+ * line reserves the delegate's width instead of the placeholder glyph's advance and grows to cover its ascent and
+ * descent. So the probe sets one over the middle of `abXc` and reads the offsets back: the box's own glyph count, the
+ * distance from the box to the next character (the delegate's width, not the glyph's), and the two heights. */
+struct fn_box { CGFloat width, ascent, descent; };
+static CGFloat fn_box_width(void *refCon) { return ((const struct fn_box *)refCon)->width; }
+static CGFloat fn_box_ascent(void *refCon) { return ((const struct fn_box *)refCon)->ascent; }
+static CGFloat fn_box_descent(void *refCon) { return ((const struct fn_box *)refCon)->descent; }
+
+static int case_run_delegate(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(13.0);
+	struct fn_box box = { 30.0, 12.0, 3.0 };
+	CTRunDelegateCallbacks callbacks = { 0, fn_box_ascent, fn_box_descent, fn_box_width };
+	CTRunDelegateRef delegate;
+	UniChar chars[4];
+	CFStringRef text;
+	CFMutableDictionaryRef attrs;
+	CFAttributedStringRef base;
+	CFMutableAttributedStringRef astr;
+	CTLineRef line;
+
+	check(font != NULL, "no face, so the box cannot be judged against one");
+	if (font == NULL) {
+		return g_fail - before;
+	}
+	delegate = CTRunDelegateCreate(&callbacks, &box);
+	check(delegate != NULL && CTRunDelegateGetRefCon(delegate) == &box,
+	      "`CTRunDelegateCreate` makes one and keeps the reference constant");
+
+	chars[0] = 'a'; chars[1] = 'b'; chars[2] = 0xFFFC; chars[3] = 'c';
+	text = CFStringCreateWithCharacters(kCFAllocatorDefault, chars, 4);
+	attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					  &kCFTypeDictionaryValueCallBacks);
+	CFDictionarySetValue(attrs, kCTFontAttributeName, font);
+	base = CFAttributedStringCreate(kCFAllocatorDefault, text, attrs);
+	astr = CFAttributedStringCreateMutableCopy(kCFAllocatorDefault, 0, base);
+	CFAttributedStringSetAttribute(astr, CFRangeMake(2, 1), kCTRunDelegateAttributeName, delegate);
+	line = CTLineCreateWithAttributedString(astr);
+	check(line != NULL, "the line with a box could not be made");
+
+	if (line != NULL) {
+		CGFloat boxX = CTLineGetOffsetForStringIndex(line, 2, NULL);
+		CGFloat afterX = CTLineGetOffsetForStringIndex(line, 3, NULL);
+		CGFloat ascent = 0.0, descent = 0.0;
+		CFArrayRef runs = CTLineGetGlyphRuns(line);
+		CTRunRef run = (runs != NULL && CFArrayGetCount(runs) > 0)
+			? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
+
+		(void)CTLineGetTypographicBounds(line, &ascent, &descent, NULL);
+		printf("  (box at x=%.3f, next at x=%.3f, ascent %.3f, descent %.3f)\n",
+		       (double)boxX, (double)afterX, (double)ascent, (double)descent);
+		check(CTLineGetGlyphCount(line) == 4, "the line has one entry per character, box included");
+		check(fabs((afterX - boxX) - 30.0) < 0.01,
+		      "the character after the box is the DELEGATE's width past it, not the glyph's advance");
+		check(ascent >= 12.0 - 0.01, "the line's ascent grew to cover the box's");
+		check(descent >= 3.0 - 0.01, "and its descent too");
+		check(run != NULL && CTRunGetGlyphCount(run) == 4, "the run agrees: one glyph per character");
+	}
+
+	/* **AND THE TYPESETTER MEASURES THE BOX TOO**, so a line breaks where the box actually ends rather than where its
+	 * placeholder glyph did. At 40 points, `a` and `b` fit but the box's THIRTY does not, so the fit stops before it —
+	 * where a placeholder advance would have left room for the box AND `c`. */
+	{
+		CTTypesetterRef ts = CTTypesetterCreateWithAttributedString(astr);
+		CFIndex count = (ts != NULL) ? CTTypesetterSuggestLineBreak(ts, 0, 40.0) : 0;
+
+		printf("  (a 40-point width broke after %ld character(s))\n", (long)count);
+		check(ts != NULL && count == 2,
+		      "the typesetter measured the box's 30 points and stopped before it");
+		if (ts != NULL) {
+			CFRelease(ts);
+		}
+	}
+
+	if (line != NULL) {
+		CFRelease(line);
+	}
+	CFRelease(astr);
+	CFRelease(base);
+	CFRelease(text);
+	CFRelease(attrs);
+	CFRelease(delegate);
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -4984,6 +5072,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "A line truncates the way Apple prints it, and refuses another font", case_line_truncation },
 	{ "A line justifies at the spaces, by the fraction it is given", case_line_justification },
 	{ "A line is kerned: the font's pair adjustments reach the positions", case_line_kerning },
+	{ "A run delegate is a box: the line reserves its width and draws no ink", case_run_delegate },
 	{ "And the FRAMESETTER path is kerned too, which is where the AppKit draws", case_frame_kerning },
 	{ "Matching finds the faces a query describes, in a stable order", case_font_matching },
 	{ "A disabled face leaves every matching answer, and comes back", case_font_visibility },

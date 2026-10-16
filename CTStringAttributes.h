@@ -91,6 +91,13 @@ extern const CFStringRef kCTVerticalFormsAttributeName;
  * header only names. PROVABLE (11 of 12) — `NSGlyphInfoAttributeName`. */
 extern const CFStringRef kCTGlyphInfoAttributeName;
 
+/* **A `CTRunDelegateRef`: the BOX a character occupies when it is not a glyph.** Attachment characters, inline
+ * pictures and tab stops all set this over their placeholder; the line reserves the delegate's width instead of the
+ * glyph's advance and draws no ink for it. INFERRED — the AppKit declares no counterpart for this key, because the
+ * value is a Core Text object the AppKit has no class for — so the literal below is this tier's, spelled the way the
+ * neighboring keys are. */
+extern const CFStringRef kCTRunDelegateAttributeName;
+
 /* A `CFNumberRef` naming a `kCharacterShapeType` shape, from the AAT `mort` feature vocabulary. PROVABLE (12 of 12) —
  * `NSCharacterShapeAttributeName`. */
 extern const CFStringRef kCTCharacterShapeAttributeName;

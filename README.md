@@ -263,6 +263,15 @@ ctest --test-dir build
   case and it says what it is: **no line breaking, no two fonts in one line, no bidirectional reordering and no
   shaping** — a character's glyph is drawn where its own advance puts it, in the order the characters appeared.
   Multi-run, bidi and complex scripts are the HarfBuzz milestone the Core Text plan already names.
+- **AND A RUN DELEGATE IS THE ONE NON-GLYPH THE LINE HONORS** (`CTRunDelegate.h`, `kCTRunDelegateAttributeName`): a
+  character carrying one is a BOX — its advance is the delegate's width, the line's ascent and descent grow to cover
+  the delegate's, and `CTLineDraw` and `CTRunDraw` skip it, so an attachment or a tab occupies space without being a
+  glyph. It is still ONE run, which is why it needs none of the machinery above. MEASURED (`case_run_delegate`): a
+  box of width **30** in `ab<c>c` puts the character after it exactly **30** points past the box's own offset, not the
+  placeholder glyph's advance; the line has one entry per character, box included; its ascent and descent grew to
+  **12** and **3**; and `CTTypesetterSuggestLineBreak` at **40** points stops BEFORE the box, because the fit counted
+  its width. WHAT IS STILL OWED: a box in a JUSTIFIED or TRUNCATED line keeps its place but not its delegate
+  (`ct_line_with_positions` copies glyphs and positions, not the flags).
 - **`CTLineDraw`'S ONE CROSS-FRAMEWORK SEMANTIC IS MEASURED RATHER THAN ASSUMED.** This Core Graphics' own header
   says `CGContextShowGlyphsAtPositions` takes positions "specified in user space" and that "the CTM alone places
   the pen" — unlike the three advance doors, whose pen "starts at the TEXT POSITION" — so the line's origin is
