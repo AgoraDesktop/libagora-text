@@ -5513,6 +5513,63 @@ static int case_bidi_implicit_levels(void)
 	return g_fail - before;
 }
 
+/* **AND THE BRACKET PAIRS — UAX #9 N0.** A matched pair takes ONE direction, and the case where that MATTERS is the
+ * one where the embedding direction and the context disagree: with N1/N2 alone the CLOSING bracket would take the
+ * embedding direction, and N0 is what makes the pair agree. */
+static int case_bidi_brackets(void)
+{
+	int before = g_fail;
+	uint8_t levels[16];
+	CTBidiClass classes[16];
+
+	/* N0.c: the inside AND the context before both disagree with the embedding direction, so the pair takes THAT
+	 * direction — and the CLOSING bracket is where it shows, because N1/N2 alone would make it L. */
+	{
+		UniChar text[] = { 0x05D0, '(', 0x05D1, ')' };
+
+		check(ct_bidi_explicit_levels(text, 4, 0, levels, classes), "the bracket walk runs");
+		ct_bidi_resolve_weak(classes, levels, 4, 0);
+		ct_bidi_resolve_brackets(text, classes, levels, 4, 0);
+		check(classes[1] == kCTBidiR && classes[3] == kCTBidiR,
+		      "N0.c: brackets around an R, with an R before them, become R — including the closer");
+	}
+	/* N0.b: something INSIDE matches the embedding direction. */
+	{
+		UniChar text[] = { '(', 'a', ')' };
+
+		ct_bidi_explicit_levels(text, 3, 0, levels, classes);
+		ct_bidi_resolve_weak(classes, levels, 3, 0);
+		ct_bidi_resolve_brackets(text, classes, levels, 3, 0);
+		check(classes[0] == kCTBidiL && classes[2] == kCTBidiL,
+		      "N0.b: brackets around an L in a left-to-right paragraph become L");
+	}
+	/* A NESTED pair, the OUTER one processed first — the standard's own order. */
+	{
+		UniChar text[] = { 0x05D0, '[', '(', 0x05D1, ')', ']' };
+
+		ct_bidi_explicit_levels(text, 6, 0, levels, classes);
+		ct_bidi_resolve_weak(classes, levels, 6, 0);
+		ct_bidi_resolve_brackets(text, classes, levels, 6, 0);
+		check(classes[1] == kCTBidiR && classes[2] == kCTBidiR
+		      && classes[4] == kCTBidiR && classes[5] == kCTBidiR,
+		      "both halves of a nested pair resolve to the SAME direction");
+	}
+	/* N0.d: NOTHING inside is strong, so the brackets are left for N1/N2. */
+	{
+		UniChar text[] = { '(', ')' };
+
+		ct_bidi_explicit_levels(text, 2, 0, levels, classes);
+		ct_bidi_resolve_weak(classes, levels, 2, 0);
+		ct_bidi_resolve_brackets(text, classes, levels, 2, 0);
+		check(classes[0] == kCTBidiON && classes[1] == kCTBidiON,
+		      "N0.d: an empty pair is left NEUTRAL for N1/N2");
+		ct_bidi_resolve_neutral(classes, levels, 2, 0);
+		check(classes[0] == kCTBidiL && classes[1] == kCTBidiL,
+		      "and N1/N2 then settles it on the embedding direction");
+	}
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -5551,6 +5608,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The neutral types N1 and N2", case_bidi_neutrals },
 	{ "The isolating run sequences X10 joins", case_bidi_isolating_sequences },
 	{ "The implicit levels I1 and I2", case_bidi_implicit_levels },
+	{ "The bracket pairs N0", case_bidi_brackets },
 	{ "And the FRAMESETTER path is kerned too, which is where the AppKit draws", case_frame_kerning },
 	{ "Matching finds the faces a query describes, in a stable order", case_font_matching },
 	{ "A disabled face leaves every matching answer, and comes back", case_font_visibility },

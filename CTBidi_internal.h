@@ -90,8 +90,8 @@ void ct_bidi_resolve_weak(CTBidiClass *classes, const uint8_t *levels, CFIndex c
 
 /* **UAX #9 N1 AND N2: THE NEUTRAL TYPES**, over the ISOLATING RUN SEQUENCES (X10) like the weak rules — a run of
  * neutrals between two strong types of the SAME direction takes that direction (a NUMBER counting as R), and any
- * other run of neutrals takes the EMBEDDING direction of its sequence. WHAT IS NOT HERE IS **N0**, the bracket pairs,
- * which need Unicode's `BidiBrackets` data — the next slice. */
+ * other run of neutrals takes the EMBEDDING direction of its sequence. N0, the bracket pairs, runs BEFORE this (see
+ * `ct_bidi_resolve_brackets`): it settles what it can, and what it cannot it leaves neutral for these rules. */
 void ct_bidi_resolve_neutral(CTBidiClass *classes, const uint8_t *levels, CFIndex count, int paragraphLevel);
 
 /* **UAX #9 I1 AND I2: THE IMPLICIT LEVELS.** The LAST level rule, and the one that puts a right-to-left character
@@ -99,5 +99,24 @@ void ct_bidi_resolve_neutral(CTBidiClass *classes, const uint8_t *levels, CFInde
  * goes UP one and a NUMBER up two (I1); at an ODD level L and a number go up one and R stays (I2). `levels` is edited
  * in place and `classes` is read: every class is L, R, EN or AN by now, because W and N have resolved the rest. */
 void ct_bidi_resolve_implicit(const CTBidiClass *classes, uint8_t *levels, CFIndex count);
+
+/* THE BRACKET PAIRS, generated from the UCD's `BidiBrackets.txt` by `tools/gen-bidi-brackets.py`: one row per bracket,
+ * with the code point it PAIRS with and whether it OPENS. BD16 pushes an opener and matches a closer against it, so
+ * both directions are in the table. */
+struct ct_bidi_bracket {
+	uint32_t bracket;
+	uint32_t paired;
+	bool isOpen;
+};
+
+extern const struct ct_bidi_bracket ct_bidi_brackets[];
+extern const size_t ct_bidi_bracket_count;
+
+/* **UAX #9 N0: THE BRACKET PAIRS.** A matched pair of brackets takes ONE direction: the embedding direction when the
+ * text inside or the context before agrees with it, and the OPPOSITE direction when the inside and the context before
+ * BOTH disagree with the embedding direction. Runs BEFORE the neutral rules, which settle whatever is left. Needs the
+ * TEXT because a class says only "OTHER NEUTRAL" — whether a character is a bracket is a code-point fact. */
+void ct_bidi_resolve_brackets(const UniChar *text, CTBidiClass *classes, const uint8_t *levels, CFIndex count,
+			      int paragraphLevel);
 
 #endif /* CORE_TEXT_CTBIDI_INTERNAL_H */

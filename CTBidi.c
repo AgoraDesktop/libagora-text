@@ -769,3 +769,182 @@ void ct_bidi_resolve_implicit(const CTBidiClass *classes, uint8_t *levels, CFInd
 		}
 	}
 }
+
+/* =================================================================================================
+ * UAX #9 N0: THE BRACKET PAIRS.
+ * =============================================================================================== */
+
+/* THE TABLE'S ROW FOR A CODE POINT, or NULL when it is not a bracket at all. */
+static const struct ct_bidi_bracket *fn_bracket(uint32_t codePoint)
+{
+	size_t lo = 0;
+	size_t hi = ct_bidi_bracket_count;
+
+	while (lo < hi) {
+		size_t mid = lo + (hi - lo) / 2;
+		const struct ct_bidi_bracket *row = &ct_bidi_brackets[mid];
+
+		if (codePoint < row->bracket) {
+			hi = mid;
+		} else if (codePoint > row->bracket) {
+			lo = mid + 1;
+		} else {
+			return row;
+		}
+	}
+	return NULL;
+}
+
+/* ONE MATCHED PAIR, as the two positions in the SEQUENCE's own order. */
+struct ct_bidi_pair {
+	CFIndex open;
+	CFIndex close;
+};
+
+void ct_bidi_resolve_brackets(const UniChar *text, CTBidiClass *classes, const uint8_t *levels, CFIndex count,
+			      int paragraphLevel)
+{
+	int *seqId = NULL;
+	CTBidiClass *sos = NULL;
+	CTBidiClass *eos = NULL;
+	int *seqLevel = NULL;
+	CFIndex seqCount;
+	CFIndex s;
+
+	if (text == NULL || classes == NULL || levels == NULL || count <= 0) {
+		return;
+	}
+	seqCount = fn_sequences(classes, levels, count, paragraphLevel, &seqId, &sos, &eos, &seqLevel);
+	for (s = 0; s < seqCount; s++) {
+		CFIndex *idx;
+		CFIndex *openAt;
+		uint32_t *openCp;
+		struct ct_bidi_pair *pairs;
+		CFIndex n = 0;
+		CFIndex sp = 0;
+		CFIndex pairCount = 0;
+		CFIndex k, m;
+		CTBidiClass embedding = ((seqLevel[s] % 2) != 0) ? kCTBidiR : kCTBidiL;
+
+		for (k = 0; k < count; k++) {
+			if (seqId[k] == (int)s) {
+				n++;
+			}
+		}
+		if (n == 0) {
+			continue;
+		}
+		idx = (CFIndex *)malloc((size_t)n * sizeof(CFIndex));
+		openAt = (CFIndex *)malloc((size_t)n * sizeof(CFIndex));
+		openCp = (uint32_t *)malloc((size_t)n * sizeof(uint32_t));
+		pairs = (struct ct_bidi_pair *)malloc((size_t)n * sizeof(struct ct_bidi_pair));
+		if (idx == NULL || openAt == NULL || openCp == NULL || pairs == NULL) {
+			free(idx);
+			free(openAt);
+			free(openCp);
+			free(pairs);
+			break;
+		}
+		n = 0;
+		for (k = 0; k < count; k++) {
+			if (seqId[k] == (int)s) {
+				idx[n++] = k;
+			}
+		}
+		/* **BD16: AN OPENER PUSHES, A CLOSER MATCHES THE NEAREST OPENER IT PAIRS WITH.** The stack holds the
+		 * opener's POSITION IN THE SEQUENCE and its own code point, so the pair is two sequence positions. A closer
+		 * that matches nothing pops nothing; when it matches, the opener AND everything above it go — which is what
+		 * makes an unpaired opener inside a matched pair fall out. */
+		for (m = 0; m < n; m++) {
+			const struct ct_bidi_bracket *row = fn_bracket(text[idx[m]]);
+
+			if (row == NULL) {
+				continue;
+			}
+			if (row->isOpen) {
+				if (sp >= 63) {
+					break;	/* the standard's stack is 63 deep: stop looking */
+				}
+				openAt[sp] = m;
+				openCp[sp] = row->bracket;
+				sp++;
+			} else {
+				CFIndex j;
+
+				for (j = sp - 1; j >= 0; j--) {
+					const struct ct_bidi_bracket *opener = fn_bracket(openCp[j]);
+
+					if (opener != NULL && opener->paired == row->bracket) {
+						break;
+					}
+				}
+				if (j >= 0) {
+					pairs[pairCount].open = openAt[j];
+					pairs[pairCount].close = m;
+					pairCount++;
+					sp = j;	/* the opener and everything above it are gone */
+				}
+			}
+		}
+		/* **AND THE PAIRS ARE RESOLVED IN THE LOGICAL ORDER OF THEIR OPENING BRACKETS**, which is the standard's
+		 * own order and the reason this is inserted-sorted rather than kept as the closers were found. */
+		for (k = 1; k < pairCount; k++) {
+			struct ct_bidi_pair key = pairs[k];
+			CFIndex b;
+
+			for (b = k - 1; b >= 0 && pairs[b].open > key.open; b--) {
+				pairs[b + 1] = pairs[b];
+			}
+			pairs[b + 1] = key;
+		}
+		for (k = 0; k < pairCount; k++) {
+			CFIndex open = pairs[k].open;
+			CFIndex close = pairs[k].close;
+			CTBidiClass insideEmbedding = kCTBidiON;
+			CTBidiClass insideOpposite = kCTBidiON;
+			CTBidiClass resolved = kCTBidiON;
+			CFIndex q;
+
+			/* N0.a: THE ENCLOSED STRONG TYPES, a number counting as R. */
+			for (q = open + 1; q < close; q++) {
+				CTBidiClass strong = fn_strong_for_neutral(classes[idx[q]]);
+
+				if (strong == embedding) {
+					insideEmbedding = strong;
+				} else if (strong != kCTBidiON) {
+					insideOpposite = strong;
+				}
+			}
+			if (insideEmbedding != kCTBidiON) {
+				/* N0.b: SOMETHING INSIDE AGREES with the embedding direction. */
+				resolved = embedding;
+			} else if (insideOpposite != kCTBidiON) {
+				/* N0.c: THE INSIDE DISAGREES, so the CONTEXT BEFORE decides — and only an established one wins. */
+				CTBidiClass before = sos[s];
+
+				for (q = open - 1; q >= 0; q--) {
+					CTBidiClass strong = fn_strong_for_neutral(classes[idx[q]]);
+
+					if (strong != kCTBidiON) {
+						before = strong;
+						break;
+					}
+				}
+				resolved = (before == insideOpposite) ? before : embedding;
+			}
+			/* N0.d: NOTHING INSIDE IS STRONG, so the brackets stay neutral and N1/N2 settle them. */
+			if (resolved != kCTBidiON) {
+				classes[idx[open]] = resolved;
+				classes[idx[close]] = resolved;
+			}
+		}
+		free(idx);
+		free(openAt);
+		free(openCp);
+		free(pairs);
+	}
+	free(seqId);
+	free(sos);
+	free(eos);
+	free(seqLevel);
+}
