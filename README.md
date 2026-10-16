@@ -349,10 +349,14 @@ ctest --test-dir build
   not break apart linguistic clusters. No other contextual analysis will be done"* — so the cluster door never backs
   off to a space and reads no paragraph style. Seven advances of `"one two three"` gives **4** from the line door and
   **7** from the cluster door, and the case asserts both numbers rather than that they differ.
-- **WHAT IS NOT ATTEMPTED IS SAID WHERE A CALLER READS IT**: no UAX #14, no hyphenation, and no bidirectional
-  reordering YET — so `kCTTypesetterOptionDisableBidiProcessing` is **recorded and cannot change an answer**, which
-  is the difference between a door that cannot do something and one that pretends it did. (The base writing
-  direction is read by the LINE, and its run reports it.)
+- **WHAT IS NOT ATTEMPTED IS SAID WHERE A CALLER READS IT**: no UAX #14 and no hyphenation. AND THE TWO TYPESETTER
+  OPTIONS ARE **OBEYED NOW**: `kCTTypesetterOptionDisableBidiProcessing` and
+  `kCTTypesetterOptionForcedEmbeddingLevel` are read into a `CTLineBidiDirective` and handed to the LINE, where the
+  algorithm runs — so the breaker still consults neither (bidi changes no advance) and both change the line the
+  typesetter makes. MEASURED: a Hebrew line from a typesetter with bidi disabled reports NO `NonMonotonic`, keeps its
+  glyphs in string order and does not mirror, `ForcedEmbeddingLevel` 0 turns that same line left-to-right, a forced 1
+  turns a LATIN line right-to-left, and a value of the wrong type or a level that is not 0 or 1 is IGNORED rather than
+  refused. (The base writing direction is read by the LINE, and its run reports it.)
 - **AND A TYPESET LINE NEEDS A LINE OVER A **RANGE**, WHICH NO PUBLIC HEADER NAMES.** `CTLine_internal.h` is that seam
   — and it carries the font-key accessor too, so the value is written **once** and the line and the typesetter cannot
   disagree about which attribute names a font. The case holds the property that makes it necessary: a line cut from

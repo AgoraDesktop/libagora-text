@@ -25,10 +25,13 @@
  * hyphenation opportunities, gets the character-level answer instead — and `CTTypesetterSuggestClusterBreak` is the
  * door for a caller that wants the character-level answer ON PURPOSE.
  *
- * AND BIDI IS THE LINE'S, NOT THE TYPESETTER'S. Apple's default is to apply the Unicode Bidirectional Algorithm, with
- * an option to switch it off — the two options are RECORDED and NOT OBEYED here, because it is the LINE that runs the
- * algorithm and reorders its glyphs now (see `CTLine.c`). A caller who needs the LEVELS is owed that door; what is
- * here is the layout, and a line whose glyphs were reordered says so with `kCTRunStatusNonMonotonic`.
+ * AND BIDI IS THE LINE'S, NOT THE TYPESETTER'S — WHICH IS WHY THE OPTIONS CROSS A SEAM RATHER THAN DOING WORK HERE.
+ * Apple's default is to apply the Unicode Bidirectional Algorithm, with an option to switch it off, and the algorithm
+ * runs in the LINE (see `CTLine.c`). **BOTH OPTIONS ARE OBEYED NOW**, by being read into a `CTLineBidiDirective` and
+ * handed to `CTLineCreateWithAttributedStringAndRangeWithBidi` — so the typesetter consults neither while BREAKING
+ * (bidi changes no advance, which is why it costs nothing to keep the breaker ignorant of it) and both change the line
+ * this typesetter makes. A caller who needs the LEVELS is still owed that door; what is here is the layout, and a line
+ * whose glyphs were reordered says so with `kCTRunStatusNonMonotonic`.
  */
 #ifndef CORE_TEXT_CTTYPESETTER_H
 #define CORE_TEXT_CTTYPESETTER_H
@@ -56,10 +59,12 @@ extern const CFStringRef kCTTypesetterOptionForcedEmbeddingLevel;
  * ------------------------------------------------------------------------------------- */
 CTTypesetterRef CTTypesetterCreateWithAttributedString(CFAttributedStringRef string);
 
-/* THE OPTIONS ARE RECORDED AND NOT OBEYED, which is the difference between a door that cannot do something and one
- * that pretends it did: both of these options are about BIDIRECTIONAL PROCESSING, and this tier does none — so
- * neither `DisableBidiProcessing` nor a forced embedding level can change its answer, and a caller that needs the
- * algorithm is told so in `CTTypesetter.c` rather than given a plausible wrong layout. */
+/* **THE TWO OPTIONS ARE OBEYED, AND WHAT THEY ARE OBEYED BY IS THE LINE.** Both are about BIDIRECTIONAL PROCESSING,
+ * which is the LINE's (see `CTLine.c`) and not this door's, so `CTTypesetterCreateLine` reads them into a
+ * `CTLineBidiDirective` and passes it across the seam. `CTTypesetter.c` records the three readings that are this
+ * tier's rather than Apple's: a value of the WRONG TYPE and a forced level that is NOT 0 OR 1 are both IGNORED rather
+ * than refused, and `DisableBidiProcessing` WINS over a forced level, because a forced level is an input to an
+ * algorithm that is not going to run. */
 CTTypesetterRef CTTypesetterCreateWithAttributedStringAndOptions(CFAttributedStringRef string,
 								 CFDictionaryRef options);
 

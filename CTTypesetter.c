@@ -16,10 +16,10 @@
  * questions a glyph can answer: whether a character is a NEWLINE (a hard break, in Core Foundation's own vocabulary
  * of newlines rather than in a list written here) and whether it is a SPACE (where word wrapping backs off to).
  *
- * AND WHAT IS ABSENT IS ABSENT LOUDLY. THE TWO OPTIONS ARE STILL RECORDED, so `kCTTypesetterOptionDisableBidiProcessing`
- * and `kCTTypesetterOptionForcedEmbeddingLevel` cannot change an answer HERE: it is the LINE that runs the algorithm
- * and reorders its glyphs now (see `CTLine.c`), and the typesetter consults neither option. NO LINE-BREAKING RULES
- * BEYOND SPACES (nothing of UAX #14, no hyphenation), so a script whose words are not space-separated breaks at the
+ * AND WHAT IS ABSENT IS NO LONGER ABSENT: **BOTH OPTIONS ARE OBEYED NOW.** `kCTTypesetterOptionDisableBidiProcessing`
+ * and `kCTTypesetterOptionForcedEmbeddingLevel` are read into a `CTLineBidiDirective` and handed to the LINE, which is
+ * where the algorithm runs — so the typesetter still consults neither while BREAKING (bidi changes no advance) and both
+ * change the line this typesetter makes. NO LINE-BREAKING RULES BEYOND SPACES (nothing of UAX #14, no hyphenation), so a script whose words are not space-separated breaks at the
  * width and no sooner.
  */
 #include <CoreText/CTTypesetter.h>
@@ -65,7 +65,7 @@ struct __CTTypesetter {
 	CFRuntimeBase base;
 	CFAttributedStringRef string;	/* RETAINED: the text being typeset */
 	CTFontRef font;			/* RETAINED: the face the whole string is set in */
-	CFDictionaryRef options;	/* RETAINED: RECORDED rather than obeyed (see this file's head) */
+	CFDictionaryRef options;	/* RETAINED: read into the LINE's bidi directive by `ct_ts_bidi_directive` */
 	UniChar *chars;			/* malloc'd, count: the characters, for newlines and spaces */
 	CGGlyph *glyphs;		/* malloc'd, count */
 	CGSize *advances;		/* malloc'd, count */
@@ -99,12 +99,19 @@ static void ct_ts_finalize(CFTypeRef cf)
 	free(ts->isBox);
 }
 
-/* TWO TYPESETTERS ARE EQUAL WHEN THEY TYPESET THE SAME STRING IN THE SAME FACE: the options are RECORDED and change
- * no answer here (see this file's head), so they are not part of what makes two typesetters the same one. */
+/* TWO TYPESETTERS ARE EQUAL WHEN THEY TYPESET THE SAME STRING IN THE SAME FACE **AND WOULD MAKE THE SAME LINE**,
+ * which is what the BIDI DIRECTIVE decides. It used to say the options changed nothing, and that was true then; the
+ * honest version is not "the dictionaries are equal" either, because an options dictionary carrying a key this tier
+ * ignores — or a value of the wrong type — changes no line, and two typesetters that lay text out identically ARE the
+ * same typesetter. So the DIRECTIVES are compared, and the hash below stays what it was, which is what makes the two
+ * agree: equal objects hash alike. */
+static CTLineBidiDirective ct_ts_bidi_directive(const struct __CTTypesetter *ts);
+
 static Boolean ct_ts_equal(CFTypeRef cf1, CFTypeRef cf2)
 {
 	const struct __CTTypesetter *a = (const struct __CTTypesetter *)cf1;
 	const struct __CTTypesetter *b = (const struct __CTTypesetter *)cf2;
+	CTLineBidiDirective da, db;
 
 	if ((a->string == NULL) != (b->string == NULL) || (a->font == NULL) != (b->font == NULL)) {
 		return false;
@@ -112,7 +119,12 @@ static Boolean ct_ts_equal(CFTypeRef cf1, CFTypeRef cf2)
 	if (a->string != NULL && !CFEqual(a->string, b->string)) {
 		return false;
 	}
-	return !(a->font != NULL && !CFEqual(a->font, b->font));
+	if (a->font != NULL && !CFEqual(a->font, b->font)) {
+		return false;
+	}
+	da = ct_ts_bidi_directive(a);
+	db = ct_ts_bidi_directive(b);
+	return da.forcedLevel == db.forcedLevel && da.disabled == db.disabled;
 }
 
 static CFHashCode ct_ts_hash(CFTypeRef cf)
@@ -281,6 +293,41 @@ CTTypesetterRef CTTypesetterCreateWithAttributedString(CFAttributedStringRef str
 /* =================================================================================================
  * A LINE FROM IT, OVER A RANGE.
  * =============================================================================================== */
+/* **THE TYPESETTER'S TWO OPTIONS, READ INTO THE DIRECTIVE THE LINE UNDERSTANDS.** Apple's meaning for each is
+ * published in the option's own name; what is NOT published is either key's VALUE, which is why the constants above
+ * are inferences while these two readings are not.
+ *
+ * **AND A VALUE OF THE WRONG TYPE, OR A LEVEL THAT IS NOT 0 OR 1, IS IGNORED RATHER THAN REFUSED.** Apple makes both
+ * a precondition (a boolean, and a level of 0 or 1); refusing the whole typesetter for one bad key would fail a
+ * layout over a value that has an obvious "none" reading. Ignoring it is the READING this tier takes, and it is
+ * named here so that a caller can tell which of the two happened: `CTTypesetterCreateLine` never fails for an option.
+ *
+ * **AND `DisableBidiProcessing` WINS OVER A FORCED LEVEL**, because a forced level is an INPUT to an algorithm that is
+ * not going to run. Apple does not say which wins when both are given; that is the choice, and it is the only one that
+ * does not leave the caller with a line that is half-processed. */
+static CTLineBidiDirective ct_ts_bidi_directive(const struct __CTTypesetter *ts)
+{
+	CTLineBidiDirective directive = CTLineBidiDirectiveNone;
+	CFTypeRef value;
+
+	if (ts->options == NULL) {
+		return directive;
+	}
+	value = CFDictionaryGetValue(ts->options, kCTTypesetterOptionDisableBidiProcessing);
+	if (value != NULL && CFGetTypeID(value) == CFBooleanGetTypeID()) {
+		directive.disabled = CFBooleanGetValue((CFBooleanRef)value) ? true : false;
+	}
+	value = CFDictionaryGetValue(ts->options, kCTTypesetterOptionForcedEmbeddingLevel);
+	if (value != NULL && CFGetTypeID(value) == CFNumberGetTypeID()) {
+		CFIndex level = -1;
+
+		if (CFNumberGetValue((CFNumberRef)value, kCFNumberCFIndexType, &level) && (level == 0 || level == 1)) {
+			directive.forcedLevel = (int)level;
+		}
+	}
+	return directive;
+}
+
 CTLineRef CTTypesetterCreateLine(CTTypesetterRef typesetter, CFRange stringRange)
 {
 	const struct __CTTypesetter *ts = (const struct __CTTypesetter *)typesetter;
@@ -298,7 +345,7 @@ CTLineRef CTTypesetterCreateLine(CTTypesetterRef typesetter, CFRange stringRange
 	if (r.location < 0 || r.length < 0 || r.location > ts->count || r.location + r.length > ts->count) {
 		return NULL;
 	}
-	return CTLineCreateWithAttributedStringAndRange(ts->string, r);
+	return CTLineCreateWithAttributedStringAndRangeWithBidi(ts->string, r, ct_ts_bidi_directive(ts));
 }
 
 /* =================================================================================================

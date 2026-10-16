@@ -19,6 +19,8 @@
 #ifndef CORE_TEXT_CTLINE_INTERNAL_H
 #define CORE_TEXT_CTLINE_INTERNAL_H
 
+#include <stdbool.h>
+
 #include <CoreText/CTLine.h>
 #include <CoreText/CTStringAttributes.h>
 
@@ -32,6 +34,25 @@
  * line's OWN origin, exactly as the whole-string door does it. A range that does not lie inside the string answers
  * NULL. */
 CTLineRef CTLineCreateWithAttributedStringAndRange(CFAttributedStringRef string, CFRange range);
+
+/* **TWO BIDI DIRECTIVES, WHICH ARE THE ONE THING A TYPESETTER'S OPTIONS ARE ABOUT, AND THEY BELONG HERE BECAUSE THE
+ * ALGORITHM IS THE LINE'S.** `kCTTypesetterOptionDisableBidiProcessing` and
+ * `kCTTypesetterOptionForcedEmbeddingLevel` are recorded on the typesetter and honoured by the LINE — the typesetter
+ * consults neither while breaking, because bidi does not change a single advance — so the facts have to cross this
+ * seam, and a struct crosses it more honestly than three positional arguments that a reader would have to count. */
+typedef struct {
+	int forcedLevel;	/* -1 = NOT FORCED; 0 or 1 is the paragraph level P3 is not allowed to choose */
+	bool disabled;		/* the algorithm does not run at all: no levels, no reordering, no mirroring */
+} CTLineBidiDirective;
+
+/* THE NEUTRAL DIRECTIVE, which is what every caller that has no options passes: P2/P3 decide the paragraph level, and
+ * the whole algorithm runs. Named rather than written as `{-1, false}` at each call site, so "no directive" has ONE
+ * spelling and a later field cannot be added without finding every place that means "nothing". */
+extern const CTLineBidiDirective CTLineBidiDirectiveNone;
+
+/* THE SAME DOOR AS ABOVE WITH THE DIRECTIVES GIVEN, for the one caller that has them. */
+CTLineRef CTLineCreateWithAttributedStringAndRangeWithBidi(CFAttributedStringRef string, CFRange range,
+							  CTLineBidiDirective bidi);
 
 /* THE FONT ATTRIBUTE'S KEY, AS THIS LIBRARY DECLARES IT — `kCTFontAttributeName`, whose value is PROVABLE now that
  * `CTStringAttributes.h` exists (the AppKit declares `NSFontAttributeName`, and a dictionary crosses). A constant,

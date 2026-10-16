@@ -247,6 +247,10 @@ static bool fn_line_bidi_order(const UniChar *chars, CFIndex count, int paragrap
 	return moved;
 }
 
+/* **THE NEUTRAL DIRECTIVE, DEFINED ONCE.** A line made by the whole-string door has no typesetter above it and
+ * therefore no options, so it takes P2/P3's own answer and runs the whole algorithm — which is what this says. */
+const CTLineBidiDirective CTLineBidiDirectiveNone = { -1, false };
+
 /* **THE TAB STOPS A LINE OBEYS, TAKEN FROM ITS PARAGRAPH STYLE.** A tab is not a glyph and not a fixed box: where it
  * lands depends on where the pen ALREADY is, so the stop is chosen while the positions are being walked. Read once at
  * the line's own start, which is right for a single-paragraph line; a line spanning paragraphs with different tab
@@ -256,11 +260,20 @@ static bool fn_line_bidi_order(const UniChar *chars, CFIndex count, int paragrap
  * a NATURAL one is RESOLVED rather than guessed — UAX #9 P2 and P3 over the line's own characters — so a paragraph of
  * Hebrew runs right to left and one that starts with a Latin letter does not. See `CTRun.h`'s status flags; the
  * REORDERING is the next slice of the bidi milestone. */
-static CTWritingDirection ct_line_base_direction(CFAttributedStringRef string, CFRange range)
+static CTWritingDirection ct_line_base_direction(CFAttributedStringRef string, CFRange range,
+						  CTLineBidiDirective bidi)
 {
 	CFTypeRef style;
 	CTWritingDirection direction = kCTWritingDirectionNatural;
 
+	/* **A FORCED LEVEL IS THE ANSWER, ABOVE EVEN THE PARAGRAPH STYLE**, which is what "forced" means: the option
+	 * exists precisely to override the direction a document states. */
+	if (bidi.forcedLevel == 0) {
+		return kCTWritingDirectionLeftToRight;
+	}
+	if (bidi.forcedLevel == 1) {
+		return kCTWritingDirectionRightToLeft;
+	}
 	if (string == NULL) {
 		return kCTWritingDirectionLeftToRight;
 	}
@@ -271,6 +284,13 @@ static CTWritingDirection ct_line_base_direction(CFAttributedStringRef string, C
 	}
 	if (direction != kCTWritingDirectionNatural) {
 		return direction;
+	}
+	/* **WITH BIDI PROCESSING OFF, A NATURAL DIRECTION CANNOT BE RESOLVED AND TAKES P3'S OWN DEFAULT.** The paragraph
+	 * style's STATED direction is kept above, because it is a PROPERTY of the paragraph rather than a computation —
+	 * what the option turns off is the algorithm. A NATURAL one has nothing left to read it with, so it is
+	 * left-to-right, which is the answer P3 gives for a paragraph with nothing to look at. */
+	if (bidi.disabled) {
+		return kCTWritingDirectionLeftToRight;
 	}
 	/* P2/P3 DECIDE THE NATURAL CASE, over the characters the line covers. */
 	if (range.length > 0) {
@@ -401,7 +421,8 @@ static CTFontRef fn_run_font(const struct __CTLine *line, CFIndex charIndex)
 /* THE ONE PLACE A LINE IS MADE, AND IT IS ALWAYS MADE OVER A RANGE. A whole-string line and a typeset line differ in
  * ONE number — where the glyphs begin — so they are one function with the range as a parameter rather than two
  * functions that could drift apart. `font` is BORROWED by the callers and RETAINED here. */
-static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRef font, CFRange range)
+static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRef font, CFRange range,
+					    CTLineBidiDirective bidi)
 {
 	struct __CTLine *line;
 	CFStringRef text;
@@ -427,7 +448,7 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 	 * out of the MIDDLE of a document reports the range it covers THERE, so a caller laying out line after line never
 	 * has to translate between the line's coordinates and the string's. */
 	line->range = range;
-	line->direction = ct_line_base_direction(string, range);
+	line->direction = ct_line_base_direction(string, range, bidi);
 	/* **THE FONT RUNS, WHICH IS WHAT MAKES A LINE MORE THAN ONE FACE.** */
 	line->runFonts = CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks);
 	line->runInfo = (struct ct_line_run *)malloc((size_t)((range.length > 0) ? range.length : 1)
@@ -481,7 +502,14 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 	/* **AND THE BIDI PIPELINE RUNS HERE, BEFORE THE GLYPHS ARE LOOKED UP**, because L4 MIRRORS a character whose level
 	 * is odd and the MIRRORED character is the one the font has to be asked for: `(` in Arabic text is `)`. The visual
 	 * order is kept for the placement at the END of this function; `levels` is only needed for the mirroring. */
-	{
+	if (bidi.disabled) {
+		/* **NOTHING RUNS AND NOTHING MOVES, AND THE ARRAYS ARE NOT EVEN ALLOCATED.** A NULL `levels` and a NULL
+		 * `visualOrder` are already this function's spelling for "logical order" — the placement at the end and the
+		 * caret doors both read them that way — so bidi processing turned off needs no second path through the rest of
+		 * the function. What that means concretely is measured in the suite: the glyphs keep their string order, the run
+		 * does not report `kCTRunStatusNonMonotonic`, and L4's MIRRORING does not happen either, so a `(` in Hebrew text
+		 * is still the font's `(`. */
+	} else {
 		int paragraphLevel = (line->direction == kCTWritingDirectionRightToLeft) ? 1 : 0;
 
 		levels = (uint8_t *)malloc((size_t)n * sizeof(uint8_t));
@@ -659,7 +687,7 @@ CTLineRef CTLineCreateWithAttributedString(CFAttributedStringRef string)
 		return NULL;
 	}
 	whole = CFRangeMake(0, CFStringGetLength(CFAttributedStringGetString(string)));
-	return ct_line_create_with_font(string, (CTFontRef)value, whole);
+	return ct_line_create_with_font(string, (CTFontRef)value, whole, CTLineBidiDirectiveNone);
 }
 
 /* AND THE SECOND WAY IN, WHICH NO PUBLIC HEADER NAMES: a TYPESETTER makes lines out of PARTS of a string, and there is
@@ -667,6 +695,16 @@ CTLineRef CTLineCreateWithAttributedString(CFAttributedStringRef string)
  * The range is VALIDATED here rather than trusted: the callers are inside this library, but the bounds are still a
  * fact about the string, and a door that can be reached with a bad range must refuse rather than read past the end. */
 CTLineRef CTLineCreateWithAttributedStringAndRange(CFAttributedStringRef string, CFRange range)
+{
+	return CTLineCreateWithAttributedStringAndRangeWithBidi(string, range, CTLineBidiDirectiveNone);
+}
+
+/* **AND THE SAME DOOR WITH THE TYPESETTER'S DIRECTIVES**, which is the only difference between a line made by a
+ * caller and one made by a typesetter that was given `kCTTypesetterOptionDisableBidiProcessing` or
+ * `kCTTypesetterOptionForcedEmbeddingLevel`. EVERYTHING ELSE IS SHARED, so the two doors cannot disagree about what a
+ * line is. */
+CTLineRef CTLineCreateWithAttributedStringAndRangeWithBidi(CFAttributedStringRef string, CFRange range,
+							  CTLineBidiDirective bidi)
 {
 	CFTypeRef value;
 	CFIndex length;
@@ -683,7 +721,7 @@ CTLineRef CTLineCreateWithAttributedStringAndRange(CFAttributedStringRef string,
 	if (value == NULL || CFGetTypeID(value) != CTFontGetTypeID()) {
 		return NULL;
 	}
-	return ct_line_create_with_font(string, (CTFontRef)value, range);
+	return ct_line_create_with_font(string, (CTFontRef)value, range, bidi);
 }
 
 /* =================================================================================================
@@ -1087,7 +1125,7 @@ CTLineRef CTLineCreateWithGlyphs(CFAttributedStringRef string, CFRange range, CT
 	line->string = (string == NULL) ? NULL : (CFAttributedStringRef)CFRetain(string);
 	line->font = (CTFontRef)CFRetain(font);
 	line->range = range;
-	line->direction = ct_line_base_direction(string, range);
+	line->direction = ct_line_base_direction(string, range, CTLineBidiDirectiveNone);
 	line->ascent = CTFontGetAscent(font);
 	line->descent = CTFontGetDescent(font);
 	line->leading = CTFontGetLeading(font);
@@ -1280,7 +1318,7 @@ static struct __CTLine *ct_line_with_positions(CFAttributedStringRef string, CFR
 	line->string = (string == NULL) ? NULL : (CFAttributedStringRef)CFRetain(string);
 	line->font = (CTFontRef)CFRetain(font);
 	line->range = range;
-	line->direction = ct_line_base_direction(string, range);
+	line->direction = ct_line_base_direction(string, range, CTLineBidiDirectiveNone);
 	line->ascent = CTFontGetAscent(font);
 	line->descent = CTFontGetDescent(font);
 	line->leading = CTFontGetLeading(font);

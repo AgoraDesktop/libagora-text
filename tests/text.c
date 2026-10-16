@@ -5860,6 +5860,290 @@ static int case_line_font_runs(void)
 	return g_fail - before;
 }
 
+/* **THE TYPESETTER'S TWO OPTIONS, WHICH WERE RECORDED AND NOT OBEYED UNTIL THE LINE COULD BE TOLD.** Both are about
+ * the Unicode Bidirectional Algorithm, and the algorithm runs in the LINE — so `CTTypesetterCreateLine` reads them
+ * into a `CTLineBidiDirective` and the line acts on it. What is asserted here is that the options reach the layout at
+ * all, which they could not before, and that each one does the thing its own name says.
+ *
+ * THE THREE READINGS THIS TIER TAKES ARE EACH AN ASSERTION, because Apple leaves them open: a value of the WRONG TYPE
+ * and a forced level that is not 0 or 1 are IGNORED rather than refused, and `DisableBidiProcessing` WINS over a forced
+ * level. A door that quietly ignored everything would pass the first two; a door that refused would fail the layout for
+ * one bad key. */
+static int case_typesetter_bidi_options(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(13.0);
+	/* ALEF, BET, THEN A MIRRORABLE BRACKET: a right-to-left paragraph by P2/P3, and one character L4 can move. */
+	UniChar hebrew[] = { 0x05D0, 0x05D1, '(' };
+	UniChar latin[] = { 'a', 'b', 'c' };
+	CFStringRef h = (font != NULL) ? CFStringCreateWithCharacters(kCFAllocatorDefault, hebrew, 3) : NULL;
+	CFStringRef l = (font != NULL) ? CFStringCreateWithCharacters(kCFAllocatorDefault, latin, 3) : NULL;
+	CFMutableDictionaryRef attrs = NULL;
+	CFMutableDictionaryRef options = NULL;
+	CFAttributedStringRef astr = NULL;
+	CGGlyph openGlyph = 0, closeGlyph = 0;
+	UniChar openChar = '(', closeChar = ')';
+
+	check(font != NULL && h != NULL && l != NULL, "the bidi-option case could not be set up");
+	if (font == NULL || h == NULL || l == NULL) {
+		if (h != NULL) CFRelease(h);
+		if (l != NULL) CFRelease(l);
+		if (font != NULL) CFRelease(font);
+		return g_fail - before;
+	}
+	(void)CTFontGetGlyphsForCharacters(font, &openChar, &openGlyph, 1);
+	(void)CTFontGetGlyphsForCharacters(font, &closeChar, &closeGlyph, 1);
+	check(openGlyph != 0 && closeGlyph != 0 && openGlyph != closeGlyph,
+	      "the face in this case maps `(` and `)` to two different glyphs, which is what makes mirroring visible");
+	attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					  &kCFTypeDictionaryValueCallBacks);
+	options = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					    &kCFTypeDictionaryValueCallBacks);
+	CFDictionarySetValue(attrs, kCTFontAttributeName, font);
+
+	/* 1. **THE BASELINE, WITH NO OPTIONS.** The Hebrew string runs right to left, the glyphs are REORDERED, and the
+	 * bracket is MIRRORED — the three things the options below are measured against. */
+	if (h != NULL) {
+		astr = CFAttributedStringCreate(kCFAllocatorDefault, h, attrs);
+		if (astr != NULL) {
+			CTTypesetterRef ts = CTTypesetterCreateWithAttributedString(astr);
+			CTLineRef line = (ts != NULL) ? CTTypesetterCreateLine(ts, CFRangeMake(0, 0)) : NULL;
+			CFArrayRef runs = (line != NULL) ? CTLineGetGlyphRuns(line) : NULL;
+			CTRunRef run = (runs != NULL && CFArrayGetCount(runs) > 0)
+				? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
+			CTRunStatus status = (run != NULL) ? CTRunGetStatus(run) : kCTRunStatusNoStatus;
+			const CGGlyph *glyphs = (run != NULL) ? CTRunGetGlyphsPtr(run) : NULL;
+
+			printf("  (no options: status %u, the bracket is glyph %u)\n", (unsigned)status,
+			       (unsigned)((glyphs != NULL) ? glyphs[2] : 0));
+			check((status & kCTRunStatusRightToLeft) != 0 && (status & kCTRunStatusNonMonotonic) != 0,
+			      "with no options a Hebrew line reports RightToLeft AND NonMonotonic");
+			check(glyphs != NULL && glyphs[2] == closeGlyph,
+			      "and L4 mirrors its bracket, so the font is asked for `)`");
+			if (line != NULL) CFRelease(line);
+			if (ts != NULL) CFRelease(ts);
+			CFRelease(astr);
+		}
+	}
+
+	/* 2. **DISABLE BIDI PROCESSING: NOTHING RUNS AND NOTHING MOVES.** No direction is computed, no glyph is
+	 * reordered and NO CHARACTER IS MIRRORED — which is the third of those that shows the option reaches the whole
+	 * algorithm rather than just the reordering. */
+	CFDictionarySetValue(options, kCTTypesetterOptionDisableBidiProcessing, kCFBooleanTrue);
+	{
+		astr = CFAttributedStringCreate(kCFAllocatorDefault, h, attrs);
+		if (astr != NULL) {
+			CTTypesetterRef ts = CTTypesetterCreateWithAttributedStringAndOptions(astr, options);
+			CTLineRef line = (ts != NULL) ? CTTypesetterCreateLine(ts, CFRangeMake(0, 0)) : NULL;
+			CFArrayRef runs = (line != NULL) ? CTLineGetGlyphRuns(line) : NULL;
+			CTRunRef run = (runs != NULL && CFArrayGetCount(runs) > 0)
+				? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
+			CTRunStatus status = (run != NULL) ? CTRunGetStatus(run) : kCTRunStatusNoStatus;
+			const CGGlyph *glyphs = (run != NULL) ? CTRunGetGlyphsPtr(run) : NULL;
+
+			printf("  (bidi disabled: status %u, the bracket is glyph %u)\n", (unsigned)status,
+			       (unsigned)((glyphs != NULL) ? glyphs[2] : 0));
+			check(run != NULL && status == kCTRunStatusNoStatus,
+			      "a line with bidi processing disabled reports NO status at all, not %u", (unsigned)status);
+			check(glyphs != NULL && glyphs[2] == openGlyph,
+			      "and the MIRRORING is off too, so the font is asked for the `(` it was given");
+			if (line != NULL) CFRelease(line);
+			if (ts != NULL) CFRelease(ts);
+			CFRelease(astr);
+		}
+	}
+	CFDictionaryRemoveValue(options, kCTTypesetterOptionDisableBidiProcessing);
+
+	/* 3. **A FORCED LEVEL OVERRIDES P2/P3.** The same Hebrew string with level 0 forced is a LEFT-TO-RIGHT paragraph,
+	 * so nothing is reordered and the run says nothing. */
+	{
+		CFNumberRef zero = CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &(int){ 0 });
+		CFNumberRef one = CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &(int){ 1 });
+
+		CFDictionarySetValue(options, kCTTypesetterOptionForcedEmbeddingLevel, zero);
+		astr = CFAttributedStringCreate(kCFAllocatorDefault, h, attrs);
+		if (astr != NULL) {
+			CTTypesetterRef ts = CTTypesetterCreateWithAttributedStringAndOptions(astr, options);
+			CTLineRef line = (ts != NULL) ? CTTypesetterCreateLine(ts, CFRangeMake(0, 0)) : NULL;
+			CFArrayRef runs = (line != NULL) ? CTLineGetGlyphRuns(line) : NULL;
+			CTRunRef run = (runs != NULL && CFArrayGetCount(runs) > 0)
+				? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
+			CTRunStatus status = (run != NULL) ? CTRunGetStatus(run) : kCTRunStatusNoStatus;
+
+			/* **THE PARAGRAPH IS LEFT TO RIGHT NOW, AND THE HEBREW RUN INSIDE IT IS STILL REORDERED** — which is
+			 * UAX #9's own answer and not a hedge: forcing the paragraph level changes the PARAGRAPH's direction,
+			 * and an RTL run inside an LTR paragraph is reordered either way. The DIRECTION bit is the proof that
+			 * the level was forced, because the same string with no options reports it. A check demanding no
+			 * NonMonotonic here would be demanding the algorithm get its own rules wrong. */
+			check(run != NULL && (status & kCTRunStatusRightToLeft) == 0,
+			      "a forced level of 0 takes the RightToLeft bit off a Hebrew paragraph (status %u)",
+			      (unsigned)status);
+			check(run != NULL && (status & kCTRunStatusNonMonotonic) != 0,
+			      "while its Hebrew RUN is still reordered, because a run inside a paragraph is not the paragraph");
+			if (line != NULL) CFRelease(line);
+			if (ts != NULL) CFRelease(ts);
+			CFRelease(astr);
+		}
+		/* AND THE OTHER WAY: a LATIN string with level 1 forced is reordered, so the option is not simply
+		 * "turn everything off". */
+		CFDictionarySetValue(options, kCTTypesetterOptionForcedEmbeddingLevel, one);
+		astr = CFAttributedStringCreate(kCFAllocatorDefault, l, attrs);
+		if (astr != NULL) {
+			CTTypesetterRef ts = CTTypesetterCreateWithAttributedStringAndOptions(astr, options);
+			CTLineRef line = (ts != NULL) ? CTTypesetterCreateLine(ts, CFRangeMake(0, 0)) : NULL;
+			CFArrayRef runs = (line != NULL) ? CTLineGetGlyphRuns(line) : NULL;
+			CTRunRef run = (runs != NULL && CFArrayGetCount(runs) > 0)
+				? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
+			CTRunStatus status = (run != NULL) ? CTRunGetStatus(run) : kCTRunStatusNoStatus;
+			CGFloat first = (line != NULL) ? CTLineGetOffsetForStringIndex(line, 0, NULL) : 0.0;
+			CGFloat last = (line != NULL) ? CTLineGetOffsetForStringIndex(line, 3, NULL) : 0.0;
+
+			printf("  (a Latin line with level 1 forced: status %u, carets %g then %g)\n",
+			       (unsigned)status, (double)first, (double)last);
+			check((status & kCTRunStatusRightToLeft) != 0,
+			      "a forced level of 1 puts the RightToLeft bit on a LATIN paragraph (status %u)",
+			      (unsigned)status);
+			/* **AND THE LATIN RUN KEEPS ITS OWN ORDER, WHICH IS I2 AND NOT A MISSING REORDER.** I2 raises the level
+			 * of every L character in an odd-level paragraph, so "abc" becomes an EVEN-level run inside a
+			 * right-to-left paragraph and L2 leaves it where it is. The caret pair is what MEASURES that the run's
+			 * order did not change: the offsets still ascend with the string. */
+			check((status & kCTRunStatusNonMonotonic) == 0 && first < last,
+			      "and its Latin run keeps its order — carets %g then %g — which is I2's own answer",
+			      (double)first, (double)last);
+			if (line != NULL) CFRelease(line);
+			if (ts != NULL) CFRelease(ts);
+			CFRelease(astr);
+		}
+		/* **AND A FORCED LEVEL BEATS THE DIRECTION THE DOCUMENT ITSELF STATES**, which is the whole meaning of the
+		 * word "forced": a caller whose document says left-to-right and whose option says level 1 gets a
+		 * right-to-left paragraph. Without this the option would only be a DEFAULT, and a paragraph style would
+		 * silently outrank the caller. */
+		{
+			CTParagraphStyleSetting setting;
+			CTWritingDirection stated = kCTWritingDirectionLeftToRight;
+			CTParagraphStyleRef ltrStyle;
+			CFMutableDictionaryRef statedAttrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
+				&kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+
+			setting.spec = kCTParagraphStyleSpecifierBaseWritingDirection;
+			setting.valueSize = sizeof stated;
+			setting.value = &stated;
+			ltrStyle = CTParagraphStyleCreate(&setting, 1);
+			CFDictionarySetValue(statedAttrs, kCTFontAttributeName, font);
+			CFDictionarySetValue(statedAttrs, kCTParagraphStyleAttributeName, ltrStyle);
+			astr = CFAttributedStringCreate(kCFAllocatorDefault, h, statedAttrs);
+			if (astr != NULL) {
+				CTTypesetterRef ts = CTTypesetterCreateWithAttributedStringAndOptions(astr, options);
+				CTLineRef line = (ts != NULL) ? CTTypesetterCreateLine(ts, CFRangeMake(0, 0)) : NULL;
+				CFArrayRef runs = (line != NULL) ? CTLineGetGlyphRuns(line) : NULL;
+				CTRunRef run = (runs != NULL && CFArrayGetCount(runs) > 0)
+					? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
+				CTRunStatus status = (run != NULL) ? CTRunGetStatus(run) : kCTRunStatusNoStatus;
+
+				check(run != NULL && (status & kCTRunStatusRightToLeft) != 0,
+				      "a forced level of 1 beats a paragraph style that states left-to-right (status %u)",
+				      (unsigned)status);
+				if (line != NULL) CFRelease(line);
+				if (ts != NULL) CFRelease(ts);
+				CFRelease(astr);
+			}
+			CFRelease(ltrStyle);
+			CFRelease(statedAttrs);
+		}
+		CFDictionaryRemoveValue(options, kCTTypesetterOptionForcedEmbeddingLevel);
+
+		/* 4. **A VALUE OF THE WRONG TYPE, AND A LEVEL THAT IS NOT 0 OR 1, ARE IGNORED RATHER THAN REFUSED.** Apple
+		 * makes both a precondition; this tier's reading is that a typesetter with a nonsense option lays out as if
+		 * the option were absent, and the case says so by comparing against the baseline's own status. */
+		CFDictionarySetValue(options, kCTTypesetterOptionDisableBidiProcessing, CFSTR("yes"));
+		{
+			CFNumberRef five = CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &(int){ 5 });
+
+			CFDictionarySetValue(options, kCTTypesetterOptionForcedEmbeddingLevel, five);
+			astr = CFAttributedStringCreate(kCFAllocatorDefault, h, attrs);
+			if (astr != NULL) {
+				CTTypesetterRef ts = CTTypesetterCreateWithAttributedStringAndOptions(astr, options);
+				CTLineRef line = (ts != NULL) ? CTTypesetterCreateLine(ts, CFRangeMake(0, 0)) : NULL;
+				CFArrayRef runs = (line != NULL) ? CTLineGetGlyphRuns(line) : NULL;
+				CTRunRef run = (runs != NULL && CFArrayGetCount(runs) > 0)
+					? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
+				CTRunStatus status = (run != NULL) ? CTRunGetStatus(run) : kCTRunStatusNoStatus;
+
+				check(ts != NULL, "a typesetter with a nonsense option is still made, not refused");
+				check(run != NULL && (status & kCTRunStatusRightToLeft) != 0
+				      && (status & kCTRunStatusNonMonotonic) != 0,
+				      "and the line lays out as if both options were absent (status %u)", (unsigned)status);
+				if (line != NULL) CFRelease(line);
+				if (ts != NULL) CFRelease(ts);
+				CFRelease(astr);
+			}
+			CFRelease(five);
+		}
+		/* AND WHEN BOTH ARE GIVEN, DISABLING WINS: a forced level is an input to an algorithm that is not going to
+		 * run, so honouring it would leave a line half-processed. Apple does not say which wins; this is the choice. */
+		CFDictionarySetValue(options, kCTTypesetterOptionDisableBidiProcessing, kCFBooleanTrue);
+		CFDictionarySetValue(options, kCTTypesetterOptionForcedEmbeddingLevel, one);
+		astr = CFAttributedStringCreate(kCFAllocatorDefault, h, attrs);
+		if (astr != NULL) {
+			CTTypesetterRef ts = CTTypesetterCreateWithAttributedStringAndOptions(astr, options);
+			CTLineRef line = (ts != NULL) ? CTTypesetterCreateLine(ts, CFRangeMake(0, 0)) : NULL;
+			CFArrayRef runs = (line != NULL) ? CTLineGetGlyphRuns(line) : NULL;
+			CTRunRef run = (runs != NULL && CFArrayGetCount(runs) > 0)
+				? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
+			CTRunStatus status = (run != NULL) ? CTRunGetStatus(run) : kCTRunStatusNoStatus;
+			const CGGlyph *glyphs = (run != NULL) ? CTRunGetGlyphsPtr(run) : NULL;
+
+			printf("  (both given: status %u, the bracket is glyph %u)\n", (unsigned)status,
+			       (unsigned)((glyphs != NULL) ? glyphs[2] : 0));
+			/* **DISABLING WINS OVER THE FORCED LEVEL, AND THE WAY IT WINS IS RATHER THAN BY DISCARDING IT.** The
+			 * forced level is the CALLER STATING THE PARAGRAPH'S DIRECTION — the same kind of fact as a paragraph
+			 * style's base writing direction — so it still decides the direction; what disabling stops is the
+			 * ALGORITHM. A stopped algorithm is exactly "no NonMonotonic and no mirroring", so a caller that asked
+			 * for both gets the direction it asked for with nothing moved. */
+			check(run != NULL && (status & kCTRunStatusRightToLeft) != 0
+			      && (status & kCTRunStatusNonMonotonic) == 0,
+			      "with both given the forced DIRECTION stands and nothing moved (status %u)", (unsigned)status);
+			check(glyphs != NULL && glyphs[2] == openGlyph,
+			      "and the algorithm really was off, because the bracket is NOT mirrored");
+			if (line != NULL) CFRelease(line);
+			if (ts != NULL) CFRelease(ts);
+			CFRelease(astr);
+		}
+		CFRelease(one);
+		CFRelease(zero);
+	}
+
+	/* 5. **AND THE BREAKER IS UNMOVED, WHICH IS WHY THE OPTIONS COST IT NOTHING.** Bidi changes no advance, so the
+	 * count `CTTypesetterSuggestLineBreak` answers is the same with the options as without — if the typesetter had
+	 * tried to apply the algorithm while breaking, this is the check that would catch it. */
+	{
+		CFStringRef wide = CFSTR("one two three four five");
+		CFAttributedStringRef plainText = CFAttributedStringCreate(kCFAllocatorDefault, wide, attrs);
+
+		CFDictionaryRemoveValue(options, kCTTypesetterOptionForcedEmbeddingLevel);
+		if (plainText != NULL) {
+			CTTypesetterRef plain = CTTypesetterCreateWithAttributedString(plainText);
+			CTTypesetterRef off = CTTypesetterCreateWithAttributedStringAndOptions(plainText, options);
+			CFIndex a = (plain != NULL) ? CTTypesetterSuggestLineBreak(plain, 0, 60.0) : -1;
+			CFIndex b = (off != NULL) ? CTTypesetterSuggestLineBreak(off, 0, 60.0) : -2;
+
+			printf("  (the breaker answers %ld with no options and %ld with bidi disabled)\n",
+			       (long)a, (long)b);
+			check(a > 0 && a == b, "the break count is the same with bidi disabled as without");
+			if (plain != NULL) CFRelease(plain);
+			if (off != NULL) CFRelease(off);
+			CFRelease(plainText);
+		}
+	}
+
+	CFRelease(options);
+	CFRelease(attrs);
+	CFRelease(l);
+	CFRelease(h);
+	CFRelease(font);
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -5881,6 +6165,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The run agrees with its line, and draws over a range", case_run_object },
 	{ "The typesetter's own surface, and its range rule", case_typesetter_object },
 	{ "The typesetter breaks at the width, and the paragraph style says how", case_typesetter_breaking },
+	{ "The typesetter's two bidi options are obeyed by the line", case_typesetter_bidi_options },
 	{ "A frame fills a path, and its lines tile what it showed", case_frame_object },
 	{ "The attribute keys, twelve proven and two inferred", case_string_attribute_keys },
 	{ "The tab, and the default it was owed for", case_text_tab },
