@@ -697,7 +697,11 @@ the user's decision is that they stay owed), the ATS pair (permanent), and the f
   overrides and ISOLATES — an RLE raises the level to 1 and its PDF brings it back, an RLO OVERRIDES the class, a
   right-to-left paragraph makes an LRE level 2, an LRI/RLI isolates what follows with the PDI bringing the level back,
   and an FSI asks P2/P3 OF ITS OWN TEXT to decide which of the two it is. X9 marks the explicit formatting characters
-  BN — removed for the rules that follow. **AND THE REST IS THE NEXT SLICE, NAMED**: the W/N/I rules give every OTHER
-  character a level, and L1/L2 put them in visual order — nothing is REORDERED yet, which is exactly what keeps a
-  Latin run inside a right-to-left paragraph from being reversed, the mistake a whole-line flip would make. MEASURED:
-  `text: 49 of 49 cases passed, 0 failed`.
+  BN — removed for the rules that follow. **AND THE WEAK TYPES ARE BUILT ON TOP** (`ct_bidi_resolve_weak`, W1-W7, over
+  the LEVEL RUNS with each run's own sos/eos): a combining mark takes the type it follows, a European number after an
+  Arabic letter becomes an ARABIC number, an Arabic letter becomes R, a separator between two numbers of a kind
+  becomes one, a European terminator adjacent to a number becomes one, what is left of them is OTHER NEUTRAL, and a
+  European number after a Latin strong type becomes L. **AND THE REST IS THE NEXT SLICE, NAMED**: X10's ISOLATING RUN
+  SEQUENCES (a run sequence may JOIN several level runs through an isolate), the N rules, the I rules, and L1/L2 —
+  nothing is REORDERED yet, which is exactly what keeps a Latin run inside a right-to-left paragraph from being
+  reversed, the mistake a whole-line flip would make. MEASURED: `text: 50 of 50 cases passed, 0 failed`.

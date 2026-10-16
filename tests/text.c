@@ -5326,6 +5326,67 @@ static int case_bidi_explicit_levels(void)
 	return g_fail - before;
 }
 
+/* **AND THE WEAK TYPES — UAX #9 W1-W7, over the level runs.** The probe builds the levels and classes with the
+ * explicit phase, runs the weak rules, and reads the CLASSES back: the marks, numbers and letters below are chosen so
+ * that each rule is the one that changes the answer. */
+static int case_bidi_weak_types(void)
+{
+	int before = g_fail;
+	uint8_t levels[16];
+	CTBidiClass classes[16];
+
+	/* W1: a NON-SPACING MARK takes the type of what it follows. */
+	{
+		UniChar text[] = { 'a', 0x0301 };
+
+		check(ct_bidi_explicit_levels(text, 2, 0, levels, classes), "the weak walk runs");
+		ct_bidi_resolve_weak(classes, levels, 2, 0);
+		check(classes[1] == kCTBidiL, "W1: a combining mark takes the type it follows");
+	}
+	/* W3: AL becomes R. */
+	{
+		UniChar text[] = { 0x0627 };
+
+		ct_bidi_explicit_levels(text, 1, 0, levels, classes);
+		ct_bidi_resolve_weak(classes, levels, 1, 0);
+		check(classes[0] == kCTBidiR, "W3: an Arabic letter becomes R");
+	}
+	/* W2: a European number after an Arabic letter becomes an ARABIC number. */
+	{
+		UniChar text[] = { 0x0627, '1' };
+
+		ct_bidi_explicit_levels(text, 2, 0, levels, classes);
+		ct_bidi_resolve_weak(classes, levels, 2, 0);
+		check(classes[1] == kCTBidiAN, "W2: a European number after an Arabic letter becomes an ARABIC number");
+	}
+	/* W7: a European number after a Latin strong type becomes L. */
+	{
+		UniChar text[] = { 'a', '1' };
+
+		ct_bidi_explicit_levels(text, 2, 0, levels, classes);
+		ct_bidi_resolve_weak(classes, levels, 2, 0);
+		check(classes[1] == kCTBidiL, "W7: a European number after a Latin strong type becomes L");
+	}
+	/* W4, W5 AND W6 in a RIGHT-TO-LEFT paragraph, where the strong type is R and W7 must NOT fire. */
+	{
+		UniChar w4[] = { 0x05D0, '1', '+', '2' };
+		UniChar w5[] = { 0x05D0, '1', '$', '2' };
+		UniChar w6[] = { 0x05D0, '$' };
+
+		ct_bidi_explicit_levels(w4, 4, 1, levels, classes);
+		ct_bidi_resolve_weak(classes, levels, 4, 1);
+		check(classes[1] == kCTBidiEN && classes[2] == kCTBidiEN && classes[3] == kCTBidiEN,
+		      "W4: a separator between two European numbers becomes one (and W7 does not fire under R)");
+		ct_bidi_explicit_levels(w5, 4, 1, levels, classes);
+		ct_bidi_resolve_weak(classes, levels, 4, 1);
+		check(classes[2] == kCTBidiEN, "W5: a European terminator ADJACENT to a number becomes one");
+		ct_bidi_explicit_levels(w6, 2, 1, levels, classes);
+		ct_bidi_resolve_weak(classes, levels, 2, 1);
+		check(classes[1] == kCTBidiON, "W6: what is left of the terminators is OTHER NEUTRAL");
+	}
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -5360,6 +5421,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The base writing direction reaches the run as a status", case_base_writing_direction },
 	{ "The bidi classes, and the paragraph level P2/P3 reads", case_bidi_paragraph_level },
 	{ "The explicit levels: embeddings, overrides and isolates", case_bidi_explicit_levels },
+	{ "The weak types W1-W7 over the level runs", case_bidi_weak_types },
 	{ "And the FRAMESETTER path is kerned too, which is where the AppKit draws", case_frame_kerning },
 	{ "Matching finds the faces a query describes, in a stable order", case_font_matching },
 	{ "A disabled face leaves every matching answer, and comes back", case_font_visibility },

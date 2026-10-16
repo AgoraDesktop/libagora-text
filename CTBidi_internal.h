@@ -83,4 +83,10 @@ int ct_bidi_paragraph_level(const UniChar *text, CFIndex count, int fallbackLeve
 bool ct_bidi_explicit_levels(const UniChar *text, CFIndex count, int paragraphLevel,
 			     uint8_t *levels, CTBidiClass *classes);
 
+/* **UAX #9 W1-W7: THE WEAK TYPES.** Applied over the LEVEL RUNS of the text (maximal runs of one embedding level),
+ * each with its own `sos`/`eos` computed from the higher of its level and its neighbour's — which is the start of
+ * X10's machinery without the isolates: an ISOLATING RUN SEQUENCE may join several level runs through an isolate,
+ * and that join is the next slice. `classes` is edited in place and `levels` is read. */
+void ct_bidi_resolve_weak(CTBidiClass *classes, const uint8_t *levels, CFIndex count, int paragraphLevel);
+
 #endif /* CORE_TEXT_CTBIDI_INTERNAL_H */

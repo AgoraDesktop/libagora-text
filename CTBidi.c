@@ -259,3 +259,131 @@ bool ct_bidi_explicit_levels(const UniChar *text, CFIndex count, int paragraphLe
 	}
 	return true;
 }
+
+/* =================================================================================================
+ * UAX #9 W1-W7: THE WEAK TYPES.
+ * =============================================================================================== */
+
+/* **SOS AND EOS.** A level run's boundary type is R when the HIGHER of the run's level and its neighbour's is odd,
+ * and L when it is even — the standard's rule, and the reason a run at level 1 inside a level-0 paragraph starts as
+ * R. */
+static CTBidiClass fn_sequence_boundary(int runLevel, int neighbourLevel)
+{
+	int higher = (runLevel > neighbourLevel) ? runLevel : neighbourLevel;
+
+	return ((higher % 2) == 0) ? kCTBidiL : kCTBidiR;
+}
+
+/* THE LAST STRONG TYPE BEFORE AN INDEX, or `fallback` when the run has none before it. W2 wants R, L and AL; W7
+ * wants L and R (AL is gone by then). ONE function, because the search differs only in which types stop it. */
+static CTBidiClass fn_last_strong_before(const CTBidiClass *classes, CFIndex runStart, CFIndex index,
+					 bool al_is_strong, CTBidiClass fallback)
+{
+	CFIndex j = index;
+
+	while (j > runStart) {
+		CTBidiClass previous = classes[j - 1];
+
+		if (previous == kCTBidiL || previous == kCTBidiR || (al_is_strong && previous == kCTBidiAL)) {
+			return previous;
+		}
+		j--;
+	}
+	return fallback;
+}
+
+void ct_bidi_resolve_weak(CTBidiClass *classes, const uint8_t *levels, CFIndex count, int paragraphLevel)
+{
+	CFIndex runStart = 0;
+
+	if (classes == NULL || levels == NULL || count <= 0) {
+		return;
+	}
+	while (runStart < count) {
+		int runLevel = levels[runStart];
+		CFIndex runEnd = runStart + 1;
+		int previousLevel = (runStart > 0) ? levels[runStart - 1] : paragraphLevel;
+		int nextLevel;
+		CTBidiClass sos;
+		CFIndex i;
+
+		while (runEnd < count && levels[runEnd] == runLevel) {
+			runEnd++;
+		}
+		nextLevel = (runEnd < count) ? levels[runEnd] : paragraphLevel;
+		sos = fn_sequence_boundary(runLevel, previousLevel);
+
+		/* W1: a NON-SPACING MARK takes the type of what it follows, or sos at the run's start. */
+		for (i = runStart; i < runEnd; i++) {
+			if (classes[i] == kCTBidiNSM) {
+				classes[i] = (i == runStart) ? sos : classes[i - 1];
+			}
+		}
+		/* W2: a European number after an Arabic letter becomes an ARABIC number. */
+		for (i = runStart; i < runEnd; i++) {
+			if (classes[i] == kCTBidiEN
+			    && fn_last_strong_before(classes, runStart, i, true, sos) == kCTBidiAL) {
+				classes[i] = kCTBidiAN;
+			}
+		}
+		/* W3: an Arabic letter becomes R. */
+		for (i = runStart; i < runEnd; i++) {
+			if (classes[i] == kCTBidiAL) {
+				classes[i] = kCTBidiR;
+			}
+		}
+		/* W4: a separator or a common separator BETWEEN two numbers of the same kind becomes that number. */
+		for (i = runStart + 1; i + 1 < runEnd; i++) {
+			if (classes[i] == kCTBidiES && classes[i - 1] == kCTBidiEN && classes[i + 1] == kCTBidiEN) {
+				classes[i] = kCTBidiEN;
+			} else if (classes[i] == kCTBidiCS) {
+				if (classes[i - 1] == kCTBidiEN && classes[i + 1] == kCTBidiEN) {
+					classes[i] = kCTBidiEN;
+				} else if (classes[i - 1] == kCTBidiAN && classes[i + 1] == kCTBidiAN) {
+					classes[i] = kCTBidiAN;
+				}
+			}
+		}
+		/* W5: a run of European terminators ADJACENT to a European number becomes that number. */
+		for (i = runStart; i < runEnd; ) {
+			if (classes[i] == kCTBidiET) {
+				CFIndex j = i;
+				bool adjacent = false;
+
+				while (j < runEnd && classes[j] == kCTBidiET) {
+					j++;
+				}
+				if (i > runStart && classes[i - 1] == kCTBidiEN) {
+					adjacent = true;
+				}
+				if (j < runEnd && classes[j] == kCTBidiEN) {
+					adjacent = true;
+				}
+				if (adjacent) {
+					CFIndex k;
+
+					for (k = i; k < j; k++) {
+						classes[k] = kCTBidiEN;
+					}
+				}
+				i = j;
+			} else {
+				i++;
+			}
+		}
+		/* W6: what is left of the terminators and separators is OTHER NEUTRAL. */
+		for (i = runStart; i < runEnd; i++) {
+			if (classes[i] == kCTBidiET || classes[i] == kCTBidiES || classes[i] == kCTBidiCS) {
+				classes[i] = kCTBidiON;
+			}
+		}
+		/* W7: a European number after a Latin strong type becomes L. */
+		for (i = runStart; i < runEnd; i++) {
+			if (classes[i] == kCTBidiEN
+			    && fn_last_strong_before(classes, runStart, i, false, sos) == kCTBidiL) {
+				classes[i] = kCTBidiL;
+			}
+		}
+		runStart = runEnd;
+	}
+}
