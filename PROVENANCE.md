@@ -306,8 +306,11 @@ through `CGContextShowGlyphsAtPositions`.
 **THE SINGLE-RUN BOUNDARY IS WRITTEN WHERE A CALLER READS IT, NOT LEFT TO BE DISCOVERED FROM A WRONG LAYOUT.** Apple's
 own sentence for the creator is that "without a typesetter object, the line cannot be properly broken", so this is the
 simple case: NO LINE BREAKING, NO TWO FONTS IN ONE LINE, NO BIDIRECTIONAL REORDERING AND NO SHAPING — a character's
-glyph is drawn where its own advance puts it, in the order the characters appeared. Multi-run, bidi and complex scripts
-are the HarfBuzz milestone this project's plan already names. AND THREE DOORS ARE OWED WITH THEIR REASONS:
+glyph is drawn where its own advance puts it, in the order the characters appeared. Multi-run and bidi were built
+afterwards; shaping's ENGINE was built too (`CTShaping.c`, over HarfBuzz, with a REQUIRED `pkg-config` dependency on
+it) and is measured on five faces — ligatures, a pair adjustment, a composed and an attached mark, a Devanagari
+conjunct and a joined Arabic word — while the LINE does not yet call it. That gap is stated in `CTLine.h`, `CTLine.c`
+and `README.md` rather than left for a caller to discover from a wrong layout. AND THREE DOORS ARE OWED WITH THEIR REASONS:
 `CTLineGetGlyphRuns`, because a line's runs are `CTRunRef`s and `CTRun` does not exist yet — Apple's own include order
 puts its header AFTER `CTLine.h`, which is why that header never mentions the type, and this is the first owed door
 whose reason is another HEADER rather than another engine; and `CTLineCreateTruncatedLine` with

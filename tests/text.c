@@ -29,6 +29,9 @@
 #include <CoreText/CTFontMatching_internal.h>
 #include <CoreText/CTFont_internal.h>
 #include <CoreText/CTBidi_internal.h>
+/* **AND THE SHAPING ENGINE, WHICH IS THE SUBSTRATE THE LAYOUT WILL SIT ON RATHER THAN BE WIRED INTO IT YET** — the
+ * same standing `CTBidi_internal.h` had while the bidi milestone was being built rule by rule. */
+#include <CoreText/CTShaping_internal.h>
 #include <CoreText/CTFont.h>
 /* AND THE ENGINE'S INTERNAL HEADER, FOR THE DOORS CORE TEXT OWNS BUT DOES NOT IMPLEMENT: the Unicode
  * glyph step and the face registry. */
@@ -6144,6 +6147,322 @@ static int case_typesetter_bidi_options(void)
 	return g_fail - before;
 }
 
+/* =================================================================================================
+ * SHAPING, WHICH IS THE ONE THING THIS LIBRARY TAKES FROM OUTSIDE ITSELF.
+ * =============================================================================================== */
+/* **A FACE FROM ITS FILE, WHICH IS HOW THESE CASES GET FACES THAT ARE NOT THE SUITE'S ONE.** Every claim below is a
+ * property of a FACE — one font has an `ffi` ligature and another does not, one composes `a`+U+0301 and another
+ * attaches the mark — so a case that could only reach the suite's monospace face could not make any of them. The
+ * graphics font is released after the `CTFont` is made, because that door retains it. */
+static CTFontRef shaping_font(const char *path, CGFloat size)
+{
+	CGDataProviderRef provider = CGDataProviderCreateWithFilename(path);
+	CGFontRef face = (provider != NULL) ? CGFontCreateWithDataProvider(provider) : NULL;
+	CTFontRef font = (face != NULL) ? CTFontCreateWithGraphicsFont(face, size, NULL, NULL) : NULL;
+
+	if (face != NULL) {
+		CGFontRelease(face);
+	}
+	if (provider != NULL) {
+		CGDataProviderRelease(provider);
+	}
+	return font;
+}
+
+/* **A LIGATURE IS THE SMALLEST THING A ONE-GLYPH-PER-CHARACTER MAPPING CANNOT EXPRESS**, and the case uses THREE
+ * faces to show that the difference is the FONT's rather than the text's: `DejaVuSans` sets `ffi` in ONE glyph,
+ * `DejaVuSerif` sets it in TWO (an `ff` ligature and the `i`), and `LiberationSerif` sets it in THREE. Same three
+ * characters, same shaper, three answers — which is why the check is on the CLUSTERS as well as the count: a
+ * ligature is a glyph that stands for characters 0..2, so cluster 0 is what says so. */
+static int case_shaping_ligatures(void)
+{
+	int before = g_fail;
+	UniChar ffi[] = { 'f', 'f', 'i' };
+	struct { const char *path; CFIndex glyphs; } faces[] = {
+		{ "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 1 },
+		{ "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf", 2 },
+		{ "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf", 3 },
+	};
+	size_t i;
+
+	for (i = 0; i < sizeof faces / sizeof faces[0]; i++) {
+		CTFontRef font = shaping_font(faces[i].path, 13.0);
+		CTShaperRef shaper = (font != NULL) ? CTShaperCreate(font) : NULL;
+		CTShapedRun run;
+		bool ok;
+
+		CTShapedRunZero(&run);
+		check(shaper != NULL, "a shaper could not be made for %s", faces[i].path);
+		if (shaper == NULL) {
+			if (font != NULL) {
+				CFRelease(font);
+			}
+			continue;
+		}
+		ok = CTShaperShape(shaper, ffi, 3, kCTWritingDirectionLeftToRight, "Latn", NULL, &run);
+		printf("  (%s: 3 characters -> %ld glyph(s), first cluster %ld)\n", faces[i].path + 26,
+		       (long)run.glyphCount, (long)((run.glyphCount > 0) ? run.clusters[0] : -1));
+		check(ok, "`ffi` could not be shaped in %s", faces[i].path);
+		check(ok && run.glyphCount == faces[i].glyphs,
+		      "%s sets `ffi` in %ld glyph(s), not %ld", faces[i].path + 26, (long)run.glyphCount,
+		      (long)faces[i].glyphs);
+		/* **AND THE CLUSTER IS AN INDEX INTO THE CHARACTERS THE CALLER GAVE**, with nothing added: the first glyph
+		 * of every one of the three answers stands for the character at 0, because that is where its run started. */
+		check(ok && run.clusters[0] == 0, "the first glyph's cluster is 0, the first character");
+		if (faces[i].glyphs == 1) {
+			/* ONE GLYPH FOR THREE CHARACTERS IS THE LIGATURE, and the cluster is the only thing that says so. */
+			check(ok && run.glyphCount == 1, "and one glyph stands for ALL THREE characters, which is a ligature");
+			check(ok && run.advances[0].width > 0.0, "with a real advance, %g", (double)run.advances[0].width);
+		}
+		CTShapedRunFree(&run);
+		/* AND A SECOND SHAPE OF THE SAME RUN IS THE SAME ANSWER, so nothing was consumed by the first. */
+		ok = CTShaperShape(shaper, ffi, 3, kCTWritingDirectionLeftToRight, "Latn", NULL, &run);
+		check(ok && run.glyphCount == faces[i].glyphs, "shaping the same run twice gives the same answer");
+		CTShapedRunFree(&run);
+		/* A FREED RUN IS ZEROED, so a second free is harmless — the contract the header states. */
+		CTShapedRunFree(&run);
+		CTShaperRelease(shaper);
+		CFRelease(font);
+	}
+	return g_fail - before;
+}
+
+/* **AND A PAIR ADJUSTMENT IS WHAT SHAPING DOES TO ADVANCES.** `To` is the pair this suite already measures against
+ * the font's own `kern` table, so the claim here is a cross-check rather than a new number: the shaped advance of
+ * the `T` must be NARROWER than the `T`'s own advance, and the size of the difference is printed beside what
+ * `CTFontGetKerningBetweenGlyphs` says, because HarfBuzz prefers `GPOS` where a face has it and `kern` where it does
+ * not — so the two need not be equal and the case does not pretend they are. */
+static int case_shaping_kerning(void)
+{
+	int before = g_fail;
+	CTFontRef font = shaping_font("/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf", 13.0);
+	CTShaperRef shaper = (font != NULL) ? CTShaperCreate(font) : NULL;
+	UniChar to[] = { 'T', 'o' };
+	UniChar tChar = 'T', oChar = 'o';
+	CGGlyph tGlyph = 0, oGlyph = 0;
+	CGSize plain = CGSizeMake(0.0, 0.0);
+	CTShapedRun run;
+
+	CTShapedRunZero(&run);
+	check(font != NULL && shaper != NULL, "the kerning case could not make its face or its shaper");
+	if (font == NULL || shaper == NULL) {
+		if (shaper != NULL) CTShaperRelease(shaper);
+		if (font != NULL) CFRelease(font);
+		return g_fail - before;
+	}
+	(void)CTFontGetGlyphsForCharacters(font, &tChar, &tGlyph, 1);
+	(void)CTFontGetGlyphsForCharacters(font, &oChar, &oGlyph, 1);
+	(void)CTFontGetAdvancesForGlyphs(font, kCTFontHorizontalOrientation, &tGlyph, &plain, 1);
+	check(CTShaperShape(shaper, to, 2, kCTWritingDirectionLeftToRight, "Latn", NULL, &run),
+	      "`To` could not be shaped");
+	if (run.glyphCount == 2) {
+		printf("  (`T` alone is %g, shaped `To` gives it %g, the `kern` table says %g)\n", (double)plain.width,
+		       (double)run.advances[0].width, (double)CTFontGetKerningBetweenGlyphs(font, tGlyph, oGlyph));
+		check(run.advances[0].width < plain.width,
+		      "shaping closes the `To` pair: %g against the `T`'s own %g", (double)run.advances[0].width,
+		      (double)plain.width);
+		check(run.clusters[0] == 0 && run.clusters[1] == 1,
+		      "and the two glyphs keep one cluster each, at 0 and 1");
+	}
+	CTShapedRunFree(&run);
+	CTShaperRelease(shaper);
+	CFRelease(font);
+	return g_fail - before;
+}
+
+/* **A COMBINING MARK, WHERE TWO FACES GIVE TWO DIFFERENT AND EQUALLY CORRECT ANSWERS.** `a` followed by U+0301 is
+ * two characters. `DejaVuSerif` COMPOSES them into the one glyph the face already has for U+00E1 — so the check is
+ * against that glyph, read out of the face independently of the shaper. `FreeSerif` does NOT: it gives two glyphs
+ * whose clusters are BOTH 0, which is the shaping fact that one character can begin a glyph and the next can share
+ * its cluster, and its second glyph carries an OFFSET, which is how a mark is moved onto the letter it belongs to.
+ * A case that only knew about the first face would conclude that marks are composed and be wrong about the second. */
+static int case_shaping_marks(void)
+{
+	int before = g_fail;
+	UniChar aacute[] = { 'a', 0x0301 };
+	UniChar precomposed = 0x00E1;
+
+	{
+		CTFontRef font = shaping_font("/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf", 13.0);
+		CTShaperRef shaper = (font != NULL) ? CTShaperCreate(font) : NULL;
+		CTShapedRun run;
+		CGGlyph composed = 0;
+
+		CTShapedRunZero(&run);
+		if (font != NULL) {
+			(void)CTFontGetGlyphsForCharacters(font, &precomposed, &composed, 1);
+		}
+		if (shaper != NULL && CTShaperShape(shaper, aacute, 2, kCTWritingDirectionLeftToRight, "Latn", NULL, &run)) {
+			printf("  (DejaVuSerif: `a`+U+0301 -> %ld glyph, %u; the face's U+00E1 is %u)\n",
+			       (long)run.glyphCount, (unsigned)((run.glyphCount > 0) ? run.glyphs[0] : 0),
+			       (unsigned)composed);
+			check(run.glyphCount == 1 && composed != 0 && run.glyphs[0] == composed,
+			      "DejaVuSerif COMPOSES `a`+U+0301 into the glyph it already has for U+00E1");
+		} else {
+			check(0, "`a`+U+0301 could not be shaped in DejaVuSerif");
+		}
+		CTShapedRunFree(&run);
+		if (shaper != NULL) CTShaperRelease(shaper);
+		if (font != NULL) CFRelease(font);
+	}
+	{
+		CTFontRef font = shaping_font("/usr/share/fonts/truetype/freefont/FreeSerif.ttf", 13.0);
+		CTShaperRef shaper = (font != NULL) ? CTShaperCreate(font) : NULL;
+		CTShapedRun run;
+
+		CTShapedRunZero(&run);
+		if (shaper != NULL && CTShaperShape(shaper, aacute, 2, kCTWritingDirectionLeftToRight, "Latn", NULL, &run)) {
+			printf("  (FreeSerif: `a`+U+0301 -> %ld glyphs, clusters %ld/%ld, the mark offset %g)\n",
+			       (long)run.glyphCount, (long)((run.glyphCount > 1) ? run.clusters[0] : -1),
+			       (long)((run.glyphCount > 1) ? run.clusters[1] : -1),
+			       (double)((run.glyphCount > 1) ? run.offsets[1].x : 0.0));
+			check(run.glyphCount == 2, "FreeSerif does NOT compose it: two glyphs, not %ld",
+			      (long)run.glyphCount);
+			if (run.glyphCount == 2) {
+				check(run.clusters[0] == 0 && run.clusters[1] == 0,
+				      "and BOTH glyphs share cluster 0, because both stand for the character at 0");
+				/* THE MARK'S OFFSET IS WHAT MOVES IT ONTO THE LETTER. A zero here would mean the accent is set
+				 * where its own advance put it, which is where a ONE-GLYPH-PER-CHARACTER layout puts it — so
+				 * this number is the difference between mark placement and no mark placement. */
+				check(run.offsets[1].x != 0.0 || run.offsets[1].y != 0.0,
+				      "and the mark carries a POSITIONING offset, which is what places it on the letter");
+			}
+		} else {
+			check(0, "`a`+U+0301 could not be shaped in FreeSerif");
+		}
+		CTShapedRunFree(&run);
+		if (shaper != NULL) CTShaperRelease(shaper);
+		if (font != NULL) CFRelease(font);
+	}
+	return g_fail - before;
+}
+
+/* **AND THE TWO THINGS THIS ENGINE EXISTS FOR: A CONJUNCT AND A JOINED SCRIPT.** Neither can be expressed by
+ * mapping characters to glyphs one at a time, and both are measured here against faces that do them:
+ *
+ *   - **DEVANAGARI.** `ka` + VIRAMA + `ssa` is three characters; FreeSerif sets the CONJUNCT in ONE glyph, and the
+ *     cluster says the one glyph stands for all three. Nothing about the characters predicts that count.
+ *   - **ARABIC.** Three letters shape to three glyphs, but the glyphs are all DIFFERENT from what each letter would
+ *     be alone — that is joining, where a letter's form depends on its neighbours — and they come back in VISUAL
+ *     order, which is the order the header documents for a right-to-left run: the clusters run 2, 1, 0. */
+static int case_shaping_complex_scripts(void)
+{
+	int before = g_fail;
+	CTFontRef font = shaping_font("/usr/share/fonts/truetype/freefont/FreeSerif.ttf", 13.0);
+	CTShaperRef shaper = (font != NULL) ? CTShaperCreate(font) : NULL;
+	/* KA, VIRAMA, SSA — the conjunct `kssa`. */
+	UniChar deva[] = { 0x0915, 0x094D, 0x0937 };
+	/* BEH, SEEN, MEEM — an Arabic word, shaped right to left. */
+	UniChar arab[] = { 0x0628, 0x0633, 0x0645 };
+	CTShapedRun run;
+
+	CTShapedRunZero(&run);
+	check(font != NULL && shaper != NULL, "the complex-script case could not make its face or its shaper");
+	if (font == NULL || shaper == NULL) {
+		if (shaper != NULL) CTShaperRelease(shaper);
+		if (font != NULL) CFRelease(font);
+		return g_fail - before;
+	}
+	if (CTShaperShape(shaper, deva, 3, kCTWritingDirectionLeftToRight, "Deva", NULL, &run)) {
+		printf("  (Devanagari ka+virama+ssa: 3 characters -> %ld glyph(s), first cluster %ld)\n",
+		       (long)run.glyphCount, (long)((run.glyphCount > 0) ? run.clusters[0] : -1));
+		check(run.glyphCount < 3, "a CONJUNCT is fewer glyphs than characters: %ld for 3",
+		      (long)run.glyphCount);
+		check(run.glyphCount > 0 && run.clusters[0] == 0, "and its first glyph stands for the character at 0");
+	} else {
+		check(0, "the Devanagari conjunct could not be shaped");
+	}
+	CTShapedRunFree(&run);
+	if (CTShaperShape(shaper, arab, 3, kCTWritingDirectionRightToLeft, "Arab", NULL, &run)) {
+		CGGlyph alone = 0;
+		UniChar beh = 0x0628;
+
+		(void)CTFontGetGlyphsForCharacters(font, &beh, &alone, 1);
+		printf("  (Arabic beh+seen+meem: %ld glyphs, clusters %ld/%ld/%ld, first glyph %u against %u alone)\n",
+		       (long)run.glyphCount, (long)((run.glyphCount > 0) ? run.clusters[0] : -1),
+		       (long)((run.glyphCount > 1) ? run.clusters[1] : -1),
+		       (long)((run.glyphCount > 2) ? run.clusters[2] : -1),
+		       (unsigned)((run.glyphCount > 0) ? run.glyphs[0] : 0), (unsigned)alone);
+		check(run.glyphCount == 3, "three Arabic letters shape to three glyphs");
+		if (run.glyphCount == 3) {
+			/* **VISUAL ORDER FOR A RIGHT-TO-LEFT RUN**, which is the contract the header states: the clusters run
+			 * backwards, so the first glyph is the LAST character's form. */
+			check(run.clusters[0] == 2 && run.clusters[1] == 1 && run.clusters[2] == 0,
+			      "and they come back in VISUAL order, so the clusters run 2, 1, 0");
+			/* **JOINING: the same letter is a different glyph in context.** `beh` in this word takes a form that is
+			 * NOT the glyph the face gives for `beh` on its own, which is the whole of what joining means. */
+			check(alone != 0 && run.glyphs[2] != alone,
+			      "and the letter's form depends on its neighbours: %u in context against %u alone",
+			      (unsigned)run.glyphs[2], (unsigned)alone);
+		}
+	} else {
+		check(0, "the Arabic word could not be shaped");
+	}
+	CTShapedRunFree(&run);
+	CTShaperRelease(shaper);
+	CFRelease(font);
+	return g_fail - before;
+}
+
+/* **AND THE EDGES, BECAUSE A DOOR THAT CAN BE REACHED WITH NOTHING MUST REFUSE RATHER THAN CRASH.** Every one of
+ * these is a call a caller can make by accident: an unloaded face, a NULL shaper from a failed create, an empty run,
+ * a NULL where the caller meant "guess", and a run released twice. */
+static int case_shaping_edges(void)
+{
+	int before = g_fail;
+	CTShapedRun run;
+	UniChar abc[] = { 'a', 'b', 'c' };
+	CTFontRef font = shaping_font("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 13.0);
+	CTShaperRef shaper = (font != NULL) ? CTShaperCreate(font) : NULL;
+	UniChar highSurrogate = 0xD83D;
+
+	CTShapedRunZero(&run);
+	check(CTShaperCreate(NULL) == NULL, "a NULL font makes no shaper");
+	CTShaperRelease(NULL);	/* must not crash */
+	check(!CTShaperShape(NULL, abc, 3, kCTWritingDirectionLeftToRight, NULL, NULL, &run),
+	      "a NULL shaper shapes nothing and says so");
+	check(!CTShaperShape(shaper, NULL, 3, kCTWritingDirectionLeftToRight, NULL, NULL, &run),
+	      "NULL characters shape nothing");
+	check(!CTShaperShape(shaper, abc, 0, kCTWritingDirectionLeftToRight, NULL, NULL, &run),
+	      "an EMPTY run shapes nothing, because there is nothing to shape");
+	check(!CTShaperShape(shaper, abc, -1, kCTWritingDirectionLeftToRight, NULL, NULL, &run),
+	      "a NEGATIVE length shapes nothing");
+	/* A RUN OF ONE UNPAIRED SURROGATE is not text, and the answer is what the shaper can make of it rather than a
+	 * crash — the same standing every other door in this library gives a caller who hands it a lone surrogate. */
+	(void)CTShaperShape(shaper, &highSurrogate, 1, kCTWritingDirectionLeftToRight, NULL, NULL, &run);
+	check(run.glyphCount >= 0, "a lone surrogate is shaped or refused, and does not crash");
+	CTShapedRunFree(&run);
+	/* **A NULL SCRIPT TAG MEANS "READ IT OFF THE CHARACTERS"**, which is the guess path, and it must agree with an
+	 * explicit tag for a run that is one script — otherwise the guess would be a different answer rather than a
+	 * convenience. */
+	if (shaper != NULL) {
+		CTShapedRun guessed, tagged;
+
+		CTShapedRunZero(&guessed);
+		CTShapedRunZero(&tagged);
+		(void)CTShaperShape(shaper, abc, 3, kCTWritingDirectionLeftToRight, NULL, NULL, &guessed);
+		(void)CTShaperShape(shaper, abc, 3, kCTWritingDirectionLeftToRight, "Latn", NULL, &tagged);
+		check(guessed.glyphCount == tagged.glyphCount && guessed.glyphCount == 3,
+		      "a guessed script and a stated `Latn` agree: %ld and %ld glyphs", (long)guessed.glyphCount,
+		      (long)tagged.glyphCount);
+		if (guessed.glyphCount == 3 && tagged.glyphCount == 3) {
+			check(memcmp(guessed.glyphs, tagged.glyphs, sizeof(CGGlyph) * 3) == 0
+			      && guessed.advances[0].width == tagged.advances[0].width,
+			      "and the same glyphs with the same advances");
+		}
+		CTShapedRunFree(&guessed);
+		CTShapedRunFree(&tagged);
+	}
+	/* AND A FACE THAT IS NOT THERE IS A REFUSAL, NOT A SHAPER OVER NOTHING. */
+	check(CTShaperCreate(shaping_font("/nonexistent/none.ttf", 13.0)) == NULL,
+	      "a face that cannot be opened makes no shaper");
+	CTShaperRelease(shaper);
+	if (font != NULL) {
+		CFRelease(font);
+	}
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -6204,6 +6523,11 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The traits dictionary: four keys and one anchor each", case_font_traits_dictionary },
 	{ "The slant angle is the face's plus the matrix's, in degrees", case_font_slant_angle },
 	{ "The vertical origin is half the advance and the ascent", case_font_vertical_origin },
+	{ "A ligature is one glyph for three characters", case_shaping_ligatures },
+	{ "A pair adjustment reaches the advances", case_shaping_kerning },
+	{ "A combining mark, composed in one face and attached in another", case_shaping_marks },
+	{ "A Devanagari conjunct and a joined Arabic word", case_shaping_complex_scripts },
+	{ "The shaper's edges refuse rather than crash", case_shaping_edges },
 };
 
 int main(void)

@@ -263,10 +263,11 @@ ctest --test-dir build
   for the creator is that "without a typesetter object, the line cannot be properly broken", so this is the simple
   case and it says what it is: **no line breaking and no shaping** — a character's glyph is drawn where its own
   advance puts it. (TWO FONTS IN ONE LINE and GLYPH REORDERING, refused here at the time, were both built later — see
-  the bidi and multi-run bullets far below.) **AND THE BASE
+  the bidi and multi-run bullets far below; SHAPING was built later too, and the bullet below says what it left
+  owed.) **AND THE BASE
   WRITING DIRECTION IS READ NOW**, the first piece of the bidi milestone: the paragraph's direction reaches the run
   (`CTRunGetStatus` reports `kCTRunStatusRightToLeft`), while the Unicode Bidirectional Algorithm that would reorder
-  the glyphs — and complex scripts — are the HarfBuzz milestone the Core Text plan already names.
+  the glyphs was built afterwards, in slices this file records.
 - **AND A RUN DELEGATE IS THE ONE NON-GLYPH THE LINE HONORS** (`CTRunDelegate.h`, `kCTRunDelegateAttributeName`): a
   character carrying one is a BOX — its advance is the delegate's width, the line's ascent and descent grow to cover
   the delegate's, and `CTLineDraw` and `CTRunDraw` skip it, so an attachment or a tab occupies space without being a
@@ -751,4 +752,30 @@ the user's decision is that they stay owed), the ATS pair (permanent), and the f
   on the context once per run, because a glyph index means nothing without the face it came from. MEASURED: a
   four-character line set in `DejaVuSansMono-Bold` and then `DejaVuSerif` reports **2** runs, each run's attributes name
   its OWN face, and the mixed line's width is **52.9688** — the two faces measured apart, **24.082** and **28.8867**,
-  summed. MEASURED: `100% tests passed, 0 tests failed out of 2` over `text: 58 of 58 cases passed, 0 failed`.
+  summed. MEASURED: `100% tests passed, 0 tests failed out of 2` over `text: 58 of 58 cases passed, 0 failed`.- **AND THE SHAPING ENGINE IS BUILT, WHICH IS THE ONE THING THIS LIBRARY TAKES FROM OUTSIDE ITSELF.**
+  `CTShaping.c` shapes a run over **HarfBuzz** (`libharfbuzz-dev` **10.2.0**, a REQUIRED `pkg-config` dependency),
+  and the decision is recorded at length in `CTShaping_internal.h`: shaping is OpenType's `GSUB`/`GPOS` plus a
+  per-script rule set that runs to thousands of lines of published behaviour for Devanagari alone, so a hand-written
+  shaper would be wrong for most of the world's scripts and **silently** wrong for many — the failure this tree
+  refuses. **AND THE FONT DOES NOT CROSS AS A FILE**: `hb_face_create_for_tables` is given a callback, and the
+  callback is `CTFontCopyTable`, so `cmap`, `GSUB`, `GPOS`, `GDEF`, `glyf`/`loca` and `hmtx` all come through the one
+  reader of a font's tables this library already had and HarfBuzz is a consumer of it rather than a second
+  implementation of it. The scale is the face's own UNITS PER EM, so every number HarfBuzz answers is an exact
+  integer of font units and the conversion to points happens once, in this file.
+  MEASURED, on five faces and every number the engine's own header promises: `ffi` in `DejaVuSans` is **1 glyph**
+  (cluster 0) and in `DejaVuSerif` **2** (an `ff` ligature and the `i`), while in `LiberationSerif` it is **3** — same
+  three characters, three answers, which is why the case carries a face WITHOUT the ligature as its control; `To` in
+  `DejaVuSerif` gives the `T` **7.66162** where its own advance is **8.6709** — a pair adjustment of **-1.00928**,
+  which is what the face's `kern` table says too — so shaping reaches the advance; `a`+U+0301 is **1 glyph** in
+  `DejaVuSerif`, equal to the glyph the face already has for U+00E1, and **2
+  glyphs** in `FreeSerif` whose clusters are BOTH **0** and whose second glyph carries an offset of **-0.689** — two
+  faces, two different and equally correct answers; Devanagari `ka`+VIRAMA+`ssa` is **1 glyph** from **3** characters;
+  and an Arabic word's three letters come back in **VISUAL order** (clusters **2, 1, 0**) with the first letter's
+  form **8249** against **1471** alone, which is joining.
+  **AND IT IS NOT WIRED INTO `CTLine`, AND THAT IS SAID RATHER THAN LEFT TO BE FOUND.** The line's arrays, its caret
+  doors and the AppKit's glyph ranges all assume one glyph per character, so connecting the engine to the line is one
+  change with the shaper's clusters as the new source of truth — and **nothing in the layout path calls it**, so
+  nothing that existed before this commit has been made silently wrong. What is not attempted by the ENGINE is named
+  in its own header too: itemization, font fallback, and reconciling HarfBuzz's visual order for a right-to-left run
+  with the line's own L2. MEASURED: `100% tests passed, 0 tests failed out of 2` over
+  `text: 64 of 64 cases passed, 0 failed`.

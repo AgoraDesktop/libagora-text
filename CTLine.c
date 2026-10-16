@@ -10,15 +10,20 @@
  * descent and leading are the line's heights. Everything else in this file is arithmetic over those, or a call to
  * Core Graphics to put the ink on a page.
  *
- * SO A LINE IS AS MANY RUNS AS ITS STRING HAS FACES, AND THE HEADER SAYS WHAT THAT STILL COSTS. No line breaking and
- * no SHAPING: one glyph per character, each mapped through the face THAT CHARACTER is set in.
+ * SO A LINE IS AS MANY RUNS AS ITS STRING HAS FACES, AND THE HEADER SAYS WHAT THAT STILL COSTS. No line breaking —
+ * and **NO SHAPING YET**, which is the next milestone rather than a missing idea: one glyph per character, each
+ * mapped through the face THAT CHARACTER is set in. THE ENGINE EXISTS (`CTShaping.c`, over HarfBuzz) and is measured,
+ * and it is NOT CALLED FROM HERE, because wiring it in means changing the one-glyph-per-character correspondence that
+ * this file's arrays, its caret doors AND the AppKit's glyph ranges all rely on — one change, with the shaper's
+ * clusters as the new source of truth. Until that change nothing here is silently wrong, which is the point of
+ * saying it.
  * **AND THE GLYPHS ARE REORDERED WHEN THE TEXT CALLS FOR IT**: the line runs the WHOLE bidirectional pipeline
  * (`CTBidi_internal.h`) over its own characters and, when the visual order is not the logical one, PLACES each glyph
  * where the reordering says — a Hebrew letter in a Latin paragraph is drawn to the RIGHT of the Latin one before it
  * — and the runs report `kCTRunStatusNonMonotonic`. THE CARET DOORS SPEAK VISUAL ORDER: the hit test walks the visual
  * slots, and an offset is the character's LEADING edge — its LEFT one at an even level and its RIGHT one at an odd
- * level. What is still owed is the SHAPING the HarfBuzz milestone names, which is a line whose glyphs are not one per
- * character.
+ * level. What is still owed is the WIRING of the shaping engine into this file — the engine itself is built
+ * (`CTShaping.c`) and the slice that connects it is named in `README.md`.
  */
 #include <CoreText/CTLine.h>
 

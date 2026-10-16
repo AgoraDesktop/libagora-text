@@ -40,6 +40,19 @@ find_package(CoreFoundation CONFIG REQUIRED)
 find_package(AgoraDrawing CONFIG REQUIRED)
 
 # ---------------------------------------------------------------------------
+# HarfBuzz, WHICH IS THE SHAPING MILESTONE'S OWN NAME. Shaping is OpenType's `GSUB`/`GPOS` plus a per-script rule
+# set that runs to thousands of lines of published behaviour for Devanagari alone; a hand-written shaper would be
+# wrong for most of the world's scripts and silently wrong for many, which is the failure this tree refuses.
+# `CTShaping.c` carries the full statement of the decision, and it is REQUIRED rather than optional because a library
+# that silently lays out `ffi` as three glyphs when the face has a ligature is the thing this milestone exists to fix.
+#
+# THE FONT DOES NOT CROSS AS A FILE. HarfBuzz asks this library for TABLES and `CTFontCopyTable` answers, so there is
+# still one reader of a font's tables in the tree and HarfBuzz is a consumer of it.
+# ---------------------------------------------------------------------------
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(HARFBUZZ REQUIRED IMPORTED_TARGET harfbuzz)
+
+# ---------------------------------------------------------------------------
 # Include shim: these headers are included as <CoreText/...>, which is how
 # Apple's own include each other and how a consumer writes them.
 # ---------------------------------------------------------------------------
@@ -86,7 +99,9 @@ target_include_directories(Text
 target_link_libraries(Text
     PUBLIC
         CoreFoundation::CoreFoundation
-        AgoraDrawing::Drawing)
+        AgoraDrawing::Drawing
+    PRIVATE
+        PkgConfig::HARFBUZZ)
 
 enable_testing()
 add_subdirectory(tests)

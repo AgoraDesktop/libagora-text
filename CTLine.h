@@ -25,13 +25,17 @@
  * partition is visible, and `CTLine.c` records that a run boundary is where the FONT changes and not where the
  * attribute dictionary does, so a run delegate or a tab in the middle does NOT split a run.
  *
- * WHAT IS THEREFORE NOT ATTEMPTED, SAID PLAINLY: SHAPING. A script needing ligatures or contextual forms is NOT laid
- * out correctly here, and neither is a line whose glyphs are not one per character. **AND THE GLYPHS ARE REORDERED,
+ * WHAT THIS HEADER STILL DOES NOT PROMISE, SAID PLAINLY: SHAPING. A script needing ligatures or contextual forms is
+ * NOT laid out correctly here, and neither is a line whose glyphs are not one per character — **BECAUSE THE SHAPING
+ * ENGINE IS BUILT BUT NOT YET WIRED IN** (`CTShaping.c`, over HarfBuzz, measured against five faces; the line's
+ * arrays, its caret doors and the AppKit's glyph ranges all assume one glyph per character, so connecting the two is
+ * one change and is the next slice). **AND THE GLYPHS ARE REORDERED,
  * WHICH IS THE BIDI MILESTONE'S PAYOFF**: the line runs the whole pipeline over its own characters, PLACES each glyph
  * where the visual order says, and reports `kCTRunStatusNonMonotonic` — so a Hebrew letter in a Latin paragraph is
  * drawn to the right of the one before it. THE CARET DOORS SPEAK VISUAL ORDER, and an offset is the character's
- * LEADING edge — its LEFT one at an even level and its RIGHT one at an odd level. Shaping and complex scripts are the
- * HarfBuzz milestone this project's Core Text plan already names.
+ * LEADING edge — its LEFT one at an even level and its RIGHT one at an odd level. The HarfBuzz milestone this
+ * project's Core Text plan names is therefore HALF DONE: the engine answers for ligatures, marks, conjuncts and
+ * joined scripts, and what is left is the correspondence change that lets this type hold its answers.
  *
  * **A RUN DELEGATE, THOUGH, IS HONORED.** A character whose attributes carry `kCTRunDelegateAttributeName` is a BOX:
  * its advance is the delegate's width rather than the placeholder glyph's, the line's ascent and descent grow to cover
