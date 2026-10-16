@@ -10,12 +10,13 @@
  * descent and leading are the line's heights. Everything else in this file is arithmetic over those, or a call to
  * Core Graphics to put the ink on a page.
  *
- * SO IT IS ONE RUN, AND THE HEADER SAYS WHAT THAT COSTS. No line breaking, no two fonts in one line, no SHAPING and
- * no GLYPH REORDERING: a character's glyph is drawn where its own advance puts it, in the order the characters
- * appeared. **AND THE BASE WRITING DIRECTION IS THE FIRST PIECE OF BIDI THAT IS READ**: the paragraph's direction is
- * taken at the line's first character and handed to the run, so `CTRunGetStatus` reports `kCTRunStatusRightToLeft`
- * for a right-to-left paragraph — while the Unicode Bidirectional Algorithm, which would REORDER the glyphs (and is
- * what makes a Latin run inside a right-to-left paragraph stay left to right), is the next slice.
+ * SO IT IS ONE RUN, AND THE HEADER SAYS WHAT THAT COSTS. No line breaking, no two fonts in one line and no SHAPING.
+ * **AND THE GLYPHS ARE REORDERED WHEN THE TEXT CALLS FOR IT**: the line runs the WHOLE bidirectional pipeline
+ * (`CTBidi_internal.h`) over its own characters and, when the visual order is not the logical one, PLACES each glyph
+ * where the reordering says — a Hebrew letter in a Latin paragraph is drawn to the RIGHT of the Latin one before it
+ * — and the run reports `kCTRunStatusNonMonotonic`. THE CARET DOORS SPEAK VISUAL ORDER: the hit test walks the visual
+ * slots, and an offset is where the glyph was placed. What is still owed is the LEADING-EDGE convention for an
+ * odd-level glyph and the MULTI-RUN model a non-monotonic line wants.
  */
 #include <CoreText/CTLine.h>
 
@@ -41,6 +42,7 @@
  * declarations and the definitions below the SAME functions rather than two files agreeing by convention. */
 #include <CoreText/CTLine_internal.h>
 #include <CoreText/CTBidi_internal.h>
+#include <CoreText/CTBidi_internal.h>
 
 #include <CoreFoundation/CFCharacterSet.h>
 #include <CoreFoundation/CFRuntime.h>
@@ -61,6 +63,13 @@ struct __CTLine {
 	CFRange range;			/* the characters that spawned the glyphs */
 	CGGlyph *glyphs;		/* malloc'd, glyphCount entries */
 	CGPoint *positions;		/* malloc'd, glyphCount entries, relative to the LINE's own origin */
+	/* **AND THE ADVANCES ARE KEPT WHEN THE LINE IS REORDERED**, because a glyph's advance is no longer the distance to
+	 * the next POSITION — the next position is a different character. NULL for a line in logical order. */
+	CGSize *advances;		/* malloc'd, glyphCount entries, or NULL */
+	/* **AND THE VISUAL ORDER, WHEN IT IS NOT THE LOGICAL ONE**: `visualOrder[k]` is the logical index in visual slot
+	 * `k`, which is what the hit test walks and what makes the run report `NonMonotonic`. NULL = logical order. */
+	CFIndex *visualOrder;		/* malloc'd, glyphCount entries, or NULL */
+	bool nonMonotonic;
 	/* **AND WHICH OF THE GLYPHS IS NOT A GLYPH BUT A BOX.** A character carrying a run delegate occupies the width its
 	 * delegate answers and draws no ink; this flag is the one thing that tells the two apart, and it is carried
 	 * alongside the glyphs so a DRAW can skip a box and the `CTRun` built from the line can too. */
@@ -69,8 +78,8 @@ struct __CTLine {
 	double width;			/* the sum of the advances */
 	CGFloat ascent, descent, leading;
 	double trailingWhitespace;
-	/* **AND THE DIRECTION THE PARAGRAPH RUNS IN**, read once at the line's first character: `kCTRunStatusRightToLeft`
-	 * is what a run REPORTS from it, and reordering the glyphs is the next slice. */
+	/* **AND THE DIRECTION THE PARAGRAPH RUNS IN**, read once at the line's first character and RESOLVED by P2/P3 when
+	 * the caller left it natural: `kCTRunStatusRightToLeft` is what a run reports from it. */
 	CTWritingDirection direction;
 	/* AND ITS ONE RUN, BUILT ON FIRST ASK RATHER THAN AT CREATION: a line that is only measured never pays for a
 	 * run, and a line whose runs are asked for pays for exactly one. `runs` is the ARRAY the door hands out, kept
@@ -97,6 +106,8 @@ static void ct_line_finalize(CFTypeRef cf)
 	}
 	free(line->glyphs);
 	free(line->positions);
+	free(line->advances);
+	free(line->visualOrder);
 	free(line->isBox);
 }
 
@@ -173,6 +184,48 @@ static struct __CTLine *ct_line_alloc(void)
 {
 	return (struct __CTLine *)_CFRuntimeCreateInstance(kCFAllocatorDefault, CTLineGetTypeID(),
 		(CFIndex)(sizeof(struct __CTLine) - sizeof(CFRuntimeBase)), NULL);
+}
+
+/* **THE WHOLE BIDI PIPELINE FOR ONE LINE'S CHARACTERS, AND WHETHER IT MOVED ANYTHING.** P2/P3, the explicit levels, the
+ * weak, bracket, neutral and implicit rules, then L1's reset and L2's reorder — the seven calls below are the whole of
+ * `CTBidi_internal.h`, which is what that header was built for. The answer is `visualOrder` (visual slot -> logical
+ * index), and the return says whether it is NOT the identity, which is what sets `NonMonotonic`. */
+static bool fn_line_bidi_order(const UniChar *chars, CFIndex count, int paragraphLevel, CFIndex *visualOrder)
+{
+	CTBidiClass *classes;
+	uint8_t *levels;
+	bool moved = false;
+	CFIndex i;
+
+	if (chars == NULL || visualOrder == NULL || count <= 0) {
+		return false;
+	}
+	classes = (CTBidiClass *)malloc((size_t)count * sizeof(CTBidiClass));
+	levels = (uint8_t *)malloc((size_t)count * sizeof(uint8_t));
+	if (classes == NULL || levels == NULL) {
+		free(classes);
+		free(levels);
+		return false;
+	}
+	for (i = 0; i < count; i++) {
+		classes[i] = ct_bidi_class(chars[i]);
+	}
+	ct_bidi_explicit_levels(chars, count, paragraphLevel, levels, classes);
+	ct_bidi_resolve_weak(classes, levels, count, paragraphLevel);
+	ct_bidi_resolve_brackets(chars, classes, levels, count, paragraphLevel);
+	ct_bidi_resolve_neutral(classes, levels, count, paragraphLevel);
+	ct_bidi_resolve_implicit(classes, levels, count);
+	ct_bidi_reset_levels(chars, levels, count, paragraphLevel);
+	ct_bidi_reorder(levels, count, visualOrder);
+	for (i = 0; i < count; i++) {
+		if (visualOrder[i] != i) {
+			moved = true;
+			break;
+		}
+	}
+	free(classes);
+	free(levels);
+	return moved;
 }
 
 /* **THE TAB STOPS A LINE OBEYS, TAKEN FROM ITS PARAGRAPH STYLE.** A tab is not a glyph and not a fixed box: where it
@@ -377,8 +430,49 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 	for (i = n - 1; i >= 0 && ct_line_is_whitespace(chars[i]); i--) {
 		line->trailingWhitespace += advances[i].width;
 	}
+	/* **AND THE GLYPHS ARE PLACED IN THE VISUAL ORDER THE PIPELINE IMPLIES.** The advances are KEPT — a reordered
+	 * glyph's advance is not recoverable from its neighbours' positions — and when the order is not the identity the
+	 * positions are REWRITTEN so that the glyphs run in visual order, which is what the draw reads: a glyph array
+	 * indexed by LOGICAL character with a position that says where it GOES. Kerning is taken between VISUAL
+	 * neighbours, because that is the pair the eye sees. */
+	line->advances = advances;
+	if (n > 0) {
+		CFIndex *visualOrder = (CFIndex *)malloc((size_t)n * sizeof(CFIndex));
+
+		if (visualOrder != NULL) {
+			int paragraphLevel = (line->direction == kCTWritingDirectionRightToLeft) ? 1 : 0;
+
+			if (fn_line_bidi_order(chars, n, paragraphLevel, visualOrder)) {
+				CGPoint *placed = (CGPoint *)malloc((size_t)n * sizeof(CGPoint));
+
+				if (placed != NULL) {
+					double placedX = 0.0;
+					CFIndex k;
+
+					for (k = 0; k < n; k++) {
+						CFIndex logical = visualOrder[k];
+
+						placed[logical] = CGPointMake((CGFloat)placedX, 0.0);
+						placedX += advances[logical].width;
+						if (k + 1 < n && !line->isBox[logical] && !line->isBox[visualOrder[k + 1]]) {
+							placedX += (CGFloat)CTFontGetKerningBetweenGlyphs(font, line->glyphs[logical],
+											line->glyphs[visualOrder[k + 1]]);
+						}
+					}
+					for (k = 0; k < n; k++) {
+						line->positions[k] = placed[k];
+					}
+					line->width = placedX;
+					line->visualOrder = visualOrder;
+					line->nonMonotonic = true;
+					visualOrder = NULL;
+					free(placed);
+				}
+			}
+			free(visualOrder);
+		}
+	}
 	free(chars);
-	free(advances);
 	return (CTLineRef)line;
 }
 
@@ -649,6 +743,12 @@ void CTLineDraw(CTLineRef line, CGContextRef context)
  * is a second chance to get it wrong. */
 static CGFloat ct_line_advance_at(const struct __CTLine *line, CFIndex i)
 {
+	/* **A REORDERED LINE KEEPS ITS ADVANCES**, because the next POSITION is a different character; a line in LOGICAL
+	 * order still derives the advance from the positions, which is what the constructors that place glyphs directly
+	 * (a truncated or a justified line) rely on. */
+	if (line->advances != NULL) {
+		return line->advances[i].width;
+	}
 	if (i + 1 < line->glyphCount) {
 		return line->positions[i + 1].x - line->positions[i].x;
 	}
@@ -662,6 +762,21 @@ CFIndex CTLineGetStringIndexForPosition(CTLineRef line, CGPoint position)
 
 	if (l == NULL) {
 		return kCFNotFound;
+	}
+	/* **A REORDERED LINE IS WALKED IN VISUAL ORDER**, because its glyphs are no longer in string order: the slot whose
+	 * box holds the point answers with ITS logical index, and one past the last slot is the door's own upper bound. */
+	if (l->visualOrder != NULL) {
+		CFIndex k;
+
+		for (k = 0; k < l->glyphCount; k++) {
+			CFIndex logical = l->visualOrder[k];
+			CGFloat midpoint = l->positions[logical].x + ct_line_advance_at(l, logical) / 2.0f;
+
+			if (position.x < midpoint) {
+				return logical;
+			}
+		}
+		return l->glyphCount;
 	}
 	/* THE NEAREST BOUNDARY WINS: a click belongs to the character whose half of the advance it fell in. Before the
 	 * first glyph is index 0 and past the last is one past the last character, which is Apple's own bound for this
@@ -687,12 +802,15 @@ CGFloat CTLineGetOffsetForStringIndex(CTLineRef line, CFIndex charIndex, CGFloat
 		}
 		return 0.0;
 	}
-	if (charIndex <= 0) {
+	if (charIndex < 0) {
 		offset = 0.0;
 	} else if (charIndex >= l->glyphCount) {
 		/* ONE PAST THE LAST CHARACTER IS THE END OF THE LINE, which is where a caret at the end belongs. */
 		offset = (CGFloat)l->width;
 	} else {
+		/* **THE GLYPH'S OWN x**, which for a REORDERED line is where it was PLACED and no longer where its character
+		 * sat in the string. (APPLE'S "LEADING EDGE" IS THE LEFT ONE HERE: an odd-level glyph's leading edge is on
+		 * the RIGHT, and telling the two apart is part of the caret slice this one leaves owed.) */
 		offset = l->positions[charIndex].x;
 	}
 	/* A SINGLE RUN HAS ONE CARET PER BOUNDARY, so the secondary offset is the same as the primary — which is
@@ -727,6 +845,7 @@ CFArrayRef CTLineGetGlyphRuns(CTLineRef line)
 	CFDictionaryRef attributes;
 	CFIndex *indices;
 	CGSize *advances;
+	CTRunStatus status;
 	CFIndex i;
 
 	if (l == NULL) {
@@ -754,9 +873,10 @@ CFArrayRef CTLineGetGlyphRuns(CTLineRef line)
 	 * MANUFACTURE: the font came from these very attributes. */
 	attributes = (l->string == NULL) ? NULL
 					 : CFAttributedStringGetAttributes(l->string, l->range.location, NULL);
-	l->run = CTRunCreateWithAttributesAndGlyphs(attributes, l->font,
-		(l->direction == kCTWritingDirectionRightToLeft) ? kCTRunStatusRightToLeft : kCTRunStatusNoStatus,
-		l->range, indices, l->glyphs, l->positions, advances, l->isBox, l->glyphCount);
+	status = ((l->direction == kCTWritingDirectionRightToLeft) ? kCTRunStatusRightToLeft : kCTRunStatusNoStatus)
+	       | (l->nonMonotonic ? kCTRunStatusNonMonotonic : 0);
+	l->run = CTRunCreateWithAttributesAndGlyphs(attributes, l->font, status, l->range, indices, l->glyphs,
+						    l->positions, advances, l->isBox, l->glyphCount);
 	free(indices);
 	free(advances);
 	if (l->run == NULL) {

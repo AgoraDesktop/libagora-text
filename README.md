@@ -718,8 +718,11 @@ the user's decision is that they stay owed), the ATS pair (permanent), and the f
   REORDERING IS BUILT** (`ct_bidi_reset_levels` for L1, `ct_bidi_reorder` for L2): L1 takes the separators, the
   whitespace/isolates BEFORE them and the whitespace/isolates at the END of the line to the paragraph's level, and L2
   turns the LEVELS into a VISUAL ORDER by reversing, from the highest level down to the lowest ODD one, every maximal
-  run at that level or higher. **AND WHAT IS LEFT IS THE LINE, NAMED**: NOTHING IS VISIBLE YET, because the reordering
-  is a PERMUTATION and no LINE has been given the glyph order it implies — `CTLine` still draws every glyph in the
-  order its character appeared, so L2 sits beside it UNWIRED, which is what keeps a whole-line flip from reversing a
-  Latin run inside a right-to-left paragraph. The MIRRORING of paired characters (L4, which needs `BidiMirroring.txt`)
-  and the multi-run line model are the slices behind that. MEASURED: `text: 55 of 55 cases passed, 0 failed`.
+  run at that level or higher. **AND THE LINE IS WIRED** (`CTLine.c`): it runs the WHOLE pipeline over its own
+  characters and, when the visual order is not the logical one, PLACES each glyph where the reordering says — the
+  advances are KEPT (a reordered glyph's advance is not recoverable from its neighbours' positions), kerning is taken
+  between VISUAL neighbours, the DRAW follows the positions, the HIT TEST walks the visual slots, and the run reports
+  `kCTRunStatusNonMonotonic`. MEASURED (`tests/text.c`): a Hebrew line's FIRST character's glyph sits at x=**15.65**
+  while the LAST is at **0**, the width unchanged at **23.48**. **AND WHAT IS STILL NAMED**: the LEADING-EDGE
+  convention for an odd-level glyph, the MIRRORING of paired characters (L4, which needs `BidiMirroring.txt`), and the
+  MULTI-RUN model a non-monotonic line wants. MEASURED: `text: 56 of 56 cases passed, 0 failed`.

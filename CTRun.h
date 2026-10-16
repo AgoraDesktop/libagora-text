@@ -22,11 +22,10 @@
  * recorded as the fact about this implementation that it is.
  *
  * **AND ONE OF THE TWO ANSWERS THIS TIER GIVES IS NOW READ RATHER THAN FIXED.** `CTRunGetStatus` reports the LINE's
- * base writing direction — `kCTRunStatusRightToLeft` when the paragraph runs that way, and `NoStatus` otherwise — so
- * the flag that exists for a direction is set from the paragraph's direction: the caller's STATED one, or the one
- * UAX #9 P2/P3 RESOLVES from the text when the caller left it natural. `CTRunGetTextMatrix` is still the identity
- * and `NonMonotonic` is still clear, because this library does no GLYPH REORDERING and sets no run matrix: the base
- * direction is READ and RESOLVED, and the algorithm that would use it is the next slice of the milestone.
+ * base writing direction — `kCTRunStatusRightToLeft` when the paragraph runs that way, and `NoStatus` otherwise — AND
+ * `kCTRunStatusNonMonotonic` when the LINE REORDERED its glyphs, which it does when the bidirectional pipeline says
+ * the visual order is not the logical one, so a run's string indices are no longer monotonic. `CTRunGetTextMatrix`
+ * is still the identity: the line reorders POSITIONS and sets no run matrix.
  */
 #ifndef CORE_TEXT_CTRUN_H
 #define CORE_TEXT_CTRUN_H

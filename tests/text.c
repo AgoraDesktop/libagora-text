@@ -5253,8 +5253,10 @@ static int case_bidi_paragraph_level(void)
 		run = (runs != NULL && CFArrayGetCount(runs) > 0) ? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
 		printf("  (a NATURAL paragraph of Hebrew reports status %u)\n",
 		       (unsigned)((run != NULL) ? CTRunGetStatus(run) : 0));
-		check(run != NULL && CTRunGetStatus(run) == kCTRunStatusRightToLeft,
+		check(run != NULL && (CTRunGetStatus(run) & kCTRunStatusRightToLeft) != 0,
 		      "a NATURAL paragraph of Hebrew RESOLVES to right to left (P2/P3)");
+		check(run != NULL && (CTRunGetStatus(run) & kCTRunStatusNonMonotonic) != 0,
+		      "and its glyphs are REORDERED now, so the run also reports NonMonotonic");
 		if (line != NULL) CFRelease(line);
 		if (astr != NULL) CFRelease(astr);
 		if (h != NULL) CFRelease(h);
@@ -5621,6 +5623,55 @@ static int case_bidi_reordering(void)
 	return g_fail - before;
 }
 
+/* **AND THE LINE IS REORDERED — THE PAYOFF.** A right-to-left line's glyphs are PLACED right to left, so the FIRST
+ * logical character's glyph is at the RIGHT end of the line and the LAST is at the origin; and the run says so, because
+ * its string indices are no longer monotonic. */
+static int case_line_bidi_reorder(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(13.0);
+	CFMutableDictionaryRef attrs = NULL;
+	CFAttributedStringRef astr = NULL;
+	CTLineRef line = NULL;
+	UniChar hebrew[] = { 0x05D0, 0x05D1, 0x05D2 };
+	CFStringRef h = (font != NULL) ? CFStringCreateWithCharacters(kCFAllocatorDefault, hebrew, 3) : NULL;
+
+	check(font != NULL && h != NULL, "the reorder case could not be set up");
+	if (font == NULL || h == NULL) {
+		if (h != NULL) CFRelease(h);
+		if (font != NULL) CFRelease(font);
+		return g_fail - before;
+	}
+	attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					  &kCFTypeDictionaryValueCallBacks);
+	CFDictionarySetValue(attrs, kCTFontAttributeName, font);
+	astr = CFAttributedStringCreate(kCFAllocatorDefault, h, attrs);
+	line = (astr != NULL) ? CTLineCreateWithAttributedString(astr) : NULL;
+	check(line != NULL, "the Hebrew line was made");
+	if (line != NULL) {
+		CFArrayRef runs = CTLineGetGlyphRuns(line);
+		CTRunRef run = (runs != NULL && CFArrayGetCount(runs) > 0)
+			? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
+		CGFloat first = CTLineGetOffsetForStringIndex(line, 0, NULL);
+		CGFloat last = CTLineGetOffsetForStringIndex(line, 2, NULL);
+		double width = CTLineGetTypographicBounds(line, NULL, NULL, NULL);
+
+		printf("  (Hebrew: x0=%.2f, x2=%.2f, width=%.2f, status=%u)\n", (double)first, (double)last, width,
+		       (unsigned)((run != NULL) ? CTRunGetStatus(run) : 0));
+		check(run != NULL && (CTRunGetStatus(run) & kCTRunStatusNonMonotonic) != 0,
+		      "a right-to-left line's run reports NonMonotonic");
+		check(first > last, "and the FIRST character's glyph is to the RIGHT of the last one's");
+		check(fabs((double)last) < 0.01, "with the LAST logical character at the line's origin");
+		check(width > 0.0, "and the width is still the whole line");
+		CFRelease(line);
+	}
+	if (astr != NULL) CFRelease(astr);
+	CFRelease(attrs);
+	CFRelease(h);
+	CFRelease(font);
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -5661,6 +5712,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The implicit levels I1 and I2", case_bidi_implicit_levels },
 	{ "The bracket pairs N0", case_bidi_brackets },
 	{ "The reordering L1 and L2", case_bidi_reordering },
+	{ "A right-to-left line's glyphs are placed right to left", case_line_bidi_reorder },
 	{ "And the FRAMESETTER path is kerned too, which is where the AppKit draws", case_frame_kerning },
 	{ "Matching finds the faces a query describes, in a stable order", case_font_matching },
 	{ "A disabled face leaves every matching answer, and comes back", case_font_visibility },

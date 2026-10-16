@@ -18,12 +18,13 @@
  * ascent, descent and leading. SO EVERY CHARACTER IN THE STRING IS IN THE LINE, the string range is the whole
  * string, and the width is the sum of the advances.
  *
- * WHAT IS THEREFORE NOT ATTEMPTED, SAID PLAINLY: MULTI-RUN LINES, GLYPH REORDERING, AND SHAPING. A line with
- * two fonts, a right-to-left run inside a left-to-right one, or a script needing ligatures or contextual forms
- * is NOT laid out correctly here — every glyph is drawn in the order its character appeared. **AND THE BASE WRITING
- * DIRECTION IS NOW READ**: the paragraph's direction reaches the run (`CTRunGetStatus`), which is the FIRST piece of
- * the bidi milestone; the Unicode Bidirectional Algorithm that would REORDER the glyphs is the next. That, multi-run
- * and complex scripts are the HarfBuzz milestone this project's Core Text plan already names.
+ * WHAT IS THEREFORE NOT ATTEMPTED, SAID PLAINLY: MULTI-RUN LINES AND SHAPING. A line with two fonts, or a script
+ * needing ligatures or contextual forms, is NOT laid out correctly here. **AND THE GLYPHS ARE REORDERED, WHICH IS THE
+ * BIDI MILESTONE'S PAYOFF**: the line runs the whole pipeline over its own characters, PLACES each glyph where the
+ * visual order says, and reports `kCTRunStatusNonMonotonic` — so a Hebrew letter in a Latin paragraph is drawn to the
+ * right of the one before it. THE CARET DOORS SPEAK VISUAL ORDER; the LEADING-EDGE convention for an odd-level glyph
+ * and the multi-run model are named as owed. Multi-run and complex scripts are the HarfBuzz milestone this project's
+ * Core Text plan already names.
  *
  * **A RUN DELEGATE, THOUGH, IS HONORED.** A character whose attributes carry `kCTRunDelegateAttributeName` is a BOX:
  * its advance is the delegate's width rather than the placeholder glyph's, the line's ascent and descent grow to cover
