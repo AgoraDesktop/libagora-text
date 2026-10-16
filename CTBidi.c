@@ -948,3 +948,103 @@ void ct_bidi_resolve_brackets(const UniChar *text, CTBidiClass *classes, const u
 	free(eos);
 	free(seqLevel);
 }
+
+/* =================================================================================================
+ * UAX #9 L1 AND L2: THE LEVEL RESET, AND THE VISUAL ORDER.
+ * =============================================================================================== */
+
+/* AN ISOLATE FORMATTING CHARACTER, which L1 treats as whitespace for its reset: the initiators and the PDI. */
+static bool fn_is_isolate_format(CTBidiClass bidiClass)
+{
+	return fn_is_isolate_initiator(bidiClass) || bidiClass == kCTBidiPDI;
+}
+
+void ct_bidi_reset_levels(const UniChar *text, uint8_t *levels, CFIndex count, int paragraphLevel)
+{
+	CFIndex i;
+
+	if (text == NULL || levels == NULL || count <= 0) {
+		return;
+	}
+	/* **L1 CLAUSE 4: THE WHITESPACE AND ISOLATES AT THE END OF THE LINE.** A trailing space is not text, and leaving
+	 * it at an odd level would make L2 reorder it as though it were. */
+	for (i = count - 1; i >= 0; i--) {
+		CTBidiClass bidiClass = ct_bidi_class(text[i]);
+
+		if (bidiClass == kCTBidiWS || fn_is_isolate_format(bidiClass)) {
+			levels[i] = (uint8_t)paragraphLevel;
+		} else {
+			break;
+		}
+	}
+	/* **L1 CLAUSES 1-3: A SEPARATOR, AND THE WHITESPACE AND ISOLATES BEFORE IT.** */
+	for (i = 0; i < count; i++) {
+		CTBidiClass bidiClass = ct_bidi_class(text[i]);
+
+		if (bidiClass == kCTBidiB || bidiClass == kCTBidiS) {
+			CFIndex j;
+
+			levels[i] = (uint8_t)paragraphLevel;
+			for (j = i - 1; j >= 0; j--) {
+				CTBidiClass previous = ct_bidi_class(text[j]);
+
+				if (previous == kCTBidiWS || fn_is_isolate_format(previous)) {
+					levels[j] = (uint8_t)paragraphLevel;
+				} else {
+					break;
+				}
+			}
+		}
+	}
+}
+
+void ct_bidi_reorder(const uint8_t *levels, CFIndex count, CFIndex *visualOrder)
+{
+	int highest = 0;
+	int lowestOdd = 0;
+	bool haveOdd = false;
+	int level;
+	CFIndex i;
+
+	if (levels == NULL || visualOrder == NULL || count <= 0) {
+		return;
+	}
+	for (i = 0; i < count; i++) {
+		visualOrder[i] = i;
+		if (levels[i] > highest) {
+			highest = levels[i];
+		}
+		if ((levels[i] % 2) != 0 && (!haveOdd || levels[i] < lowestOdd)) {
+			lowestOdd = levels[i];
+			haveOdd = true;
+		}
+	}
+	/* **ALL EVEN LEVELS MEAN NO REVERSAL AT ALL**, which is why a left-to-right line's order IS the identity. */
+	if (!haveOdd) {
+		return;
+	}
+	/* **FROM THE HIGHEST LEVEL DOWN TO THE LOWEST ODD ONE**, reversing each maximal run at that level or higher — and
+	 * re-scanning the CURRENT order each time, because a higher level's reversal is what a lower one then sees. */
+	for (level = highest; level >= lowestOdd; level--) {
+		i = 0;
+		while (i < count) {
+			if (levels[visualOrder[i]] >= level) {
+				CFIndex j = i;
+				CFIndex a, b;
+
+				while (j + 1 < count && levels[visualOrder[j + 1]] >= level) {
+					j++;
+				}
+				for (a = i, b = j; a < b; a++, b--) {
+					CFIndex swap = visualOrder[a];
+
+					visualOrder[a] = visualOrder[b];
+					visualOrder[b] = swap;
+				}
+				i = j + 1;
+			} else {
+				i++;
+			}
+		}
+	}
+}

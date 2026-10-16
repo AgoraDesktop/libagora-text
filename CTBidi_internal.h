@@ -119,4 +119,15 @@ extern const size_t ct_bidi_bracket_count;
 void ct_bidi_resolve_brackets(const UniChar *text, CTBidiClass *classes, const uint8_t *levels, CFIndex count,
 			      int paragraphLevel);
 
+/* **UAX #9 L1: THE LEVEL RESET.** A segment or paragraph separator, the whitespace/isolate formatting BEFORE it, and
+ * the whitespace/isolate formatting at the END of the line all take the PARAGRAPH's level — so a trailing space does
+ * not sit at an odd level and get reordered as though it were text. Reads the ORIGINAL classes (from `ct_bidi_class`
+ * over the text), because the resolved ones no longer say which characters were whitespace. */
+void ct_bidi_reset_levels(const UniChar *text, uint8_t *levels, CFIndex count, int paragraphLevel);
+
+/* **UAX #9 L2: THE VISUAL ORDER.** Fills `visualOrder[k]` with the LOGICAL index that sits at visual position `k`: from
+ * the highest level present down to the lowest ODD level, every maximal run of characters at that level OR HIGHER is
+ * REVERSED. All-even levels mean no reversal at all, which is why a left-to-right line's order is the identity. */
+void ct_bidi_reorder(const uint8_t *levels, CFIndex count, CFIndex *visualOrder);
+
 #endif /* CORE_TEXT_CTBIDI_INTERNAL_H */

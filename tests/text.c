@@ -5570,6 +5570,57 @@ static int case_bidi_brackets(void)
 	return g_fail - before;
 }
 
+/* **AND THE REORDERING — UAX #9 L1 AND L2.** L2 is the payoff: the LEVELS become a VISUAL ORDER by reversing, from the
+ * highest level down to the lowest odd one, every maximal run at that level or higher. L1 comes first and takes the
+ * separators and the whitespace at the ends out of the picture, so a trailing space is not reordered as text. */
+static int case_bidi_reordering(void)
+{
+	int before = g_fail;
+	CFIndex order[8];
+
+	/* L2. */
+	{
+		uint8_t even[] = { 0, 0, 0 };
+		uint8_t rtl[] = { 1, 1, 1 };
+		uint8_t mixed[] = { 0, 1, 1, 0 };
+		uint8_t nested[] = { 0, 2, 2, 0 };
+		uint8_t deep[] = { 0, 2, 1, 0 };
+
+		ct_bidi_reorder(even, 3, order);
+		check(order[0] == 0 && order[1] == 1 && order[2] == 2,
+		      "L2: an all-even line is left in LOGICAL order");
+		ct_bidi_reorder(rtl, 3, order);
+		check(order[0] == 2 && order[1] == 1 && order[2] == 0, "L2: an all-right-to-left line is REVERSED");
+		ct_bidi_reorder(mixed, 4, order);
+		check(order[0] == 0 && order[1] == 2 && order[2] == 1 && order[3] == 3,
+		      "L2: an RTL run between two LTR characters is reversed");
+		ct_bidi_reorder(nested, 4, order);
+		check(order[0] == 0 && order[1] == 1 && order[2] == 2 && order[3] == 3,
+		      "L2: an all-EVEN embedded run is NOT reversed — there is no odd level to reverse down to");
+		ct_bidi_reorder(deep, 4, order);
+		check(order[0] == 0 && order[1] == 2 && order[2] == 1 && order[3] == 3,
+		      "L2: a level-2 character and a level-1 one reverse together, as one run");
+	}
+	/* L1: a separator and the whitespace before it. */
+	{
+		UniChar text[] = { 'a', ' ', '\n', 'b' };
+		uint8_t levels[] = { 0, 1, 1, 1 };
+
+		ct_bidi_reset_levels(text, levels, 4, 0);
+		check(levels[1] == 0 && levels[2] == 0 && levels[3] == 1,
+		      "L1: a separator and the whitespace BEFORE it take the paragraph level");
+	}
+	/* L1: the whitespace at the END of the line. */
+	{
+		UniChar text[] = { 'a', 0x05D0, ' ' };
+		uint8_t levels[] = { 0, 1, 1 };
+
+		ct_bidi_reset_levels(text, levels, 3, 0);
+		check(levels[1] == 1 && levels[2] == 0, "L1: trailing whitespace takes the paragraph level");
+	}
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -5609,6 +5660,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The isolating run sequences X10 joins", case_bidi_isolating_sequences },
 	{ "The implicit levels I1 and I2", case_bidi_implicit_levels },
 	{ "The bracket pairs N0", case_bidi_brackets },
+	{ "The reordering L1 and L2", case_bidi_reordering },
 	{ "And the FRAMESETTER path is kerned too, which is where the AppKit draws", case_frame_kerning },
 	{ "Matching finds the faces a query describes, in a stable order", case_font_matching },
 	{ "A disabled face leaves every matching answer, and comes back", case_font_visibility },
