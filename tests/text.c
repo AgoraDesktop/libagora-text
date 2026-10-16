@@ -5387,6 +5387,63 @@ static int case_bidi_weak_types(void)
 	return g_fail - before;
 }
 
+/* **AND THE NEUTRALS — UAX #9 N1 AND N2.** A neutral between two strong types of the SAME direction takes that
+ * direction; anything else takes the EMBEDDING direction of its run. A NUMBER counts as R, which is the case that
+ * separates N1 from a plain "same as the left" reading. */
+static int case_bidi_neutrals(void)
+{
+	int before = g_fail;
+	uint8_t levels[16];
+	CTBidiClass classes[16];
+
+	/* N1: L ... L. */
+	{
+		UniChar text[] = { 'a', ' ', 'b' };
+
+		check(ct_bidi_explicit_levels(text, 3, 0, levels, classes), "the neutral walk runs");
+		ct_bidi_resolve_weak(classes, levels, 3, 0);
+		ct_bidi_resolve_neutral(classes, levels, 3, 0);
+		check(classes[1] == kCTBidiL, "N1: a neutral between two Latin strong types becomes L");
+	}
+	/* N1: R ... R. */
+	{
+		UniChar text[] = { 0x05D0, ' ', 0x05D1 };
+
+		ct_bidi_explicit_levels(text, 3, 0, levels, classes);
+		ct_bidi_resolve_weak(classes, levels, 3, 0);
+		ct_bidi_resolve_neutral(classes, levels, 3, 0);
+		check(classes[1] == kCTBidiR, "N1: a neutral between two Hebrew strong types becomes R");
+	}
+	/* N1: a NUMBER counts as R. */
+	{
+		UniChar text[] = { 0x05D0, ' ', '1' };
+
+		ct_bidi_explicit_levels(text, 3, 1, levels, classes);
+		ct_bidi_resolve_weak(classes, levels, 3, 1);
+		ct_bidi_resolve_neutral(classes, levels, 3, 1);
+		check(classes[1] == kCTBidiR, "N1: a neutral beside a NUMBER and R becomes R (a number influences as R)");
+	}
+	/* N2: the sides disagree, so the EMBEDDING direction — R in a right-to-left paragraph. */
+	{
+		UniChar text[] = { 'a', ' ', 0x05D0 };
+
+		ct_bidi_explicit_levels(text, 3, 1, levels, classes);
+		ct_bidi_resolve_weak(classes, levels, 3, 1);
+		ct_bidi_resolve_neutral(classes, levels, 3, 1);
+		check(classes[1] == kCTBidiR, "N2: a neutral whose sides DISAGREE takes the embedding direction (R here)");
+	}
+	/* N2: the same text in a left-to-right paragraph takes L. */
+	{
+		UniChar text[] = { 'a', ' ', 0x05D0 };
+
+		ct_bidi_explicit_levels(text, 3, 0, levels, classes);
+		ct_bidi_resolve_weak(classes, levels, 3, 0);
+		ct_bidi_resolve_neutral(classes, levels, 3, 0);
+		check(classes[1] == kCTBidiL, "and the same text in a left-to-right paragraph takes L");
+	}
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -5422,6 +5479,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The bidi classes, and the paragraph level P2/P3 reads", case_bidi_paragraph_level },
 	{ "The explicit levels: embeddings, overrides and isolates", case_bidi_explicit_levels },
 	{ "The weak types W1-W7 over the level runs", case_bidi_weak_types },
+	{ "The neutral types N1 and N2", case_bidi_neutrals },
 	{ "And the FRAMESETTER path is kerned too, which is where the AppKit draws", case_frame_kerning },
 	{ "Matching finds the faces a query describes, in a stable order", case_font_matching },
 	{ "A disabled face leaves every matching answer, and comes back", case_font_visibility },

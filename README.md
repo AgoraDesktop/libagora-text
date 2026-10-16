@@ -701,7 +701,11 @@ the user's decision is that they stay owed), the ATS pair (permanent), and the f
   the LEVEL RUNS with each run's own sos/eos): a combining mark takes the type it follows, a European number after an
   Arabic letter becomes an ARABIC number, an Arabic letter becomes R, a separator between two numbers of a kind
   becomes one, a European terminator adjacent to a number becomes one, what is left of them is OTHER NEUTRAL, and a
-  European number after a Latin strong type becomes L. **AND THE REST IS THE NEXT SLICE, NAMED**: X10's ISOLATING RUN
-  SEQUENCES (a run sequence may JOIN several level runs through an isolate), the N rules, the I rules, and L1/L2 —
-  nothing is REORDERED yet, which is exactly what keeps a Latin run inside a right-to-left paragraph from being
-  reversed, the mistake a whole-line flip would make. MEASURED: `text: 50 of 50 cases passed, 0 failed`.
+  European number after a Latin strong type becomes L. **AND THE NEUTRALS ARE BUILT ON THOSE**
+  (`ct_bidi_resolve_neutral`, N1/N2): a run of neutrals between two strong types of the SAME direction takes that
+  direction — a NUMBER counting as R — and anything else takes the EMBEDDING direction of its run. **AND THE REST IS
+  THE NEXT SLICE, NAMED**: X10's ISOLATING RUN SEQUENCES (a run sequence may JOIN several level runs through an
+  isolate, so the neutrals AROUND an isolate see each other), N0's BRACKET PAIRS (which need Unicode's `BidiBrackets`
+  data), the I rules, and L1/L2 — nothing is REORDERED yet, which is exactly what keeps a Latin run inside a
+  right-to-left paragraph from being reversed, the mistake a whole-line flip would make. MEASURED: `text: 51 of 51
+  cases passed, 0 failed`.

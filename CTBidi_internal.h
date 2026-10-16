@@ -89,4 +89,11 @@ bool ct_bidi_explicit_levels(const UniChar *text, CFIndex count, int paragraphLe
  * and that join is the next slice. `classes` is edited in place and `levels` is read. */
 void ct_bidi_resolve_weak(CTBidiClass *classes, const uint8_t *levels, CFIndex count, int paragraphLevel);
 
+/* **UAX #9 N1 AND N2: THE NEUTRAL TYPES.** Over the LEVEL RUNS, like the weak rules — a run of neutrals between two
+ * strong types of the SAME direction takes that direction (a NUMBER counting as R), and any other run of neutrals
+ * takes the EMBEDDING direction of its run. WHAT IS NOT HERE IS TWO THINGS, BOTH NAMED: **X10**, the isolating run
+ * sequences, which JOIN level runs through an isolate so the neutrals AROUND an isolate see each other; and **N0**,
+ * the bracket pairs, which need Unicode's `BidiBrackets` data. Each is the next slice. */
+void ct_bidi_resolve_neutral(CTBidiClass *classes, const uint8_t *levels, CFIndex count, int paragraphLevel);
+
 #endif /* CORE_TEXT_CTBIDI_INTERNAL_H */

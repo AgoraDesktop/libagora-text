@@ -387,3 +387,85 @@ void ct_bidi_resolve_weak(CTBidiClass *classes, const uint8_t *levels, CFIndex c
 		runStart = runEnd;
 	}
 }
+
+/* =================================================================================================
+ * UAX #9 N1 AND N2: THE NEUTRAL TYPES.
+ * =============================================================================================== */
+
+/* **NI: A NEUTRAL OR AN ISOLATE FORMATTING CHARACTER.** The standard's own name for the set the N rules resolve, and
+ * the reason the isolate initiators and the PDI are here: they are NOT ink, and a neutral beside one must be read
+ * against whatever is on the other side of it. */
+static bool fn_is_ni(CTBidiClass bidiClass)
+{
+	return bidiClass == kCTBidiB || bidiClass == kCTBidiS || bidiClass == kCTBidiWS
+	    || bidiClass == kCTBidiON || bidiClass == kCTBidiBN
+	    || bidiClass == kCTBidiLRI || bidiClass == kCTBidiRLI || bidiClass == kCTBidiFSI || bidiClass == kCTBidiPDI;
+}
+
+/* **WHAT A NEUTRAL READS AS ITS NEIGHBOUR.** A European or Arabic number INFLUENCES a neutral exactly as R does —
+ * Apple's rule and Unicode's — and anything that is not L or R is not strong at all, which the caller reads as "no
+ * answer" and resolves with N2. */
+static CTBidiClass fn_strong_for_neutral(CTBidiClass bidiClass)
+{
+	if (bidiClass == kCTBidiL) {
+		return kCTBidiL;
+	}
+	if (bidiClass == kCTBidiR || bidiClass == kCTBidiEN || bidiClass == kCTBidiAN) {
+		return kCTBidiR;
+	}
+	return kCTBidiON;
+}
+
+void ct_bidi_resolve_neutral(CTBidiClass *classes, const uint8_t *levels, CFIndex count, int paragraphLevel)
+{
+	CFIndex runStart = 0;
+
+	if (classes == NULL || levels == NULL || count <= 0) {
+		return;
+	}
+	while (runStart < count) {
+		int runLevel = levels[runStart];
+		CFIndex runEnd = runStart + 1;
+		int previousLevel = (runStart > 0) ? levels[runStart - 1] : paragraphLevel;
+		int nextLevel;
+		CTBidiClass sos;
+		CTBidiClass eos;
+		CTBidiClass embedding = ((runLevel % 2) != 0) ? kCTBidiR : kCTBidiL;
+		CFIndex i;
+
+		while (runEnd < count && levels[runEnd] == runLevel) {
+			runEnd++;
+		}
+		nextLevel = (runEnd < count) ? levels[runEnd] : paragraphLevel;
+		sos = fn_sequence_boundary(runLevel, previousLevel);
+		eos = fn_sequence_boundary(runLevel, nextLevel);
+
+		/* **N1 WOULD JOIN, N2 DECIDES.** Walk the run's NEUTRAL RUNS — the maximal stretches of NI — and for each read
+		 * the strong type on either side (a number counting as R, and `sos`/`eos` at the ends). */
+		i = runStart;
+		while (i < runEnd) {
+			if (fn_is_ni(classes[i])) {
+				CFIndex j = i;
+				CTBidiClass before;
+				CTBidiClass after;
+				CTBidiClass resolved;
+				CFIndex k;
+
+				while (j < runEnd && fn_is_ni(classes[j])) {
+					j++;
+				}
+				before = (i > runStart) ? fn_strong_for_neutral(classes[i - 1]) : sos;
+				after = (j < runEnd) ? fn_strong_for_neutral(classes[j]) : eos;
+				/* N1: BOTH SIDES AGREE; N2: otherwise the EMBEDDING direction. */
+				resolved = (before != kCTBidiON && before == after) ? before : embedding;
+				for (k = i; k < j; k++) {
+					classes[k] = resolved;
+				}
+				i = j;
+			} else {
+				i++;
+			}
+		}
+		runStart = runEnd;
+	}
+}
