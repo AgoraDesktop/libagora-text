@@ -14,17 +14,20 @@
  * and it is implemented honestly: a hard break ends the line wherever it is, and otherwise characters are taken
  * until the width is full.
  *
- * WHAT IS NOT ATTEMPTED, SAID WHERE A CALLER READS IT — AND ONE OF THE THREE IS NO LONGER MISSING, ONLY UNWIRED.
- * The Unicode line-breaking rules (UAX #14) are BUILT (`CTLineBreak.c`, over the UCD's `Line_Break` property, at
- * the UCD's own conformance score: 10,274 of 10,274 of `LineBreakTest.txt`), and **THIS TYPESETTER DOES NOT CALL
- * THEM YET** — so what it does below is what it always did, backing off to the last space, and the engine's arrival
- * changes no line until the wiring slice lands. Hyphenation, and the rules for scripts whose words are not separated
- * by spaces, are NOT implemented. **AND HYPHENATION IS NOT MERELY
+ * WHAT IS NOT ATTEMPTED, SAID WHERE A CALLER READS IT — AND WHAT WAS MISSING IS HERE NOW. **THE UNICODE
+ * LINE-BREAKING RULES (UAX #14) ARE IMPLEMENTED AND CALLED** (`CTLineBreak.c`, over the UCD's `Line_Break` property,
+ * at the UCD's own conformance score: 10,274 of 10,274 of `LineBreakTest.txt`), so the boundary a wrapped line backs
+ * off to is the last one the RULES allow rather than the last SPACE — MEASURED, `abc-defghij` now breaks after the
+ * hyphen instead of at the overflow. HYPHENATION is still not attempted. **AND THE SCRIPTS UAX #14 ITSELF SENDS TO A
+ * DICTIONARY ARE NOT WRAPPED**: `SA` — Thai, Lao, Khmer and friends, "require morphological analysis to determine
+ * break opportunities" — resolves to `AL`, whose own rule forbids a break inside an alphabetic run, so such a run is
+ * unbreakable here and the answer is the word-doesn't-fit fallback. That is the specification's answer rather than
+ * this tier's gap, and it is said here because "UAX #14 is implemented" invites the opposite assumption. **AND HYPHENATION IS NOT MERELY
  * ABSENT HERE, IT IS SOMEWHERE ELSE — WHICH IS A FACT WORTH STATING WHERE A CALLER LOOKS FOR IT.** Core Text's
  * typesetter does not hyphenate either, on the platform this follows; the resource is Core Foundation's, and this tree
  * now answers it (`libagora-core/CFHyphenation.c`: `CFStringGetHyphenationLocationBeforeIndex`). The door for a caller
  * that wants to do the breaking itself is `CTTypesetterSuggestClusterBreak`, named below. Word wrapping here backs off
- * to the last SPACE that fits, which is what Apple's own description of that mode says ("Wrapping occurs at word boundaries,
+ * to the last UAX #14 opportunity that fits, which is what Apple's own description of that mode says ("Wrapping occurs at word boundaries,
  * unless the word itself doesn't fit on a single line") and no more than that. A caller typesetting Thai, or expecting
  * hyphenation opportunities, gets the character-level answer instead — and `CTTypesetterSuggestClusterBreak` is the
  * door for a caller that wants the character-level answer ON PURPOSE.

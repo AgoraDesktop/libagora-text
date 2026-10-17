@@ -19,8 +19,11 @@
  * AND WHAT IS ABSENT IS NO LONGER ABSENT: **BOTH OPTIONS ARE OBEYED NOW.** `kCTTypesetterOptionDisableBidiProcessing`
  * and `kCTTypesetterOptionForcedEmbeddingLevel` are read into a `CTLineBidiDirective` and handed to the LINE, which is
  * where the algorithm runs — so the typesetter still consults neither while BREAKING (bidi changes no advance) and both
- * change the line this typesetter makes. NO LINE-BREAKING RULES BEYOND SPACES (nothing of UAX #14, no hyphenation), so a script whose words are not space-separated breaks at the
- * width and no sooner.
+ * change the line this typesetter makes. **AND THE LINE-BREAKING RULES ARE UAX #14'S NOW**: the break a word-wrapped
+ * line backs off to is the last opportunity the Unicode Line Breaking Algorithm allows (`CTLineBreak.c`), not the last
+ * space — which is why a break can now fall after a hyphen or a slash and why a Hangul syllable is not cut in half.
+ * WHAT IS STILL NOT DONE IS HYPHENATION, and the scripts UAX #14 itself sends to a dictionary (`SA`: Thai, Lao,
+ * Khmer) are one unbreakable run here, which `ct_lb_break_before_utf16`'s caller says in words.
  */
 #include <CoreText/CTTypesetter.h>
 
@@ -32,6 +35,7 @@
 #include <CoreText/CTRunDelegate_internal.h>
 #include <CoreText/CTStringAttributes.h>
 #include <CoreText/CTTextTab.h>
+#include <CoreText/CTLineBreak_internal.h>
 
 #include <CoreFoundation/CFCharacterSet.h>
 #include <CoreFoundation/CFRuntime.h>
@@ -420,7 +424,7 @@ static CFIndex ct_ts_hard_break(const struct __CTTypesetter *ts, CFIndex start)
 CFIndex CTTypesetterSuggestLineBreak(CTTypesetterRef typesetter, CFIndex startIndex, double width)
 {
 	const struct __CTTypesetter *ts = (const struct __CTTypesetter *)typesetter;
-	CFIndex hard, fit, i;
+	CFIndex hard, fit, opportunity;
 
 	if (ts == NULL || startIndex < 0 || startIndex >= ts->count) {
 		return 0;
@@ -445,16 +449,34 @@ CFIndex CTTypesetterSuggestLineBreak(CTTypesetterRef typesetter, CFIndex startIn
 	if (ts->mode == kCTLineBreakByCharWrapping) {
 		return fit - startIndex;
 	}
-	/* AND WORD WRAPPING BACKS OFF TO THE LAST SPACE THAT FITS, WHICH IT THEN INCLUDES: a line's trailing whitespace
-	 * is part of its range — that is why `CTLineGetTrailingWhitespaceWidth` exists at all — so the space stays with
-	 * the line it ended. */
-	for (i = fit; i > startIndex; i--) {
-		if (ct_ts_is_space(ts->chars[i - 1])) {
-			return i - startIndex;
-		}
+	/* **AND WORD WRAPPING BACKS OFF TO THE LAST OPPORTUNITY UAX #14 ALLOWS — WHICH IS WHAT A WORD BOUNDARY IS.**
+	 * It used to back off to the last SPACE, and that is one rule of thirty-one: UAX #14 also allows a break after a
+	 * hyphen, after a comma, after a closing quote, and BETWEEN IDEOGRAPHS, and it forbids one before a closing
+	 * bracket or inside a word.
+	 *
+	 * **AND `SA` IS THE ONE CLASS THIS DOES NOT HELP, WHICH IS THE SPECIFICATION'S OWN ANSWER RATHER THAN THIS
+	 * TIER'S GAP.** Thai, Lao, Khmer and friends are `SA` — "South-East Asian:... require morphological analysis to
+	 * determine break opportunities" — and LB1 sends `SA` to `AL`, whose rule (LB28) forbids a break between two
+	 * alphabetic characters. So a run of Thai is one unbreakable unit under the standard rules and NEEDS A
+	 * DICTIONARY, which is what ICU's dictionary-based break iterator and the spec's own `SA` tailoring exist for.
+	 * This tier does neither, so Thai does not wrap — and saying so is the point, because the opposite claim is the
+	 * one a reader would assume from "UAX #14 is implemented now". A script UAX #14 DOES handle without a
+	 * dictionary — Han, Hiragana, Katakana, Hangul, and the scripts whose breaks are punctuation — wraps here.
+	 *
+	 * THE TRAILING SPACE STILL STAYS WITH THE LINE IT ENDED, and that is a property of the rules rather than a
+	 * coincidence: LB18 is `SP ÷`, a break AFTER the spaces, so the run of spaces that ends a line is inside it —
+	 * which is why `CTLineGetTrailingWhitespaceWidth` exists at all.
+	 *
+	 * **AND THE CLUSTER DOOR BELOW DOES NOT GET THIS**, which is also a property: Apple's own sentence for it is
+	 * "no other contextual analysis will be done", and UAX #14 is exactly that analysis. The two doors therefore
+	 * differ in the way Apple names, and the case that measures them still holds — a line door that breaks at a word
+	 * boundary and a cluster door that does not. */
+	opportunity = ct_lb_break_before_utf16(ts->chars, ts->count, startIndex, fit);
+	if (opportunity > startIndex) {
+		return opportunity - startIndex;
 	}
 	/* "UNLESS THE WORD ITSELF DOESN'T FIT ON A SINGLE LINE", which is Apple's own exception for this mode: with no
-	 * space to back off to, the line takes as much of the word as fits. */
+	 * opportunity to back off to, the line takes as much of the word as fits. */
 	return (fit > startIndex) ? (fit - startIndex) : 1;
 }
 

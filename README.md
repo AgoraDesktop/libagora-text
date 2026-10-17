@@ -350,7 +350,8 @@ ctest --test-dir build
   not break apart linguistic clusters. No other contextual analysis will be done"* — so the cluster door never backs
   off to a space and reads no paragraph style. Seven advances of `"one two three"` gives **4** from the line door and
   **7** from the cluster door, and the case asserts both numbers rather than that they differ.
-- **WHAT IS NOT ATTEMPTED IS SAID WHERE A CALLER READS IT**: no UAX #14 and no hyphenation. AND THE TWO TYPESETTER
+- **WHAT IS NOT ATTEMPTED IS SAID WHERE A CALLER READS IT**: no hyphenation, and the scripts UAX #14 sends to a
+  dictionary. (UAX #14 ITSELF ARRIVED LATER — see the bullet at the end of this file.) AND THE TWO TYPESETTER
   OPTIONS ARE **OBEYED NOW**: `kCTTypesetterOptionDisableBidiProcessing` and
   `kCTTypesetterOptionForcedEmbeddingLevel` are read into a `CTLineBidiDirective` and handed to the LINE, where the
   algorithm runs — so the breaker still consults neither (bidi changes no advance) and both change the line the
@@ -849,3 +850,24 @@ the user's decision is that they stay owed), the ATS pair (permanent), and the f
   MEASURED: `100% tests passed, 0 tests failed out of 2` over `text: 66 of 66 cases passed, 0 failed`.
   **AND THE TYPESETTER STILL DOES NOT CALL IT** — that is the next slice, and until it lands no line is laid out
   differently than it was. `CTTypesetter.h` says so where a caller reads it.
+- **AND THE TYPESETTER CALLS UAX #14 NOW, WHICH IS THE ALGORITHM ITS BREAKING WAS STANDING IN FOR.** Word wrapping
+  backs off to the last opportunity the rules allow instead of the last SPACE — and a space is ONE of thirty-one
+  rules. **MEASURED, and one character apart from the answer that was there before**: `abc-defghij` at a width that
+  fits five characters broke after **4** (after the hyphen) where the space search returned **5**, a cut INSIDE a
+  word. `abc,defghij` at the same width broke after **5** — and that one was a correction rather than a confirmation:
+  I expected 4, and the engine was right, because **LB29 (`IS × (AL | HL)`, the rule whose own comment is "e.g.")**
+  forbids a break after a comma before a letter.
+- **AND THE CLUSTER DOOR DELIBERATELY DOES NOT, WHICH THE CASE MEASURES RATHER THAN ASSERTS.** Apple's sentence for
+  it is "no other contextual analysis will be done", and UAX #14 is exactly that analysis — so the two doors differ,
+  and the case asserts the DIFFERENCE as well as the answer, because a door rewired by accident would pass one check
+  and fail the other. MEASURED on two Hangul syllables (U+1100 U+1161 twice), which LB26 will not let a break fall
+  inside: at a width fitting three of the four characters the line door breaks after **2**, BETWEEN them, and the
+  cluster door cuts at **3**, inside the second.
+- **AND TWO THINGS THIS DOES *NOT* BUY ARE SAID WHERE A READER WOULD ASSUME THEM.** Han was already right by
+  accident — the old space search fell back to the overflow, and ideographs may break between every pair, so no width
+  distinguishes the two implementations. And **Thai, Lao and Khmer do not wrap at all**, because they are `SA`
+  ("require morphological analysis to determine break opportunities"), LB1 resolves `SA` to `AL`, and LB28 forbids a
+  break inside an alphabetic run: they need a DICTIONARY, which ICU's dictionary-based break iterator and the
+  specification's own `SA` tailoring exist for. "UAX #14 is implemented" invites the opposite assumption, so the
+  engine's header, the typesetter's header and the typesetter's source each say it in words; the suite asserts the
+  Hangul rule instead, because a case that asserted a difference for Thai would be asserting the fallback.

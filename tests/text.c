@@ -6736,6 +6736,183 @@ static int case_line_break_conformance(void)
 	return g_fail - before;
 }
 
+/* **AND THE TYPESETTER BREAKS WHERE UAX #14 SAYS, WHICH IS NOT WHERE IT BACKED OFF BEFORE.** The engine arrived in
+ * the last slice and the typesetter did not call it; this case is what shows the wiring, and it is written around the
+ * one place the two answers DIFFER rather than around a case where they agree.
+ *
+ * **THE DIFFERENCE IS THE HYPHEN, AND IT IS THE WHOLE SLICE.** With no space to back off to, the old code returned
+ * the character that overflowed — a cut INSIDE a word, which is where a line must never break. UAX #14 allows a break
+ * AFTER A HYPHEN and after a comma (LB31, with nothing forbidding it) and forbids one inside a word (LB28), so the
+ * same width now gives a break at the hyphen. MEASURED, one character apart, and the old answer is the one that put
+ * `abc-d|efghij` on a line.
+ *
+ * AND THE CLUSTER DOOR STILL DOES NOT DO THIS, which is the other half of the claim: Apple's sentence for it is "no
+ * other contextual analysis will be done", and UAX #14 is exactly that analysis. The two doors differ in the way
+ * Apple names, and the case asserts the difference rather than the new answer alone — a door that had been rewired
+ * by accident would pass the first check and fail this one. */
+static int case_typesetter_uax14(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(13.0);
+	struct { const char *text; CFIndex line; CFIndex cluster; const char *why; } cases[] = {
+		{ "abc-defghij", 4, 5, "a break AFTER THE HYPHEN, where the space search cut inside the word" },
+		/* **AND A COMMA IS THE OPPOSITE CASE, WHICH THE MEASUREMENT TAUGHT RATHER THAN CONFIRMED.** I expected a
+		 * break after `,` — nothing forbids it in LB13, which is about the break BEFORE it — and the engine said
+		 * no, because LB29 is `IS × (AL | HL)`: "Do not break between numeric punctuation and alphabetics", the
+		 * rule whose own comment is ("e.g."). The engine was right and the expectation was a guess. */
+		{ "abc,defghij", 5, 5, "and NO break after a comma (LB29, the `IS x (AL | HL)` rule for e.g.)" },
+	};
+	CFMutableDictionaryRef attrs = (font != NULL)
+		? CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					    &kCFTypeDictionaryValueCallBacks) : NULL;
+	size_t i;
+
+	check(font != NULL, "the UAX #14 case has a face");
+	if (font == NULL) {
+		return g_fail - before;
+	}
+	CFDictionarySetValue(attrs, kCTFontAttributeName, font);
+	/* **THE WIDTH IS MEASURED FROM THE FACE RATHER THAN TYPED**: this suite's face is a monospace one, so the width
+	 * that fits five characters is five advances — asked of an attributed string, so the answer does not depend on a
+	 * number written here. */
+	{
+		UniChar five[] = { 'a', 'b', 'c', 'd', 'e' };
+		CFStringRef measure = CFStringCreateWithCharacters(kCFAllocatorDefault, five, 5);
+		CFAttributedStringRef measured = CFAttributedStringCreate(kCFAllocatorDefault, measure, attrs);
+		CTTypesetterRef ts = (measured != NULL) ? CTTypesetterCreateWithAttributedString(measured) : NULL;
+		double width = 0.0;
+
+		check(ts != NULL, "the UAX #14 case could make a typesetter to measure with");
+		if (ts != NULL) {
+			width = (double)CTTypesetterSuggestLineBreak(ts, 0, 1.0e6);
+			printf("  (note: five characters are %ld wide at 13 points, so the width below is %g)\n",
+			       (long)width, width);
+		}
+		if (measured != NULL) {
+			CFRelease(measured);
+		}
+		if (measure != NULL) {
+			CFRelease(measure);
+		}
+		if (ts != NULL) {
+			CFRelease(ts);
+		}
+		/* AND THE SAME MEASUREMENT, TAKEN PROPERLY: the typographic width of the five characters. */
+		{
+			CFStringRef s5 = CFStringCreateWithCharacters(kCFAllocatorDefault, five, 5);
+			CFAttributedStringRef a5 = CFAttributedStringCreate(kCFAllocatorDefault, s5, attrs);
+			CTLineRef line5 = (a5 != NULL) ? CTLineCreateWithAttributedString(a5) : NULL;
+
+			if (line5 != NULL) {
+				width = (double)CTLineGetTypographicBounds(line5, NULL, NULL, NULL);
+				CFRelease(line5);
+			}
+			if (a5 != NULL) {
+				CFRelease(a5);
+			}
+			if (s5 != NULL) {
+				CFRelease(s5);
+			}
+		}
+		for (i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+			UniChar utf16[64];
+			CFIndex n = 0, k;
+			CFStringRef text = CFStringCreateWithCString(kCFAllocatorDefault, cases[i].text,
+								    kCFStringEncodingUTF8);
+
+			for (k = 0; k < CFStringGetLength(text) && n < 64; k++) {
+				utf16[n++] = CFStringGetCharacterAtIndex(text, (CFIndex)k);
+			}
+			{
+				CFAttributedStringRef astr = CFAttributedStringCreate(kCFAllocatorDefault, text, attrs);
+				CTTypesetterRef ts = (astr != NULL)
+					? CTTypesetterCreateWithAttributedString(astr) : NULL;
+				CFIndex lineBreak = (ts != NULL)
+					? CTTypesetterSuggestLineBreak(ts, 0, (double)width) : -1;
+				CFIndex clusterBreak = (ts != NULL)
+					? CTTypesetterSuggestClusterBreak(ts, 0, (double)width) : -1;
+
+				printf("  (note: `%s` at %g: the line door says %ld, the cluster door says %ld)\n",
+				       cases[i].text, (double)width, (long)lineBreak, (long)clusterBreak);
+				check(ts != NULL, "`%s` could not be typeset", cases[i].text);
+				check(lineBreak == cases[i].line, "%s (`%s` broke after %ld)", cases[i].why,
+				      cases[i].text, (long)lineBreak);
+				check(clusterBreak == cases[i].cluster,
+				      "and the CLUSTER door, which does no contextual analysis, cuts at %ld",
+				      (long)clusterBreak);
+				if (astr != NULL) {
+					CFRelease(astr);
+				}
+				if (ts != NULL) {
+					CFRelease(ts);
+				}
+			}
+			(void)utf16;
+			if (text != NULL) {
+				CFRelease(text);
+			}
+		}
+		/* **AND A SCRIPT WITH NO SPACES AT ALL, WHERE THE DIFFERENCE IS A RULE AND NOT A FALLBACK.**
+		 * Jamo — U+1100 is a Hangul leading consonant and U+1161 a vowel — compose a syllable, and LB26 forbids a
+		 * break INSIDE one (`JL × (JL | JV | H2 | H3)`), while a break BETWEEN two syllables is what LB31 allows.
+		 * With a width that fits three of the four characters, the old space search had nothing to back off to and
+		 * cut at the overflow — INSIDE the second syllable — and the line door now breaks between them.
+		 *
+		 * **AND HAN AND THAI ARE THE TWO THINGS THIS DOES NOT SHOW, WHICH IS WHY NEITHER IS ASSERTED HERE.** Han
+		 * ideographs may break between every pair, so the old fallback was accidentally right for Han and no width
+		 * tells the two implementations apart. And Thai is `SA` — "require morphological analysis to determine
+		 * break opportunities" — which LB1 resolves to `AL`, so there is NO opportunity inside a Thai run and the
+		 * answer is the word-doesn't-fit fallback, which is the same answer the character-level door gives. A case
+		 * asserting a difference there would be asserting the fallback; `CTTypesetter.c` says so in words instead. */
+		{
+			UniChar jamo[] = { 0x1100, 0x1161, 0x1100, 0x1161 };
+			CFStringRef text = CFStringCreateWithCharacters(kCFAllocatorDefault, jamo, 4);
+			CFAttributedStringRef astr = (text != NULL)
+				? CFAttributedStringCreate(kCFAllocatorDefault, text, attrs) : NULL;
+			CTTypesetterRef ts = (astr != NULL)
+				? CTTypesetterCreateWithAttributedString(astr) : NULL;
+			double runWidth = 0.0;
+
+			{
+				CTLineRef whole = (astr != NULL) ? CTLineCreateWithAttributedString(astr) : NULL;
+
+				if (whole != NULL) {
+					runWidth = (double)CTLineGetTypographicBounds(whole, NULL, NULL, NULL);
+					CFRelease(whole);
+				}
+			}
+			/* THREE AND A HALF OF THE FOUR, so the overflow falls INSIDE the second syllable. */
+			{
+				double threeAndAHalf = runWidth * 0.875;
+
+				printf("  (note: two Hangul syllables are %g wide, so %g broke after %ld; the cluster door says "
+				       "%ld)\n", runWidth, threeAndAHalf,
+				       (long)((ts != NULL) ? CTTypesetterSuggestLineBreak(ts, 0, threeAndAHalf) : -1),
+				       (long)((ts != NULL) ? CTTypesetterSuggestClusterBreak(ts, 0, threeAndAHalf) : -1));
+				check(ts != NULL, "the Hangul run could be typeset");
+				check(ts != NULL && CTTypesetterSuggestLineBreak(ts, 0, threeAndAHalf) == 2,
+				      "the line door breaks BETWEEN the two syllables, where LB26 forbids a break inside one");
+				check(ts != NULL && CTTypesetterSuggestClusterBreak(ts, 0, threeAndAHalf) == 3,
+				      "and the cluster door cuts at the overflow, inside the second syllable, because it does "
+				      "no contextual analysis");
+			}
+			if (astr != NULL) {
+				CFRelease(astr);
+			}
+			if (ts != NULL) {
+				CFRelease(ts);
+			}
+			if (text != NULL) {
+				CFRelease(text);
+			}
+		}
+	}
+
+	CFRelease(attrs);
+	CFRelease(font);
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -6798,6 +6975,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The vertical origin is half the advance and the ascent", case_font_vertical_origin },
 	{ "The glyph-to-character map the caret doors read", case_cluster_map },
 	{ "UAX #14, against the Unicode data's own rule cases", case_line_break_conformance },
+	{ "The typesetter breaks where UAX #14 says, and the cluster door does not", case_typesetter_uax14 },
 	{ "A ligature is one glyph for three characters", case_shaping_ligatures },
 	{ "A pair adjustment reaches the advances", case_shaping_kerning },
 	{ "A combining mark, composed in one face and attached in another", case_shaping_marks },

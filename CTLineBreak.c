@@ -684,3 +684,66 @@ CFIndex ct_lb_break_before(const UTF32Char *chars, CFIndex count, CFIndex start,
 	}
 	return start;
 }
+
+/* **THE CODE POINT A UNIT BELONGS TO, by binary search over an ascending map.** The map is built by the decoder below
+ * and holds, for each code point, the unit it began at — so this is "the last code point that started at or before
+ * this unit", which is the code point the unit is part of. */
+static CFIndex fn_lb_codepoint_for_unit(const CFIndex *units, CFIndex count, CFIndex unit)
+{
+	CFIndex low = 0, high = count - 1, found = 0;
+
+	while (low <= high) {
+		CFIndex mid = low + (high - low) / 2;
+
+		if (units[mid] <= unit) {
+			found = mid;
+			low = mid + 1;
+		} else {
+			high = mid - 1;
+		}
+	}
+	return found;
+}
+
+CFIndex ct_lb_break_before_utf16(const UniChar *chars, CFIndex count, CFIndex start, CFIndex limit)
+{
+	UTF32Char *points;
+	CFIndex *units;
+	CFIndex pointCount = 0, i, answer, mapped;
+
+	if (chars == NULL || count <= 0 || start >= count) {
+		return start;
+	}
+	points = (UTF32Char *)malloc((size_t)count * sizeof(UTF32Char));
+	units = (CFIndex *)malloc((size_t)(count + 1) * sizeof(CFIndex));
+	if (points == NULL || units == NULL) {
+		free(points);
+		free(units);
+		return start;
+	}
+	/* **THE DECODE, AND IT KEEPS THE MAP THE ANSWER IS TRANSLATED BACK WITH**: a surrogate pair becomes one code
+	 * point and the map remembers the unit it started at, so a code point index can be turned back into the index
+	 * the caller asked in. `units[pointCount]` is the end of the run, which is what an answer of "the last code
+	 * point" maps to. */
+	for (i = 0; i < count;) {
+		UTF32Char c = (UTF32Char)chars[i];
+
+		units[pointCount] = i;
+		if (c >= 0xD800 && c <= 0xDBFF && i + 1 < count && chars[i + 1] >= 0xDC00 && chars[i + 1] <= 0xDFFF) {
+			c = (UTF32Char)(0x10000 + ((c - 0xD800) << 10) + (chars[i + 1] - 0xDC00));
+			i += 2;
+		} else {
+			i++;
+		}
+		points[pointCount++] = c;
+	}
+	units[pointCount] = count;
+
+	answer = ct_lb_break_before(points, pointCount, fn_lb_codepoint_for_unit(units, pointCount, start),
+				    fn_lb_codepoint_for_unit(units, pointCount,
+							     (limit < count) ? limit : count));
+	mapped = units[answer];
+	free(points);
+	free(units);
+	return mapped;
+}

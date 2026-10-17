@@ -157,4 +157,14 @@ bool ct_lb_break_at(const UTF32Char *chars, CFIndex count, CFIndex index);
  * the range is an opportunity, so a caller cannot mistake "no break" for an index that was never searched. */
 CFIndex ct_lb_break_before(const UTF32Char *chars, CFIndex count, CFIndex start, CFIndex limit);
 
+/* **AND THE SAME QUESTION OVER UTF-16, WHICH IS WHERE THIS LIBRARY LIVES.** UAX #14 is written over CODE POINTS and
+ * this door is written over `UniChar`, and the two index spaces are not the same one: a surrogate pair is two units
+ * and one code point, so a typesetter working in UTF-16 cannot ask the engine a question in its own indices. Rather
+ * than make every caller do the conversion, the engine does it — the run is decoded once per call, the answer is
+ * mapped back to the UNIT index the caller asked in, and a caller never sees a code point index at all.
+ *
+ * `start` and `limit` are UNIT indices and the answer is one too; `start` comes back when the range holds no
+ * opportunity, exactly as above. */
+CFIndex ct_lb_break_before_utf16(const UniChar *chars, CFIndex count, CFIndex start, CFIndex limit);
+
 #endif /* CORE_TEXT_CTLINEBREAK_INTERNAL_H */
