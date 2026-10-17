@@ -6913,6 +6913,119 @@ static int case_typesetter_uax14(void)
 	return g_fail - before;
 }
 
+/* **AND THE TYPESETTER CAN HYPHENATE, WHICH IT ONLY DOES WHEN IT IS ASKED.** The resource is Core Foundation's and
+ * the AppKit's layout manager has used it for a while, applying its own zone test and re-breaking after the fact;
+ * this is the same decision made where the breaking already lives, and it is OPT-IN — `kCTTypesetterOptionHyphenationFactor`
+ * is this tier's own key (Core Text's paragraph style has no specifier for the factor, which is AppKit's), and a
+ * caller that passes nothing gets exactly what it always got.
+ *
+ * **EVERY CASE HERE IS A PAIR, BECAUSE THE CLAIM IS THE DIFFERENCE.** The same string and the same width are asked
+ * twice — with no factor and with one — and the two answers are the two halves of the measurement: the overflow,
+ * which is what this door answered before any of this existed, and a hyphenation point. And the CLUSTER door is asked
+ * the same question to show that the option did not leak: it reads no paragraph style and no option, so it still cuts
+ * at the overflow. */
+static int case_typesetter_hyphenation(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(13.0);
+	CFMutableDictionaryRef attrs = (font != NULL)
+		? CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					    &kCFTypeDictionaryValueCallBacks) : NULL;
+	CFMutableDictionaryRef options = (font != NULL)
+		? CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					    &kCFTypeDictionaryValueCallBacks) : NULL;
+	double four = 0.0, eight = 0.0;
+
+	check(font != NULL && options != NULL, "the hyphenation case could be set up");
+	if (font == NULL || options == NULL) {
+		return g_fail - before;
+	}
+	CFDictionarySetValue(attrs, kCTFontAttributeName, font);
+	/* **THE WIDTHS COME FROM THE FACE**, four characters and eight of them, so the two cases below ask in the same
+	 * units the answers are given in. */
+	{
+		UniChar eightChars[] = { 'h', 'y', 'p', 'h', 'e', 'n', 'a', 't' };
+		CFStringRef text = CFStringCreateWithCharacters(kCFAllocatorDefault, eightChars, 8);
+		CFAttributedStringRef astr = CFAttributedStringCreate(kCFAllocatorDefault, text, attrs);
+		CTLineRef line = (astr != NULL) ? CTLineCreateWithAttributedString(astr) : NULL;
+
+		if (line != NULL) {
+			eight = (double)CTLineGetTypographicBounds(line, NULL, NULL, NULL);
+			CFRelease(line);
+		}
+		four = eight / 2.0;
+		printf("  (note: four characters are %g and eight are %g in this face)\n", four, eight);
+		if (astr != NULL) {
+			CFRelease(astr);
+		}
+		if (text != NULL) {
+			CFRelease(text);
+		}
+	}
+	CFDictionarySetValue(options, kCTTypesetterOptionHyphenationFactor,
+			     (CFTypeRef)CFNumberCreate(kCFAllocatorDefault, kCFNumberDoubleType, &(double){ 1.0 }));
+	{
+		struct { const char *text; double width; CFIndex plain; CFIndex hyphenated; CFIndex cluster; } cases[] = {
+			/* NO OPPORTUNITY AT ALL: the fallback would cut inside the word, and the hyphenation point is the
+			 * only break that is not that. `hyphenation` breaks at 2 and 6 — the dictionary's own answer, measured
+			 * in `libagora-base`'s bridge suite — and the last one below the overflow is 2. */
+			{ "hyphenation", 0.0, 4, 2, 4 },
+			/* AN OPPORTUNITY THAT LEAVES THE LINE TOO EMPTY: the break after `the ` is legal and the line is
+			 * only HALF full — four characters of an eight-character width — so the factor decides and the word
+			 * that follows is pulled up to its point at 6. **AND THIS IS WHERE THE CLUSTER DOOR COMES APART FROM
+			 * BOTH**: it reads no paragraph style and no option, so it never backs off to `the ` and answers the
+			 * fit itself, 8. My first version asserted it equalled the plain answer and the measurement said
+			 * otherwise, which is the difference Apple's own sentence describes. */
+			{ "the hyphenation", 0.0, 4, 6, 8 },
+		};
+		size_t i;
+
+		for (i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+			double width = (cases[i].width != 0.0) ? cases[i].width : ((i == 0) ? four : eight);
+			CFStringRef text = CFStringCreateWithCString(kCFAllocatorDefault, cases[i].text,
+								    kCFStringEncodingUTF8);
+			CFAttributedStringRef astr = (text != NULL)
+				? CFAttributedStringCreate(kCFAllocatorDefault, text, attrs) : NULL;
+			CTTypesetterRef plainTs = (astr != NULL)
+				? CTTypesetterCreateWithAttributedString(astr) : NULL;
+			CTTypesetterRef hyphenTs = (astr != NULL)
+				? CTTypesetterCreateWithAttributedStringAndOptions(astr, options) : NULL;
+			CFIndex plain = (plainTs != NULL) ? CTTypesetterSuggestLineBreak(plainTs, 0, width) : -1;
+			CFIndex hyphenated = (hyphenTs != NULL) ? CTTypesetterSuggestLineBreak(hyphenTs, 0, width) : -2;
+			CFIndex cluster = (hyphenTs != NULL) ? CTTypesetterSuggestClusterBreak(hyphenTs, 0, width) : -3;
+
+			printf("  (note: `%s` at %g: no factor %ld, factor 1.0 %ld, cluster door %ld)\n",
+			       cases[i].text, width, (long)plain, (long)hyphenated, (long)cluster);
+			check(plainTs != NULL && hyphenTs != NULL, "`%s` could be typeset both ways", cases[i].text);
+			check(plain == cases[i].plain,
+			      "with no option `%s` breaks at the overflow, %ld, as it always did", cases[i].text,
+			      (long)plain);
+			check(hyphenated == cases[i].hyphenated,
+			      "and with the factor it breaks at the HYPHENATION POINT, %ld (`%s`)",
+			      (long)hyphenated, cases[i].text);
+			check(cluster == cases[i].cluster,
+			      "while the CLUSTER door reads neither the option nor the style and cuts at the fit, %ld",
+			      (long)cluster);
+			if (astr != NULL) {
+				CFRelease(astr);
+			}
+			if (plainTs != NULL) {
+				CFRelease(plainTs);
+			}
+			if (hyphenTs != NULL) {
+				CFRelease(hyphenTs);
+			}
+			if (text != NULL) {
+				CFRelease(text);
+			}
+		}
+	}
+	CFRelease(options);
+	CFRelease(attrs);
+	CFRelease(font);
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -6976,6 +7089,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The glyph-to-character map the caret doors read", case_cluster_map },
 	{ "UAX #14, against the Unicode data's own rule cases", case_line_break_conformance },
 	{ "The typesetter breaks where UAX #14 says, and the cluster door does not", case_typesetter_uax14 },
+	{ "The typesetter hyphenates, but only when a factor asks it to", case_typesetter_hyphenation },
 	{ "A ligature is one glyph for three characters", case_shaping_ligatures },
 	{ "A pair adjustment reaches the advances", case_shaping_kerning },
 	{ "A combining mark, composed in one face and attached in another", case_shaping_marks },

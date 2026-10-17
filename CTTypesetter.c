@@ -22,8 +22,12 @@
  * change the line this typesetter makes. **AND THE LINE-BREAKING RULES ARE UAX #14'S NOW**: the break a word-wrapped
  * line backs off to is the last opportunity the Unicode Line Breaking Algorithm allows (`CTLineBreak.c`), not the last
  * space — which is why a break can now fall after a hyphen or a slash and why a Hangul syllable is not cut in half.
- * WHAT IS STILL NOT DONE IS HYPHENATION, and the scripts UAX #14 itself sends to a dictionary (`SA`: Thai, Lao,
- * Khmer) are one unbreakable run here, which `ct_lb_break_before_utf16`'s caller says in words.
+ * **AND HYPHENATION IS HERE NOW, BEHIND AN OPTION.** `kCTTypesetterOptionHyphenationFactor` — this tier's own key,
+ * because the setting is AppKit's, and the declaration carries the reasoning — makes the breaker consider hyphenation
+ * points where UAX #14 has none, or where the legal break would leave the line too empty. **THE DEFAULT IS ZERO AND
+ * THE DEFAULT IS WHAT EVERY EXISTING CALLER ALREADY GOT**, which is what makes the option an option.
+ * **AND WHAT IS STILL NOT DONE IS THE SCRIPTS UAX #14 SENDS TO A DICTIONARY** (`SA`: Thai, Lao, Khmer), which are one
+ * unbreakable run here — said in words by `ct_lb_break_before_utf16`'s caller and by the header.
  */
 #include <CoreText/CTTypesetter.h>
 
@@ -50,6 +54,28 @@
  * carry, and for the same reason. */
 const CFStringRef kCTTypesetterOptionDisableBidiProcessing = CFSTR("CTTypesetterOptionDisableBidiProcessing");
 const CFStringRef kCTTypesetterOptionForcedEmbeddingLevel = CFSTR("CTTypesetterOptionForcedEmbeddingLevel");
+
+/* **AND A THIRD KEY, WHICH IS THIS TIER'S OWN AND IS RECORDED AS SUCH.** Apple declares the two above and this one
+ * does not exist in any version of `CTTypesetter.h` — because the SETTING it carries lives in AppKit:
+ * `NSParagraphStyle -hyphenationFactor` is a paragraph property, `CTParagraphStyle` has no specifier for it, and on
+ * the platform this library follows the layout manager is what reads the factor and asks
+ * `CFStringGetHyphenationLocationBeforeIndex`. So a TYPESETTER that can hyphenate needs a channel for that setting,
+ * Apple does not provide one in Core Text, and the options dictionary is the surface designed for exactly this — it
+ * is a dictionary, Apple's own two keys are precedent, and a caller that passes nothing gets the behaviour it always
+ * got.
+ *
+ * **THE ALTERNATIVE WAS REFUSED RATHER THAN OVERLOOKED: `SuggestLineBreak` COULD ALWAYS HYPHENATE, AND IT MUST NOT.**
+ * Two reasons, and both are properties of a published door rather than matters of taste. Its answer would depend on
+ * the MACHINE — a `hyph_en_US.dic` that is present on one system and absent on another would break the same string
+ * at a different character — and it would change the meaning of a door Apple documents, for every caller, including
+ * the ones that asked for nothing. **A DOOR THAT CHANGES ITS ANSWER WITH THE MACHINE IS THE ONE THING A LAYOUT
+ * ENGINE MUST NOT DO**, which is why hyphenation is opted into here and the factor is the opt-in.
+ *
+ * ITS VALUE IS A `CFNumber` and its reading is the AppKit's own: **0.0 means no hyphenation** and the number is the
+ * share of the width a line must be able to fill before hyphenation is worth it — the hyphenation zone, which
+ * `NSLayoutManager` records at the door it reads. A missing key, a value of the wrong type and a value of zero are
+ * all "do not hyphenate", which is what every existing caller already got. */
+const CFStringRef kCTTypesetterOptionHyphenationFactor = CFSTR("CTTypesetterOptionHyphenationFactor");
 
 /* AND THE PARAGRAPH STYLE'S KEY, WHICH IS NO LONGER WRITTEN HERE. This function used to return the literal
  * "NSParagraphStyleAttributeName", because `kCTParagraphStyleAttributeName` lives in a header this repository had not
@@ -78,6 +104,9 @@ struct __CTTypesetter {
 	bool *isBox;			/* malloc'd, count, or NULL */
 	CFIndex count;
 	CTLineBreakMode mode;		/* the paragraph style's mode, or the default when it has none */
+	/* **AND WHETHER THIS TYPESETTER MAY HYPHENATE, from `kCTTypesetterOptionHyphenationFactor`.** Zero — the default
+	 * — is no hyphenation, which is what every caller that passes no options gets. */
+	double hyphenationFactor;
 	/* **AND THE TAB STOPS THE FIT OBEYS**, borrowed from the paragraph style the string carries (which the typesetter's
 	 * own retained string keeps alive) — the same list `CTLine` reads, so a line breaks where it will actually end. */
 	CFArrayRef tabs;		/* BORROWED, or NULL */
@@ -128,7 +157,10 @@ static Boolean ct_ts_equal(CFTypeRef cf1, CFTypeRef cf2)
 	}
 	da = ct_ts_bidi_directive(a);
 	db = ct_ts_bidi_directive(b);
-	return da.forcedLevel == db.forcedLevel && da.disabled == db.disabled;
+	/* **AND THE HYPHENATION FACTOR IS PART OF WHAT MAKES TWO TYPESETTERS THE SAME ONE**, for the same reason the
+	 * directive is: it changes the lines they make. */
+	return da.forcedLevel == db.forcedLevel && da.disabled == db.disabled
+	       && a->hyphenationFactor == b->hyphenationFactor;
 }
 
 static CFHashCode ct_ts_hash(CFTypeRef cf)
@@ -230,6 +262,24 @@ CTTypesetterRef CTTypesetterCreateWithAttributedStringAndOptions(CFAttributedStr
 	ts->options = (options == NULL) ? NULL : (CFDictionaryRef)CFRetain(options);
 	ts->count = n;
 	ts->mode = kCTLineBreakByWordWrapping;	/* the default, and Apple prints it beside the specifier */
+	ts->hyphenationFactor = 0.0;		/* and no hyphenation is the default the same way */
+	/* **AND THE HYPHENATION FACTOR IS READ HERE RATHER THAN INSIDE THE PARAGRAPH-STYLE BRANCH BELOW** — it is an
+	 * OPTION and the paragraph style has no specifier for it, so a string with no style at all must still be able to
+	 * ask for hyphenation. MEASURED, and this is the bug: the read was written inside that branch, so every case
+	 * with no paragraph style silently got no hyphenation and the case below measured nothing. **AND IT IS GUARDED,
+	 * because a caller with no options is the ordinary caller and `CFDictionaryGetValue` is not NULL-safe** — the
+	 * unguarded version SEGFAULTED two of this suite's own cases the moment it ran. */
+	if (options != NULL) {
+		CFTypeRef factor = CFDictionaryGetValue(options, kCTTypesetterOptionHyphenationFactor);
+
+		if (factor != NULL && CFGetTypeID(factor) == CFNumberGetTypeID()) {
+			double value = 0.0;
+
+			if (CFNumberGetValue((CFNumberRef)factor, kCFNumberDoubleType, &value) && value > 0.0) {
+				ts->hyphenationFactor = value;
+			}
+		}
+	}
 
 	/* THE PARAGRAPH STYLE'S MODE, IF THE STRING CARRIES ONE. This is the one place the settings a paragraph style
 	 * holds actually CHANGE what the library does — everything else so far has recorded them — and it is read here
@@ -358,44 +408,54 @@ CTLineRef CTTypesetterCreateLine(CTTypesetterRef typesetter, CFRange stringRange
 /* HOW FAR THE WIDTH REACHES, as an index one past the last character that fits. A GPU-less sum over the advances,
  * which is why this tier can answer it at all: measuring needs nothing but the numbers the creator already computed.
  * A character whose advance is ZERO always fits, so this cannot spin on a combining mark. */
+/* **HOW WIDE ONE CHARACTER IS AT A GIVEN PEN POSITION, IN ONE PLACE.** A step is the glyph's advance PLUS the pair's
+ * adjustment, or — for a tab — the distance to the next stop, which depends on where the pen already is. TWO WALKS
+ * NEED IT NOW (`ct_ts_fit` forward, and the hyphenation test measuring a candidate break), and a second copy of these
+ * rules would be a second chance to disagree with `CTLine`'s own positions.
+ *
+ * **AND A TAB TAKES THE FIT TO ITS STOP.** A tab's advance is not in `ts->advances` — it depends on where the pen
+ * already is — so this computes it the same way `CTLine` does, from the same stops, and the two agree about where the
+ * line ends. **AND THE PAIR'S ADJUSTMENT IS INCLUDED, BECAUSE THE LINE'S OWN WIDTH HAS IT AND THE TWO MUST AGREE**:
+ * an advance is what a glyph asks for on its own, a KERN is what the font says about the two glyphs TOGETHER, and
+ * `CTLine` applies it. A box has no glyph to adjust, so the kern is skipped. */
+static double ct_ts_step(const struct __CTTypesetter *ts, CFIndex start, CFIndex i, double x)
+{
+	if (ts->chars[i] == '\t') {
+		double stop = x;
+		CFIndex t;
+
+		for (t = 0; ts->tabs != NULL && t < CFArrayGetCount(ts->tabs); t++) {
+			CTTextTabRef tab = (CTTextTabRef)CFArrayGetValueAtIndex(ts->tabs, t);
+			double location = (tab != NULL) ? CTTextTabGetLocation(tab) : 0.0;
+
+			if (location > x) {
+				stop = location;
+				break;
+			}
+		}
+		if (stop == x && ts->tabInterval > 0.0) {
+			stop = (floor(x / ts->tabInterval) + 1.0) * ts->tabInterval;
+		}
+		return stop - x;
+	}
+	{
+		double step = ts->advances[i].width;
+
+		if (i > start && !(ts->isBox != NULL && (ts->isBox[i - 1] || ts->isBox[i]))) {
+			step += (double)CTFontGetKerningBetweenGlyphs(ts->font, ts->glyphs[i - 1], ts->glyphs[i]);
+		}
+		return step;
+	}
+}
+
 static CFIndex ct_ts_fit(const struct __CTTypesetter *ts, CFIndex start, double width)
 {
 	double x = 0.0;
 	CFIndex i = start;
 
 	while (i < ts->count) {
-		double step;
+		double step = ct_ts_step(ts, start, i, x);
 
-		/* **AND A TAB TAKES THE FIT TO ITS STOP.** A tab's advance is not in `ts->advances` — it depends on where the
-		 * pen already is — so the fit computes it the same way `CTLine` does, from the same stops, and the two agree
-		 * about where the line ends. */
-		if (ts->chars[i] == '\t') {
-			double stop = x;
-			CFIndex t;
-
-			for (t = 0; ts->tabs != NULL && t < CFArrayGetCount(ts->tabs); t++) {
-				CTTextTabRef tab = (CTTextTabRef)CFArrayGetValueAtIndex(ts->tabs, t);
-				double location = (tab != NULL) ? CTTextTabGetLocation(tab) : 0.0;
-
-				if (location > x) {
-					stop = location;
-					break;
-				}
-			}
-			if (stop == x && ts->tabInterval > 0.0) {
-				stop = (floor(x / ts->tabInterval) + 1.0) * ts->tabInterval;
-			}
-			step = stop - x;
-		} else {
-			step = ts->advances[i].width;
-			/* **AND THE PAIR'S ADJUSTMENT, BECAUSE THE LINE's OWN WIDTH HAS IT AND THE TWO MUST AGREE.** An advance
-			 * is what a glyph asks for on its own; a KERN is what the font says about the two glyphs TOGETHER, and
-			 * `CTLine` applies it (see `CTLine.c`). A typesetter that measured without it would break a line at a
-			 * DIFFERENT place than the line then draws it. A box has no glyph to adjust, so the kern is skipped. */
-			if (i > start && !(ts->isBox != NULL && (ts->isBox[i - 1] || ts->isBox[i]))) {
-				step += (double)CTFontGetKerningBetweenGlyphs(ts->font, ts->glyphs[i - 1], ts->glyphs[i]);
-			}
-		}
 		if (x + step > width) {
 			break;
 		}
@@ -403,6 +463,37 @@ static CFIndex ct_ts_fit(const struct __CTTypesetter *ts, CFIndex start, double 
 		i++;
 	}
 	return i;
+}
+
+/* **THE WIDTH OF THE TEXT FROM `start` UP TO `end`**, by the same steps the fit walks — the measurement the
+ * hyphenation test needs, which is "how full would this line be if it ended here". */
+static double ct_ts_width_to(const struct __CTTypesetter *ts, CFIndex start, CFIndex end)
+{
+	double x = 0.0;
+	CFIndex i = start;
+
+	while (i < end && i < ts->count) {
+		x += ct_ts_step(ts, start, i, x);
+		i++;
+	}
+	return x;
+}
+
+/* **THE WIDTH OF THE HYPHEN A HYPHENATED LINE DRAWS, WHICH IS PART OF WHETHER IT FITS.** A break inside a word is
+ * only a break if the mark that says so fits with it — `U+2010 HYPHEN`, the character `CFHyphenation.c` suggests and
+ * the one the AppKit's layout manager draws — and a typesetter that ignored it would hand back a line that overflows
+ * by exactly one glyph. A face with no glyph for it answers zero, which is the honest answer: nothing is drawn. */
+static double ct_ts_hyphen_width(const struct __CTTypesetter *ts)
+{
+	UniChar hyphen = 0x2010;
+	CGGlyph glyph = 0;
+	CGSize advance = CGSizeMake(0.0, 0.0);
+
+	if (!CTFontGetGlyphsForCharacters(ts->font, &hyphen, &glyph, 1)) {
+		return 0.0;
+	}
+	(void)CTFontGetAdvancesForGlyphs(ts->font, kCTFontHorizontalOrientation, &glyph, &advance, 1);
+	return (double)advance.width;
 }
 
 /* THE HARD BREAK, WHICH COMES FIRST AND WINS WHEREVER IT IS. Apple's sentence puts the two triggers side by side
@@ -419,6 +510,36 @@ static CFIndex ct_ts_hard_break(const struct __CTTypesetter *ts, CFIndex start)
 		}
 	}
 	return 0;
+}
+
+/* **THE LAST HYPHENATION POINT BEFORE `limit` THAT STILL FITS, OR -1.** The resource is Core Foundation's — the same
+ * `CFStringGetHyphenationLocationBeforeIndex` the AppKit's layout manager asks, over the system's dictionary — so
+ * there is ONE implementation of Liang's algorithm and one set of patterns behind every hyphen in this tree.
+ *
+ * **AND "FITS" INCLUDES THE HYPHEN.** The line takes the text up to the point AND the mark that says the word
+ * continues, so a point whose text fits but whose hyphen does not is not a point — a typesetter that ignored the
+ * hyphen would hand back a line that overflows by exactly one glyph. The locale is the process's, which is what the
+ * Core Foundation door defaults to and what the AppKit's own door records as its reading. */
+static CFIndex ct_ts_hyphenation_point(const struct __CTTypesetter *ts, CFIndex start, CFIndex limit, double width)
+{
+	CFStringRef text;
+	CFIndex point;
+
+	if (ts->hyphenationFactor <= 0.0 || ts->string == NULL || limit <= start) {
+		return -1;
+	}
+	text = CFAttributedStringGetString(ts->string);
+	if (text == NULL) {
+		return -1;
+	}
+	point = CFStringGetHyphenationLocationBeforeIndex(text, limit, CFRangeMake(start, limit - start), 0, NULL, NULL);
+	if (point == kCFNotFound || point <= start) {
+		return -1;
+	}
+	if (ct_ts_width_to(ts, start, point) + ct_ts_hyphen_width(ts) > width) {
+		return -1;
+	}
+	return point;
 }
 
 CFIndex CTTypesetterSuggestLineBreak(CTTypesetterRef typesetter, CFIndex startIndex, double width)
@@ -472,6 +593,30 @@ CFIndex CTTypesetterSuggestLineBreak(CTTypesetterRef typesetter, CFIndex startIn
 	 * differ in the way Apple names, and the case that measures them still holds — a line door that breaks at a word
 	 * boundary and a cluster door that does not. */
 	opportunity = ct_lb_break_before_utf16(ts->chars, ts->count, startIndex, fit);
+	/* **AND WHERE UAX #14 HAS NO OPINION, A HYPHENATION POINT IS THE ONLY BREAK THAT IS NOT A CUT INSIDE A WORD.**
+	 * The two cases are different questions and the answer is taken for a different reason in each:
+	 *
+	 *   - NO OPPORTUNITY AT ALL: the fallback below would cut inside a word, which is where a line must never break.
+	 *     If the caller asked for hyphenation, the hyphenation point IS the honest answer, and the zone test does not
+	 *     apply — the line is nearly FULL here, so "too empty to be worth it" cannot be what rules it out.
+	 *   - AN OPPORTUNITY THAT LEAVES THE LINE TOO EMPTY: the plain answer is legal and the line is badly filled, so
+	 *     the factor decides. That is the AppKit's own reading of the number — `lineWidth < factor * width` — and it
+	 *     is applied here in the same terms: the width the break would give up to, against the factor's share.
+	 *
+	 * MEASURED, both: a word too long for the width comes back at its hyphenation point, and the same word with the
+	 * factor at zero comes back at the overflow, which is what this door answered before any of this existed. */
+	if (ts->hyphenationFactor > 0.0) {
+		CFIndex point = ct_ts_hyphenation_point(ts, startIndex, fit, width);
+
+		if (opportunity <= startIndex) {
+			if (point > startIndex) {
+				return point - startIndex;
+			}
+		} else if (point > opportunity
+			   && ct_ts_width_to(ts, startIndex, opportunity) < ts->hyphenationFactor * width) {
+			return point - startIndex;
+		}
+	}
 	if (opportunity > startIndex) {
 		return opportunity - startIndex;
 	}

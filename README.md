@@ -871,3 +871,27 @@ the user's decision is that they stay owed), the ATS pair (permanent), and the f
   specification's own `SA` tailoring exist for. "UAX #14 is implemented" invites the opposite assumption, so the
   engine's header, the typesetter's header and the typesetter's source each say it in words; the suite asserts the
   Hangul rule instead, because a case that asserted a difference for Thai would be asserting the fallback.
+- **AND HYPHENATION REACHES THE ENGINE, BEHIND AN EXPLICIT OPTION.** `kCTTypesetterOptionHyphenationFactor` is **this
+  tier's OWN key** — Apple declares two typesetter options and this is not one of them — and the reasoning is at the
+  declaration: the SETTING is AppKit's (`NSParagraphStyle -hyphenationFactor`; `CTParagraphStyle` has no specifier for
+  it in any version), the RESOURCE is Core Foundation's (`CFStringGetHyphenationLocationBeforeIndex`, which the layout
+  manager already asks), and a typesetter that can hyphenate needs a channel Core Text does not provide — the options
+  dictionary is the surface built for exactly that.
+- **AND THE ALTERNATIVE WAS REFUSED RATHER THAN OVERLOOKED: `SuggestLineBreak` MUST NOT ALWAYS HYPHENATE.** Its answer
+  would depend on the MACHINE — a `hyph_en_US.dic` present here and absent there breaks the same string at a different
+  character — and it would change the meaning of a door Apple documents, for callers that asked for nothing. A door
+  whose answer changes with the machine is the one thing a layout engine must not have, so the factor is the opt-in
+  and zero is the default. MEASURED, each case a PAIR because the claim is the difference: `hyphenation` at a
+  four-character width breaks at the overflow **4** with no factor and at the hyphenation point **2** with one; `the
+  hyphenation` at an eight-character width breaks after the space at **4** with no factor and after **6** with one,
+  because the space leaves the line only half full and the factor's zone says hyphenate; and the CLUSTER door ignores
+  the option entirely, answering the fit — **4** and **8** — since it reads no paragraph style at all.
+- **AND TWO BUGS OF MY OWN WERE FOUND BY THE SUITE RATHER THAN BY READING, BOTH WORTH RECORDING.** The factor was
+  first READ INSIDE THE PARAGRAPH-STYLE BRANCH, so a string with no style silently got no hyphenation and the new case
+  measured nothing; and the read was UNGUARDED, so `CFDictionaryGetValue(NULL, …)` **SEGFAULTED two of this suite's
+  own cases** the moment it ran. A caller passing no options is the ordinary caller, and it took a measurement to
+  notice.
+- **AND WHAT IS STILL A DUPLICATION IS NAMED HERE RATHER THAN LEFT**: the AppKit's layout manager computes its own
+  hyphenated break (`cg_hyphenatedLineForRange:`, applying the same zone test and drawing the hyphen) instead of
+  passing this option through. Moving it is the next slice, and the case above is what makes the move safe — the
+  typesetter's answer is now measurable on its own.

@@ -18,7 +18,12 @@
  * LINE-BREAKING RULES (UAX #14) ARE IMPLEMENTED AND CALLED** (`CTLineBreak.c`, over the UCD's `Line_Break` property,
  * at the UCD's own conformance score: 10,274 of 10,274 of `LineBreakTest.txt`), so the boundary a wrapped line backs
  * off to is the last one the RULES allow rather than the last SPACE — MEASURED, `abc-defghij` now breaks after the
- * hyphen instead of at the overflow. HYPHENATION is still not attempted. **AND THE SCRIPTS UAX #14 ITSELF SENDS TO A
+ * hyphen instead of at the overflow. **AND HYPHENATION IS IMPLEMENTED TOO, OPT-IN**: `kCTTypesetterOptionHyphenationFactor`
+ * (this tier's own key, declared below, because the factor is AppKit's property) lets the breaker take a hyphenation
+ * point where UAX #14 has no opportunity or where the legal break would leave the line too empty — and a caller that
+ * passes no options gets exactly the answer it always got, which is the point. MEASURED: `hyphenation` at a
+ * four-character width breaks at the overflow **4** with no factor and at the hyphenation point **2** with one.
+ * **AND THE SCRIPTS UAX #14 ITSELF SENDS TO A
  * DICTIONARY ARE NOT WRAPPED**: `SA` — Thai, Lao, Khmer and friends, "require morphological analysis to determine
  * break opportunities" — resolves to `AL`, whose own rule forbids a break inside an alphabetic run, so such a run is
  * unbreakable here and the answer is the word-doesn't-fit fallback. That is the specification's answer rather than
@@ -60,6 +65,24 @@ CFTypeID CTTypesetterGetTypeID(void);
  * forces an embedding level (a `CFNumberRef`, default unset). */
 extern const CFStringRef kCTTypesetterOptionDisableBidiProcessing;
 extern const CFStringRef kCTTypesetterOptionForcedEmbeddingLevel;
+
+/* **AND A THIRD KEY, WHICH IS THIS TIER'S OWN — RECORDED HERE BECAUSE APPLE DECLARES TWO AND THIS IS NOT ONE OF
+ * THEM.** Its value is a `CFNumber`: **0.0 means no hyphenation**, and the number is the share of the width a line
+ * must be able to fill before hyphenating is worth it — the hyphenation ZONE, which is how `NSLayoutManager` reads
+ * `NSParagraphStyle -hyphenationFactor`, the property this key carries into the engine.
+ *
+ * WHY IT HAS TO EXIST. The setting is AppKit's: `NSParagraphStyle -hyphenationFactor` is a paragraph property,
+ * `CTParagraphStyle` has no specifier for it in any version, and on the platform this library follows the layout
+ * manager is what reads the factor and asks `CFStringGetHyphenationLocationBeforeIndex`. A TYPESETTER that can
+ * hyphenate therefore needs a channel for that setting, Core Text provides none, and the options dictionary is the
+ * surface built for it — a dictionary, with Apple's own two keys as precedent.
+ *
+ * **AND THE ALTERNATIVE WAS REFUSED RATHER THAN OVERLOOKED: THIS DOOR MUST NOT ALWAYS HYPHENATE.** Two reasons, both
+ * properties of a published door. Its answer would depend on the MACHINE — a dictionary present here and absent
+ * there would break the same string at a different character — and it would change the meaning of a door Apple
+ * documents, for callers that asked for nothing. **A DOOR WHOSE ANSWER CHANGES WITH THE MACHINE IS THE ONE THING A
+ * LAYOUT ENGINE MUST NOT HAVE**, so hyphenation is opted into, and the factor is the opt-in. */
+extern const CFStringRef kCTTypesetterOptionHyphenationFactor;
 
 /* ---------------------------------------------------------------------------------------
  * CREATION. Both doors take the SAME string and differ only in whether the caller has options to give.
