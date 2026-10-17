@@ -969,6 +969,25 @@ the user's decision is that they stay owed), the ATS pair (permanent), and the f
   it. And "a right-to-left paragraph's run reports RightToLeft" is now answered by `abc` being raised to level 2 by I2 —
   an EVEN level, drawn left to right — so its status is none; the paragraph's direction is measured in a NEUTRAL run
   instead, which takes the paragraph's level and reports it directly.
+- **AND BIDI IS NOW MEASURED THE WAY LINE BREAKING WAS — THE ASYMMETRY THE LAST STOCK-TAKE NAMED, CLOSED.**
+  `BidiCharacterTest.txt` (Unicode 15.1.0) states 91,707 single-paragraph cases with their resolved paragraph level,
+  their resolved level per character and their visual order; the engine is driven through the SAME phase order the
+  line uses (P2/P3, X1-X8, W1-W7, N0, N1/N2, I1/I2, L1, L2) and **91,691 agree, 16 do not.** The suite runs a
+  committed table of 19 cases — the shortest the data has for each feature the engine has a code path for — and the
+  whole 6.8 MB file whenever `BIDI_TEST` names it, which is also how the number above can be reproduced.
+  **AND IT FOUND TWO RULES THE ENGINE HAD READ PAST, both now fixed and both named where they are implemented**:
+  X5a/X6a's last sentence (an isolate initiator and its PDI take the OVERRIDE's class when one is in effect), and
+  N0's last sentence (combining marks following a paired bracket take the bracket's new direction — and finding them
+  needs the ORIGINAL class, because W1 has already rewritten it). A hand-written anchor test could not have found
+  either.
+- **AND THE 16 THAT REMAIN ARE ONE DEFECT, RECORDED RATHER THAN SMOOTHED OVER.** X9 removes embedding, override and BN
+  characters; the level-run walk builds X10's sequences over the raw arrays, so a removed character whose level
+  differs from its neighbours splits a run. The cost is visible and small: brackets spanning an embedding, and a Latin
+  word followed by an embedding and then digits, where W7's backward search stops at a boundary that is not there in
+  the text. Two cheap fixes were tried and MEASURED WORSE (85,842 and 85,847 of 91,707 — giving the removed characters
+  the preceding level, and letting them stay inside a run), so the suite now ASSERTS the open count (`bad == 16`) and
+  the real fix — a sequence pass over a compacted index space — is a cut of its own, named in `CTBidi_internal.h` and
+  in `fn_sequences`.
 - **AND THAI HAS ITS DICTIONARY NOW — THE `SA` TAILORING'S ENGINE, BUILT AND MEASURED, NOT YET WIRED.** UAX #14 §6.1
   says `SA` "require[s] morphological analysis", and LB1 resolves it to `AL` for want of that analysis, so a Thai
   sentence was ONE unbreakable word here. `CTLineBreakThai.c` is that analysis: it reads **libthai's** word-break trie

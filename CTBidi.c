@@ -162,6 +162,7 @@ bool ct_bidi_explicit_levels(const UniChar *text, CFIndex count, int paragraphLe
 	for (i = 0; i < count; i++) {
 		CTBidiClass bidiClass = ct_bidi_class(text[i]);
 		int currentLevel = stack[sp - 1].level;
+		CTBidiClass outerOverride = stack[sp - 1].override;
 		int newLevel = currentLevel;
 
 		levels[i] = (uint8_t)currentLevel;
@@ -208,7 +209,16 @@ bool ct_bidi_explicit_levels(const UniChar *text, CFIndex count, int paragraphLe
 			} else {
 				overflowIsolate++;
 			}
-			/* THE ISOLATE INITIATOR KEEPS ITS OWN LEVEL — the one OUTSIDE the isolate. X9 does not remove it. */
+			/* **THE ISOLATE INITIATOR KEEPS ITS OWN LEVEL — the one OUTSIDE the isolate** — and X9 does not remove
+			 * it. **AND ITS CLASS IS THE OVERRIDE'S WHEN THERE IS ONE**, which the conformance run found: X5a's own
+			 * sentence ends "If the directional override status of the last entry on the directional status stack is
+			 * not neutral, reset the current character type from RLI to L or R accordingly." Without that reset the
+			 * initiator stays a neutral, and a neutral between two strong characters of the other direction takes
+			 * THEIR direction instead of the override's — MEASURED, the RLO-isolate-PDI cases in
+			 * `BidiCharacterTest.txt` came out one level too deep. */
+			if (outerOverride != kCTBidiON) {
+				classes[i] = outerOverride;
+			}
 			break;
 		}
 		case kCTBidiPDI: {
@@ -224,8 +234,12 @@ bool ct_bidi_explicit_levels(const UniChar *text, CFIndex count, int paragraphLe
 				}
 				validIsolate--;
 			}
-			/* AND THE PDI CARRIES THE LEVEL IN EFFECT AFTER THE ISOLATE CLOSES. */
+			/* AND THE PDI CARRIES THE LEVEL IN EFFECT AFTER THE ISOLATE CLOSES — and, like the initiator, the
+			 * OVERRIDE'S class when the entry it closes back to has one (X6a's own last sentence). */
 			levels[i] = (uint8_t)stack[sp - 1].level;
+			if (stack[sp - 1].override != kCTBidiON) {
+				classes[i] = stack[sp - 1].override;
+			}
 			break;
 		}
 		case kCTBidiPDF: {
@@ -520,7 +534,13 @@ static CFIndex fn_sequences(const CTBidiClass *classes, const uint8_t *levels, C
 			match[i] = open;
 		}
 	}
-	/* THE LEVEL RUNS. */
+	/* THE LEVEL RUNS. **AND A RUN IS CUT WHERE THE LEVEL CHANGES, INCLUDING AT A CHARACTER X9 REMOVED** — which is a
+	 * DEFECT this file records rather than one it hides: those characters are "not there" for the rules, so a run
+	 * must not end at one, but ending one there is what this walk does, and 16 of `BidiCharacterTest.txt`'s 91,707
+	 * cases depend on it. Making them transparent was tried twice and MEASURED WORSE (85,842 both ways — once by
+	 * giving them the preceding character's level, once by letting them stay inside a run), because a run list built
+	 * over indices cannot express "contiguous except for the characters that are not there". The honest fix is to
+	 * build the sequences over a COMPACTED index space and map back, which is a cut of its own. */
 	for (i = 0; i < count; ) {
 		CFIndex j = i + 1;
 
@@ -934,8 +954,23 @@ void ct_bidi_resolve_brackets(const UniChar *text, CTBidiClass *classes, const u
 			}
 			/* N0.d: NOTHING INSIDE IS STRONG, so the brackets stay neutral and N1/N2 settle them. */
 			if (resolved != kCTBidiON) {
+				CFIndex trailing;
+
 				classes[idx[open]] = resolved;
 				classes[idx[close]] = resolved;
+				/* **AND THE COMBINING MARKS THAT FOLLOW THE PAIR TAKE ITS DIRECTION** — N0's own closing sentence:
+				 * "Any number of characters that had original bidirectional character type NSM prior to the application
+				 * of W1 that immediately follow a paired bracket which changed to L or R under N0 should change to
+				 * match the type of the pair." **THE ORIGINAL TYPE IS READ FROM THE TEXT, because W1 has already
+				 * rewritten the class** — an NSM in `classes` looks exactly like the character before it, so a test
+				 * on the resolved class finds nothing. MEASURED: this is the whole of a 22-case family in
+				 * `BidiCharacterTest.txt`, every one of them a combining mark after a closing bracket. */
+				for (trailing = close + 1; trailing < n; trailing++) {
+					if (ct_bidi_class(text[idx[trailing]]) != kCTBidiNSM) {
+						break;
+					}
+					classes[idx[trailing]] = resolved;
+				}
 			}
 		}
 		free(idx);

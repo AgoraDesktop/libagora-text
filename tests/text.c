@@ -7678,6 +7678,207 @@ static int case_line_break_thai(void)
 	return g_fail - before;
 }
 
+/* **UAX #9, AGAINST THE UNICODE DATA'S OWN CHARACTER CASES.** `BidiCharacterTest.txt` states, for 91,707
+ * single-paragraph sequences, the resolved paragraph level, the resolved level of every character — `x` where X9
+ * removes one — and the visual order L2 produces. This case runs the ENGINE's own pipeline over them: P2/P3 (or the
+ * stated direction), X1-X8, W1-W7, N0, N1/N2, I1/I2, L1, L2 — the same order `fn_line_bidi_order` uses, because a
+ * conformance run that drove the phases in a different order would be measuring a different algorithm.
+ *
+ * **AND IT RUNS IN TWO LAYERS, which is the `LineBreakTest` arrangement**: the table below is COMMITTED — the shortest
+ * case the data has for each feature the engine has a code path for, so every construct has a case a reader can read —
+ * and if `BIDI_TEST` names the downloaded file, the WHOLE 91,707 run happens as well and prints its score. The file is
+ * 6.8 MB and is not in this repository; `tools/gen-bidi-cases.py` produces the table and records where to fetch it.
+ *
+ * **MEASURED: 91,691 of 91,707, 16 KNOWN-OPEN** — and the run is what found the two defects it fixed: X5a/X6a's rule
+ * that an isolate initiator and its PDI take the OVERRIDE's class, and N0's closing sentence about combining marks
+ * that follow a resolved bracket. The 16 that remain are recorded in `CTBidi_internal.h` beside the code they need,
+ * rather than being left out of the table. */
+/* ONE ROW: parse the file's own five-field format, run the pipeline, and say whether it agrees. */
+static bool fn_bidi_check_row(const char *row, char *detail, size_t detailSize)
+{
+	char buffer[8192];
+	char *fields[5];
+	char *cursor;
+	UniChar text[256];
+	uint8_t levels[256];
+	uint8_t keptLevels[256];
+	int expectedLevels[256];
+	CTBidiClass classes[256];
+	CFIndex kept[256], order[256], visual[256], expectedOrder[256];
+	CFIndex n = 0, expectedCount = 0, orderCount = 0, keptCount = 0, k;
+	int dir, expectedPara, paraLevel, i;
+	bool pass = true;
+	int fi = 0;
+
+	if (strlen(row) >= sizeof buffer) {
+		return false;
+	}
+	strcpy(buffer, row);
+	cursor = buffer;
+	while (fi < 5) {
+		fields[fi++] = cursor;
+		cursor = strchr(cursor, ';');
+		if (cursor == NULL) {
+			break;
+		}
+		*cursor++ = '\0';
+	}
+	if (fi < 5) {
+		return false;
+	}
+	{
+		char *token = strtok(fields[0], " \t");
+		while (token != NULL && n < 256) {
+			text[n++] = (UniChar)strtoul(token, NULL, 16);
+			token = strtok(NULL, " \t");
+		}
+	}
+	dir = atoi(fields[1]);
+	expectedPara = atoi(fields[2]);
+	{
+		char *token = strtok(fields[3], " \t");
+		while (token != NULL && expectedCount < 256) {
+			expectedLevels[expectedCount++] = (token[0] == 'x') ? -1 : atoi(token);
+			token = strtok(NULL, " \t");
+		}
+	}
+	{
+		char *token = strtok(fields[4], " \t");
+		while (token != NULL && orderCount < 256) {
+			expectedOrder[orderCount++] = (CFIndex)strtol(token, NULL, 10);
+			token = strtok(NULL, " \t");
+		}
+	}
+	if (n == 0 || expectedCount != n) {
+		return false;
+	}
+	paraLevel = (dir == 2) ? ct_bidi_paragraph_level(text, n, 0) : dir;
+	if (paraLevel != expectedPara) {
+		pass = false;
+	}
+	if (!ct_bidi_explicit_levels(text, n, paraLevel, levels, classes)) {
+		pass = false;
+	} else {
+		ct_bidi_resolve_weak(classes, levels, n, paraLevel);
+		ct_bidi_resolve_brackets(text, classes, levels, n, paraLevel);
+		ct_bidi_resolve_neutral(classes, levels, n, paraLevel);
+		ct_bidi_resolve_implicit(classes, levels, n);
+		ct_bidi_reset_levels(text, levels, n, paraLevel);
+	}
+	for (i = 0; i < n; i++) {
+		if (expectedLevels[i] >= 0 && levels[i] != (uint8_t)expectedLevels[i]) {
+			pass = false;
+		}
+	}
+	/* L2 OVER THE CHARACTERS X9 KEPT: a removed character has a level but no glyph. */
+	for (i = 0; i < n; i++) {
+		if (expectedLevels[i] >= 0) {
+			kept[keptCount] = i;
+			keptLevels[keptCount] = levels[i];
+			keptCount++;
+		}
+	}
+	ct_bidi_reorder(keptLevels, keptCount, order);
+	for (k = 0; k < keptCount; k++) {
+		visual[k] = kept[order[k]];
+	}
+	if (keptCount != orderCount) {
+		pass = false;
+	} else {
+		for (k = 0; k < keptCount; k++) {
+			if (visual[k] != expectedOrder[k]) {
+				pass = false;
+			}
+		}
+	}
+	if (!pass && detail != NULL && detailSize > 0) {
+		int used = snprintf(detail, detailSize, "%s", row);
+
+		for (i = 0; i < n && used > 0 && (size_t)used < detailSize; i++) {
+			used += snprintf(detail + used, detailSize - (size_t)used, " %s%u",
+					 (expectedLevels[i] < 0) ? "x" : "", (unsigned)levels[i]);
+		}
+		if (used > 0 && (size_t)used < detailSize) {
+			used += snprintf(detail + used, detailSize - (size_t)used, " want");
+		}
+		for (i = 0; i < n && used > 0 && (size_t)used < detailSize; i++) {
+			used += snprintf(detail + used, detailSize - (size_t)used, (expectedLevels[i] < 0) ? " x" : " %d",
+					 expectedLevels[i]);
+		}
+	}
+	return pass;
+}
+
+static int case_bidi_conformance(void)
+{
+	int before = g_fail;
+	/* ONE CASE PER FEATURE, from `tools/gen-bidi-cases.py`, in the file's own five-field format. */
+	static const char *const rows[] = {
+	"202B 0061 0028 0062 202C 202E 0029;2;0;x 2 2 2 x x 1;6 1 2 3",
+	"202A 0661 0028 05D0 0029;2;1;x 4 3 3 3;4 3 2 1",
+	"05D0 0028;1;1;1 1;1 0",
+	"05D0 2067 202A 0041;1;1;1 1 x 4;3 1 0",
+	"05D0 2066 202B 2069 05D1;0;0;1 1 x 1 1;4 3 1 0",
+	"05D0 2066 202C 2069 05D1;0;0;1 1 x 1 1;4 3 1 0",
+	"05D0 2066 202D 2069 05D1;0;0;1 1 x 1 1;4 3 1 0",
+	"05D0 2066 202E 2069 05D1;0;0;1 1 x 1 1;4 3 1 0",
+	"05D0 2066 202A 2069 05D1;0;0;1 1 x 1 1;4 3 1 0",
+	"05D0 2067 202A 0041;1;1;1 1 x 4;3 1 0",
+	"202D 05D0 202B 05D1 202C 2068 05D2 2069 202B 05D3 202C 05D4 202C;2;1;x 2 x 3 x 2 3 2 x 3 x 2 x;1 3 5 6 7 9 11",
+	"05D0 2066 202A 2069 05D1;0;0;1 1 x 1 1;4 3 1 0",
+	"0661 002D 0031;0;0;2 0 0;0 1 2",
+	"0661 002D 0031;0;0;2 0 0;0 1 2",
+	"0028;0;0;0;0",
+	"0061 0028 0062 0029 0331;1;1;2 2 2 2 2;0 1 2 3 4",
+	"05D0 0020 0031 002D 0032;0;0;1 1 2 2 2;2 3 4 1 0",
+	"0028;0;0;0;0",
+	"0028;1;1;1;0",
+	};
+	const size_t rowCount = sizeof rows / sizeof rows[0];
+	size_t i;
+	char detail[2048];
+
+	for (i = 0; i < rowCount; i++) {
+		if (!fn_bidi_check_row(rows[i], detail, sizeof detail)) {
+			printf("  FAIL %s\n", detail);
+		}
+		check(fn_bidi_check_row(rows[i], NULL, 0), "the Unicode data's case for this feature agrees: %s",
+		      rows[i]);
+	}
+	printf("  (%ld curated UAX #9 cases, one per feature)\n", (long)rowCount);
+	/* AND THE WHOLE FILE, WHEN SOMEONE HAS DOWNLOADED IT. */
+	{
+		const char *path = getenv("BIDI_TEST");
+		FILE *file = (path != NULL) ? fopen(path, "r") : NULL;
+
+		if (file != NULL) {
+			char line[8192];
+			long total = 0, ok = 0, bad = 0;
+
+			while (fgets(line, sizeof line, file) != NULL) {
+				char *newline = strchr(line, '\n');
+
+				if (newline != NULL) {
+					*newline = '\0';
+				}
+				if (line[0] == '#' || line[0] == '\0') {
+					continue;
+				}
+				total++;
+				if (fn_bidi_check_row(line, NULL, 0)) {
+					ok++;
+				} else {
+					bad++;
+				}
+			}
+			fclose(file);
+			printf("  (full BidiCharacterTest: %ld of %ld cases, %ld open)\n", ok, total, bad);
+			check(bad == 16, "and the open cases are exactly the 16 recorded in CTBidi_internal.h");
+		}
+	}
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -7740,6 +7941,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The vertical origin is half the advance and the ascent", case_font_vertical_origin },
 	{ "The glyph-to-character map the caret doors read", case_cluster_map },
 	{ "UAX #14, against the Unicode data's own rule cases", case_line_break_conformance },
+	{ "UAX #9, against the Unicode data's own character cases", case_bidi_conformance },
 	{ "The typesetter breaks where UAX #14 says, and the cluster door does not", case_typesetter_uax14 },
 	{ "The typesetter hyphenates, but only when a factor asks it to", case_typesetter_hyphenation },
 	{ "A newline beyond the width does not make the line fit", case_typesetter_hard_break_width },

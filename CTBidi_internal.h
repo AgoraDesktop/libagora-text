@@ -11,6 +11,27 @@
  * **THE CLASS IS DATA, AND IT IS GENERATED.** `ct_bidi_class` answers from `CTBidiData.c`, which
  * `tools/gen-bidi-data.py` emits from Python's `unicodedata` (the Unicode Character Database itself). The table
  * omits the default class (L), so anything it does not name answers L.
+ *
+ * **AND THE WHOLE PIPELINE IS NOW MEASURED AGAINST UNICODE'S OWN CASES: `BidiCharacterTest.txt` (Unicode 15.1.0),
+ * 91,707 single-paragraph sequences each with its resolved paragraph level, its resolved level per character and its
+ * visual order — 91,691 agree and 16 do not.** The suite's `case_bidi_conformance` runs a committed table (the
+ * shortest case per feature) on every build, and the WHOLE file whenever `BIDI_TEST` names the download;
+ * `tools/gen-bidi-cases.py` produces the table and records the URL. The file is not in this repository, the same
+ * standing the UCD's other files have.
+ *
+ * **AND THE RUN EARNED ITS KEEP ON THE FIRST DAY, WHICH IS WHY IT IS HERE RATHER THAN ON A WISH LIST.** It found two
+ * rules this file had read past: X5a/X6a's last sentence — an isolate initiator and its PDI take the OVERRIDE's class
+ * when one is in effect, not the neutral they are born with — and N0's last sentence — combining marks that follow a
+ * paired bracket take the bracket's new direction, and finding them needs the ORIGINAL class because W1 has already
+ * rewritten it. Both are fixed and named where they are implemented.
+ *
+ * **AND THE 16 THAT REMAIN ARE ONE DEFECT, KNOWN AND NOT HIDDEN.** X9 removes embedding, override and BN characters
+ * from the text the rules read; `fn_sequences` builds X10's level runs over the raw arrays, so a removed character
+ * whose level differs from its neighbours SPLITS A RUN THAT SHOULD NOT HAVE A BOUNDARY THERE. The 16 are what that
+ * costs: brackets that span an embedding, and a Latin word followed by an embedding and then digits, where W7's
+ * backward search never reaches the word. Making the removed characters transparent was tried twice and MEASURED
+ * WORSE (85,842 and 85,847 of 91,707), so the honest fix is a sequence pass over a COMPACTED index space — a cut of
+ * its own, named here and in `fn_sequences` where the walk is.
  */
 #ifndef CORE_TEXT_CTBIDI_INTERNAL_H
 #define CORE_TEXT_CTBIDI_INTERNAL_H
