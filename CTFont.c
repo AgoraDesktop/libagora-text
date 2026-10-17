@@ -533,6 +533,21 @@ static bool ct_accept_covers(CTFontRef candidate, void *info)
  * in this tier is the caller's own `kCTFontCascadeListAttribute` if the font carries one and the REGISTRY
  * otherwise -- the walk above -- in the tier's order. Apple's cascade list is a system property with an order
  * nobody prints, which is the same wall the matching tier hit and the same recorded answer. */
+/* **THE PRIVATE USE AREA IS NEVER SUBSTITUTED, AND THAT IS BOTH THE CORRECT ANSWER AND THE FAST ONE.** A code
+ * point in U+E000..U+F8FF means whatever THE FONT says it means, so no other face's glyph is a substitute for it;
+ * Unicode's own rule is that Private Use code points are not interoperable, and Apple's cascade does not fall back
+ * for them either — the character stays in the original face and draws `.notdef`.
+ *
+ * MEASURED, and this is why it exists: drawing U+F700 — the up arrow FUNCTION KEY, which a menu writes as the key
+ * equivalent for Command-Up — took **8.2 seconds per draw** and inked the wrong glyph, because the search below
+ * enumerates EVERY installed font and loads each one to test coverage. A menu with one such row took sixteen
+ * seconds to paint, and a menu bar is full of function-key shortcuts.
+ */
+static bool ct_is_private_use(UniChar c)
+{
+	return c >= 0xE000 && c <= 0xF8FF;
+}
+
 CTFontRef CTFontCreateForString(CTFontRef currentFont, CFStringRef string, CFRange range)
 {
 	const struct __CTFont *original = (const struct __CTFont *)currentFont;
@@ -573,6 +588,22 @@ CTFontRef CTFontCreateForString(CTFontRef currentFont, CFStringRef string, CFRan
 		free(characters);
 		free(glyphs);
 		return (CTFontRef)CFRetain(currentFont);	/* Apple's own first half, word for word */
+	}
+	/* AND A STRING THAT IS ENTIRELY PRIVATE USE IS ANSWERED AT ONCE, WITH NO FACE: the caller keeps its own, which
+	 * draws `.notdef` — the honest answer, and the one that does not walk the font list. */
+	{
+		CFIndex private_use = 0;
+
+		for (i = 0; i < asked.length; i++) {
+			if (ct_is_private_use(characters[i])) {
+				private_use++;
+			}
+		}
+		if (private_use == asked.length) {
+			free(characters);
+			free(glyphs);
+			return NULL;
+		}
 	}
 	want.characters = characters;
 	want.count = asked.length;
