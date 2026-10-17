@@ -81,7 +81,16 @@ extern const CFStringRef kCTTypesetterOptionForcedEmbeddingLevel;
  * properties of a published door. Its answer would depend on the MACHINE — a dictionary present here and absent
  * there would break the same string at a different character — and it would change the meaning of a door Apple
  * documents, for callers that asked for nothing. **A DOOR WHOSE ANSWER CHANGES WITH THE MACHINE IS THE ONE THING A
- * LAYOUT ENGINE MUST NOT HAVE**, so hyphenation is opted into, and the factor is the opt-in. */
+ * LAYOUT ENGINE MUST NOT HAVE**, so hyphenation is opted into, and the factor is the opt-in.
+ *
+ * **AND THE APPKIT STILL HYPHENATES ITSELF, WHICH IS NOT A DUPLICATION WAITING TO BE REMOVED BUT THE LAYERING
+ * ANSWER.** Passing this option from `NSLayoutManager` was the obvious tidy-up and it is WRONG: **THE FACTOR IS A
+ * PARAGRAPH'S PROPERTY AND A TYPESETTER COVERS A WHOLE STRING.** The manager makes ONE typesetter for the store and
+ * reads `hyphenationFactor` from each paragraph's own style, so a single option value cannot carry two paragraphs'
+ * factors — and making a typesetter per paragraph would re-typeset the whole string per paragraph, against this
+ * type's own contract that "the whole string is typeset once". MEASURED, in the AppKit's suite: one store, two
+ * paragraphs, factors 0.0 and 1.0, and each is laid out by ITS OWN — the first breaks at its space and the second
+ * reaches into its word. A single factor could only have got one of them right. */
 extern const CFStringRef kCTTypesetterOptionHyphenationFactor;
 
 /* ---------------------------------------------------------------------------------------

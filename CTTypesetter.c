@@ -28,6 +28,13 @@
  * THE DEFAULT IS WHAT EVERY EXISTING CALLER ALREADY GOT**, which is what makes the option an option.
  * **AND WHAT IS STILL NOT DONE IS THE SCRIPTS UAX #14 SENDS TO A DICTIONARY** (`SA`: Thai, Lao, Khmer), which are one
  * unbreakable run here — said in words by `ct_lb_break_before_utf16`'s caller and by the header.
+ *
+ * **AND ONE BUG OF LONG STANDING WAS FOUND BY A CASE ABOUT SOMETHING ELSE.** The hard break was returned
+ * UNCONDITIONALLY — see `ct_ts_hard_break_reached` — so a paragraph longer than its container that ended in a newline
+ * came back as ONE LINE THAT OVERFLOWS. Every case in this suite that involved a newline used lines short enough to
+ * fit, which is exactly why it survived: the case that found it was written to measure PER-PARAGRAPH HYPHENATION in
+ * the AppKit, and its first paragraph (`go internationalization\n`, 135.9 points in a 74.7-point container) came back
+ * as a single fragment. Seven characters' worth of wrapping appeared the moment the rule was stated correctly.
  */
 #include <CoreText/CTTypesetter.h>
 
@@ -496,10 +503,23 @@ static double ct_ts_hyphen_width(const struct __CTTypesetter *ts)
 	return (double)advance.width;
 }
 
-/* THE HARD BREAK, WHICH COMES FIRST AND WINS WHEREVER IT IS. Apple's sentence puts the two triggers side by side
- * ("either by a hard break character in the stream or by filling the specified width"), and a newline does not stop
- * being one because the width had room to spare. THE BREAK CHARACTER IS PART OF THE LINE, which is what makes a line
- * built from this answer carry its newline — and what lets the caller's loop advance past it. */
+/* **THE HARD BREAK IS ONE OF TWO TRIGGERS, AND THE OTHER IS THE WIDTH — SO IT WINS ONLY IF IT IS REACHED.** Apple's
+ * sentence puts them side by side: "The line break can be triggered either by a hard break character in the stream or
+ * by FILLING THE SPECIFIED WIDTH with characters." A newline does not stop being one because the width had room to
+ * spare, which is the reading this door has always had — **BUT A NEWLINE BEYOND THE WIDTH DOES NOT MAKE THE LINE
+ * FIT**, and returning it unconditionally did exactly that: `ct_ts_hard_break` scanned forward for the first newline
+ * and this door returned it whatever the width was, so A PARAGRAPH LONGER THAN ITS CONTAINER THAT ENDS IN A NEWLINE
+ * came back as ONE LINE THAT OVERFLOWS. MEASURED, and it is what a two-paragraph case in the AppKit's suite found: a
+ * 135.9-point paragraph in a 74.7-point container was laid out as a single fragment, and the only reason no test had
+ * seen it is that every case with a newline in it used lines short enough to fit.
+ *
+ * THE BREAK CHARACTER IS STILL PART OF THE LINE, which is what makes a line built from this answer carry its newline
+ * — and what lets the caller's loop advance past it. */
+static CFIndex ct_ts_hard_break_reached(const struct __CTTypesetter *ts, CFIndex start, CFIndex hard, CFIndex fit)
+{
+	/* The newline is the LAST character of the hard break's span, so the break is reached when that character fits. */
+	return (hard > 0 && start + hard <= fit) ? hard : 0;
+}
 static CFIndex ct_ts_hard_break(const struct __CTTypesetter *ts, CFIndex start)
 {
 	CFIndex i;
@@ -550,7 +570,10 @@ CFIndex CTTypesetterSuggestLineBreak(CTTypesetterRef typesetter, CFIndex startIn
 	if (ts == NULL || startIndex < 0 || startIndex >= ts->count) {
 		return 0;
 	}
-	hard = ct_ts_hard_break(ts, startIndex);
+	/* **THE FIT IS COMPUTED BEFORE THE HARD BREAK IS BELIEVED**, because the two triggers are compared rather than
+	 * ordered — see `ct_ts_hard_break_reached`. */
+	fit = ct_ts_fit(ts, startIndex, width);
+	hard = ct_ts_hard_break_reached(ts, startIndex, ct_ts_hard_break(ts, startIndex), fit);
 	if (hard > 0) {
 		return hard;
 	}
@@ -562,7 +585,6 @@ CFIndex CTTypesetterSuggestLineBreak(CTTypesetterRef typesetter, CFIndex startIn
 	    ts->mode == kCTLineBreakByTruncatingTail || ts->mode == kCTLineBreakByTruncatingMiddle) {
 		return ts->count - startIndex;
 	}
-	fit = ct_ts_fit(ts, startIndex, width);
 	if (fit >= ts->count) {
 		return ts->count - startIndex;
 	}
@@ -637,10 +659,10 @@ CFIndex CTTypesetterSuggestClusterBreak(CTTypesetterRef typesetter, CFIndex star
 	if (ts == NULL || startIndex < 0 || startIndex >= ts->count) {
 		return 0;
 	}
-	hard = ct_ts_hard_break(ts, startIndex);
+	fit = ct_ts_fit(ts, startIndex, width);
+	hard = ct_ts_hard_break_reached(ts, startIndex, ct_ts_hard_break(ts, startIndex), fit);
 	if (hard > 0) {
 		return hard;
 	}
-	fit = ct_ts_fit(ts, startIndex, width);
 	return (fit > startIndex) ? (fit - startIndex) : 1;
 }

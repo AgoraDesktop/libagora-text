@@ -891,7 +891,20 @@ the user's decision is that they stay owed), the ATS pair (permanent), and the f
   measured nothing; and the read was UNGUARDED, so `CFDictionaryGetValue(NULL, …)` **SEGFAULTED two of this suite's
   own cases** the moment it ran. A caller passing no options is the ordinary caller, and it took a measurement to
   notice.
-- **AND WHAT IS STILL A DUPLICATION IS NAMED HERE RATHER THAN LEFT**: the AppKit's layout manager computes its own
-  hyphenated break (`cg_hyphenatedLineForRange:`, applying the same zone test and drawing the hyphen) instead of
-  passing this option through. Moving it is the next slice, and the case above is what makes the move safe — the
-  typesetter's answer is now measurable on its own.
+- **AND THE APPKIT STILL HYPHENATES ITSELF, WHICH IS THE LAYERING ANSWER RATHER THAN A DUPLICATION LEFT BEHIND.**
+  Passing this option from `NSLayoutManager` is the obvious tidy-up and it is WRONG: **THE FACTOR IS A PARAGRAPH'S
+  PROPERTY AND A TYPESETTER COVERS A WHOLE STRING.** The manager makes ONE typesetter for the store and reads
+  `hyphenationFactor` from each paragraph's own style, so one option value cannot carry two paragraphs' factors, and a
+  typesetter per paragraph would re-typeset the whole string per paragraph — against this type's own contract that
+  "the whole string is typeset once". MEASURED, in the AppKit's suite: one store, two paragraphs, factors 0.0 and 1.0,
+  and each is laid out by its OWN (the first breaks at its space, the second reaches into its word). A single factor
+  could only have got one of them right.
+- **AND THAT CASE FOUND A BUG OF LONG STANDING IN THIS FILE, WHICH IS THE PART WORTH RECORDING.** `ct_ts_hard_break`
+  scanned forward for the first newline and `SuggestLineBreak` returned it WHATEVER THE WIDTH WAS — so A PARAGRAPH
+  LONGER THAN ITS CONTAINER THAT ENDED IN A NEWLINE CAME BACK AS ONE LINE THAT OVERFLOWS. Apple's sentence is "either
+  by a hard break character in the stream or by FILLING THE SPECIFIED WIDTH", and the fix is to COMPARE the two
+  triggers instead of ordering them: the hard break wins only when it is REACHED (`start + hard <= fit`). MEASURED,
+  the case's first paragraph: **8 fragments where it had 1**, `(0,24)` becoming `(0,3) (3,9) (12,9) (21,3)`. Every
+  case in this suite that involved a newline used a line short enough to fit, which is exactly why it survived — and
+  the engine's own suite now holds both sides of the rule: a newline INSIDE the width still ends the line, newline
+  included, and one BEYOND it does not.

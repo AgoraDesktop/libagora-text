@@ -7026,6 +7026,94 @@ static int case_typesetter_hyphenation(void)
 	return g_fail - before;
 }
 
+/* **AND A NEWLINE BEYOND THE WIDTH DOES NOT MAKE THE LINE FIT.** The typesetter has two triggers — Apple's own
+ * sentence: "The line break can be triggered either by a hard break character in the stream or by FILLING THE
+ * SPECIFIED WIDTH with characters" — and this door used to return the distance to the first newline WHATEVER the
+ * width was. So a paragraph longer than its container that ENDED IN A NEWLINE came back as ONE LINE THAT OVERFLOWS,
+ * and the only reason no case had seen it is that every case with a newline in it used lines short enough to fit.
+ *
+ * **MEASURED, FOUND BY A TWO-PARAGRAPH CASE IN THE APPKIT'S SUITE RATHER THAN BY THIS ONE**, which is why it is
+ * written here too: a 135.9-point paragraph in a 74.7-point container was laid out as a single fragment. The cases
+ * below are the two sides of the rule: a newline INSIDE the width still ends the line, newline included, and one
+ * beyond it does not. */
+static int case_typesetter_hard_break_width(void)
+{
+	int before = g_fail;
+	CTFontRef font = test_font(13.0);
+	CFMutableDictionaryRef attrs = (font != NULL)
+		? CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					    &kCFTypeDictionaryValueCallBacks) : NULL;
+	double four = 0.0;
+
+	check(font != NULL, "the hard-break case has a face");
+	if (font == NULL) {
+		return g_fail - before;
+	}
+	CFDictionarySetValue(attrs, kCTFontAttributeName, font);
+	/* FOUR CHARACTERS' WIDTH, measured from the face. */
+	{
+		UniChar fourChars[] = { 'a', 'b', 'c', 'd' };
+		CFStringRef text = CFStringCreateWithCharacters(kCFAllocatorDefault, fourChars, 4);
+		CFAttributedStringRef astr = CFAttributedStringCreate(kCFAllocatorDefault, text, attrs);
+		CTLineRef line = (astr != NULL) ? CTLineCreateWithAttributedString(astr) : NULL;
+
+		if (line != NULL) {
+			four = (double)CTLineGetTypographicBounds(line, NULL, NULL, NULL);
+			CFRelease(line);
+		}
+		if (astr != NULL) {
+			CFRelease(astr);
+		}
+		if (text != NULL) {
+			CFRelease(text);
+		}
+	}
+	{
+		struct { const char *text; CFIndex expect; const char *why; } cases[] = {
+			/* THE NEWLINE IS INSIDE THE WIDTH, so it is reached and it ends the line — newline included, which
+			 * is what makes a line built from this answer carry it. */
+			{ "ab\ncdefghij", 3, "a newline inside the width ends the line, and the newline is part of it" },
+			/* THE NEWLINE IS BEYOND THE WIDTH, so the width governs: the line ends at the overflow (the last
+			 * opportunity UAX #14 allows, which for `abcdefghij` is none, so the word-doesn't-fit fallback). */
+			{ "abcdefghij\nkl", 4, "but a newline BEYOND the width does not make the line fit" },
+		};
+		size_t i;
+
+		for (i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+			CFStringRef text = CFStringCreateWithCString(kCFAllocatorDefault, cases[i].text,
+								    kCFStringEncodingUTF8);
+			CFAttributedStringRef astr = (text != NULL)
+				? CFAttributedStringCreate(kCFAllocatorDefault, text, attrs) : NULL;
+			CTTypesetterRef ts = (astr != NULL)
+				? CTTypesetterCreateWithAttributedString(astr) : NULL;
+			CFIndex answer = (ts != NULL) ? CTTypesetterSuggestLineBreak(ts, 0, four) : -1;
+			CFIndex cluster = (ts != NULL) ? CTTypesetterSuggestClusterBreak(ts, 0, four) : -1;
+
+			printf("  (note: `%s` at %g: the line door says %ld, the cluster door %ld)\n", cases[i].text,
+			       four, (long)answer, (long)cluster);
+			check(ts != NULL, "`%s` could be typeset", cases[i].text);
+			check(answer == cases[i].expect, "%s (`%s` answered %ld)", cases[i].why, cases[i].text,
+			      (long)answer);
+			/* **AND THE CLUSTER DOOR HAS THE SAME TWO TRIGGERS**, so it is held to the same rule — a door that
+			 * had the fix and a door that did not would be two answers to one question. */
+			check(cluster == answer,
+			      "and the cluster door answers the same for this text, %ld", (long)cluster);
+			if (astr != NULL) {
+				CFRelease(astr);
+			}
+			if (ts != NULL) {
+				CFRelease(ts);
+			}
+			if (text != NULL) {
+				CFRelease(text);
+			}
+		}
+	}
+	CFRelease(attrs);
+	CFRelease(font);
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -7090,6 +7178,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "UAX #14, against the Unicode data's own rule cases", case_line_break_conformance },
 	{ "The typesetter breaks where UAX #14 says, and the cluster door does not", case_typesetter_uax14 },
 	{ "The typesetter hyphenates, but only when a factor asks it to", case_typesetter_hyphenation },
+	{ "A newline beyond the width does not make the line fit", case_typesetter_hard_break_width },
 	{ "A ligature is one glyph for three characters", case_shaping_ligatures },
 	{ "A pair adjustment reaches the advances", case_shaping_kerning },
 	{ "A combining mark, composed in one face and attached in another", case_shaping_marks },
