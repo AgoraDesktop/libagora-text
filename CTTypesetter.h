@@ -24,7 +24,7 @@
  * passes no options gets exactly the answer it always got, which is the point. MEASURED: `hyphenation` at a
  * four-character width breaks at the overflow **4** with no factor and at the hyphenation point **2** with one.
  * **AND THE SCRIPTS UAX #14 ITSELF SENDS TO A
- * DICTIONARY ARE NOT WRAPPED**: `SA` — Thai, Lao, Khmer and friends, "require morphological analysis to determine
+ * DICTIONARY ARE STILL NOT WRAPPED HERE, THOUGH THE ANALYSIS NOW EXISTS**: `SA` — Thai, Lao, Khmer and friends, "require morphological analysis to determine
  * break opportunities" — resolves to `AL`, whose own rule forbids a break inside an alphabetic run, so such a run is
  * unbreakable here and the answer is the word-doesn't-fit fallback. That is the specification's answer rather than
  * this tier's gap, and it is said here because "UAX #14 is implemented" invites the opposite assumption. **AND HYPHENATION IS NOT MERELY
@@ -36,6 +36,16 @@
  * unless the word itself doesn't fit on a single line") and no more than that. A caller typesetting Thai, or expecting
  * hyphenation opportunities, gets the character-level answer instead — and `CTTypesetterSuggestClusterBreak` is the
  * door for a caller that wants the character-level answer ON PURPOSE.
+ *
+ * **AND `SA`'s ANALYSIS IS BUILT NOW AND NOT WIRED, WHICH IS A DIFFERENT KIND OF GAP.** `CTLineBreakThai.c` reads
+ * libthai's word-breaking dictionary at runtime — never vendored, because it is copyleft — and answers "where does a
+ * word end" for Thai. MEASURED against `th_brk()` over 800 runs of real prose, 24,520 characters: **774 identical, 26
+ * different**, the differences being where libthai's contest algorithm picks another candidate path than a greedy
+ * longest match does. What is NOT done is the wiring: the rule list still answers `SA` → `AL`, so a Thai run is still
+ * one unbreakable unit through this typesetter. That wiring is a cut of its own rather than a call added — the
+ * dictionary's positions must be computed ONCE PER RUN and then compete with the rule list's per-position answer,
+ * because re-walking 588 KB from every position would make the breaker quadratic — and until it is done, this sentence
+ * is what a caller reading about Thai is owed.
  *
  * AND BIDI IS THE LINE'S, NOT THE TYPESETTER'S — WHICH IS WHY THE OPTIONS CROSS A SEAM RATHER THAN DOING WORK HERE.
  * Apple's default is to apply the Unicode Bidirectional Algorithm, with an option to switch it off, and the algorithm

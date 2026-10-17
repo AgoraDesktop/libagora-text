@@ -26,7 +26,9 @@
  * because the setting is AppKit's, and the declaration carries the reasoning — makes the breaker consider hyphenation
  * points where UAX #14 has none, or where the legal break would leave the line too empty. **THE DEFAULT IS ZERO AND
  * THE DEFAULT IS WHAT EVERY EXISTING CALLER ALREADY GOT**, which is what makes the option an option.
- * **AND WHAT IS STILL NOT DONE IS THE SCRIPTS UAX #14 SENDS TO A DICTIONARY** (`SA`: Thai, Lao, Khmer), which are one
+ * **AND THE SCRIPTS UAX #14 SENDS TO A DICTIONARY HAVE THEIR ANALYSIS NOW AND NOT THEIR WIRING** (`SA`: Thai, Lao,
+ * Khmer): `CTLineBreakThai.c` reads libthai's trie, measured against `th_brk()`, and this typesetter does not ask it
+ * yet. They are one
  * unbreakable run here — said in words by `ct_lb_break_before_utf16`'s caller and by the header.
  *
  * **AND ONE BUG OF LONG STANDING WAS FOUND BY A CASE ABOUT SOMETHING ELSE.** The hard break was returned
@@ -602,7 +604,8 @@ CFIndex CTTypesetterSuggestLineBreak(CTTypesetterRef typesetter, CFIndex startIn
 	 * determine break opportunities" — and LB1 sends `SA` to `AL`, whose rule (LB28) forbids a break between two
 	 * alphabetic characters. So a run of Thai is one unbreakable unit under the standard rules and NEEDS A
 	 * DICTIONARY, which is what ICU's dictionary-based break iterator and the spec's own `SA` tailoring exist for.
-	 * This tier does neither, so Thai does not wrap — and saying so is the point, because the opposite claim is the
+	 * This tier has the first half (`CTLineBreakThai.c`: the dictionary) and not the second, so Thai still does not
+	 * wrap THROUGH HERE — and saying so is the point, because the opposite claim is the
 	 * one a reader would assume from "UAX #14 is implemented now". A script UAX #14 DOES handle without a
 	 * dictionary — Han, Hiragana, Katakana, Hangul, and the scripts whose breaks are punctuation — wraps here.
 	 *

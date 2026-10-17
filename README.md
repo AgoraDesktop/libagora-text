@@ -865,7 +865,10 @@ the user's decision is that they stay owed), the ATS pair (permanent), and the f
   cluster door cuts at **3**, inside the second.
 - **AND TWO THINGS THIS DOES *NOT* BUY ARE SAID WHERE A READER WOULD ASSUME THEM.** Han was already right by
   accident — the old space search fell back to the overflow, and ideographs may break between every pair, so no width
-  distinguishes the two implementations. And **Thai, Lao and Khmer do not wrap at all**, because they are `SA`
+  distinguishes the two implementations. And **Thai, Lao and Khmer still do not wrap through the typesetter**, because
+  their `SA` analysis — `CTLineBreakThai.c`, added after this note was written: a libdatrie reader over libthai's
+  dictionary, measured 774 of 800 prose runs identical to `th_brk()` — is built and not yet wired into
+  `SuggestLineBreak`. They are `SA`
   ("require morphological analysis to determine break opportunities"), LB1 resolves `SA` to `AL`, and LB28 forbids a
   break inside an alphabetic run: they need a DICTIONARY, which ICU's dictionary-based break iterator and the
   specification's own `SA` tailoring exist for. "UAX #14 is implemented" invites the opposite assumption, so the
@@ -966,6 +969,25 @@ the user's decision is that they stay owed), the ATS pair (permanent), and the f
   it. And "a right-to-left paragraph's run reports RightToLeft" is now answered by `abc` being raised to level 2 by I2 —
   an EVEN level, drawn left to right — so its status is none; the paragraph's direction is measured in a NEUTRAL run
   instead, which takes the paragraph's level and reports it directly.
+- **AND THAI HAS ITS DICTIONARY NOW — THE `SA` TAILORING'S ENGINE, BUILT AND MEASURED, NOT YET WIRED.** UAX #14 §6.1
+  says `SA` "require[s] morphological analysis", and LB1 resolves it to `AL` for want of that analysis, so a Thai
+  sentence was ONE unbreakable word here. `CTLineBreakThai.c` is that analysis: it reads **libthai's** word-break trie
+  (`/usr/share/libthai/thbrk.tri`) at runtime — never vendored, because the data is `LGPL-2.1-or-later`, the same
+  standing `CFHyphenation.c` has with the `hyphen-*` patterns — and walks it. **AND IT READS THE FILE FORMAT ITSELF**,
+  which is libdatrie's serialised double-array trie: three big-endian sections behind three signatures, a one-byte
+  alphabet with its own range list, and tails whose terminator the file does not store. The format is written down in
+  that file's header; there is no link-time dependency and no table in this repository for Thai.
+  **MEASURED, and the second number is the one worth having:** against `th_brk()` (libthai 0.1.29) over 800 runs of
+  real Thai prose from a Wikipedia article — 24,520 characters — **774 runs identical and 26 different.** The
+  differences are the algorithm: libthai keeps a SET of candidate paths and contests them with penalties, and this
+  walks greedily for the longest dictionary word. Reproducing the contest would be copying rather than implementing, so
+  it is named instead — and the case in the suite asserts the ORACLE's positions, so the engine is measured against
+  the library the data came from rather than against itself.
+  **AND THE CONTROL IS THE POINT OF THE SLICE**: the same characters through the rule list alone offer NO break
+  opportunity at all, which is what this tier answered for Thai before, and which is why a Thai paragraph could not
+  wrap. The wiring — the dictionary's positions computed once per run and competing with the rule list's per-position
+  answer — is the next cut, and `CTLineBreakThai_internal.h`, `CTTypesetter.h` and `CTTypesetter.c` each say so where a
+  reader looks rather than leaving the old claim in place.
 - **AND FALLBACK CHANGED THE MEASUREMENTS OF THREE CASES THAT ASSUMED ONE FACE RENDERED EVERYTHING**, which is a
   property of the change rather than a surprise: they read `CTLineGetGlyphRuns(line)[0]` and took their expectations
   from the attributed font, and with fallback the Hebrew and Hangul characters are in runs of their own, set in faces

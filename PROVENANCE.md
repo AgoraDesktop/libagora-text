@@ -1248,3 +1248,25 @@ diagnostic and no warning; bare `ctest --test-dir build` is `100% tests passed, 
 `text: 42 of 42 cases passed, 0 failed`; and the `owed` guard is still **6** names — THE CORRECTION MOVED NO DOOR,
 because the vertical metrics belong to a door that is DEFINED and answers a fallback, and the read it needs is a unit
 rather than an owed name.
+## THE THAI DICTIONARY: libthai's, read at runtime, never vendored
+
+`libagora-text/CTLineBreakThai.c` implements the UAX #14 §6.1 `SA` tailoring for Thai, which the specification says
+"require[s] morphological analysis to determine break opportunities". The analysis is a word dictionary, and this tree
+does not own one — so the same rule `libagora-core/CFHyphenation.c` follows applies:
+
+- **THE DATA IS libthai's `thbrk.tri`** (`libthai-data` 0.1.29-2, `/usr/share/libthai/thbrk.tri`, 588,096 bytes),
+  licensed **`LGPL-2.1-or-later`**. It is READ AT RUNTIME from `LIBTHAI_DICTDIR` (libthai's own environment variable)
+  or `/usr/share/libthai/`, and **NO COPY OF IT IS IN THIS REPOSITORY** — the same standing the hyphenation patterns
+  have, and for the same reason: a copyleft data set may be used by a program that reads it and may not be shipped
+  inside this tree.
+- **THE FILE FORMAT IS libdatrie's**, and the reader is this tier's own. libdatrie is also `LGPL-2.1-or-later`; what
+  `CTLineBreakThai.c` takes from it is a FACT ABOUT A FILE FORMAT, not code — three big-endian sections behind three
+  signatures, a range-list alphabet whose codes are one-based because 0 is the key terminator, and tail blocks whose
+  suffix terminator the file leaves out. The provenance is recorded in that file's header, citing
+  `alpha-map.c`/`darray.c`/`tail.c`/`fileutils.c` by function name.
+- **AND THE DEGRADATION IS NAMED**: on a machine without the data the engine does nothing, the rule list's answer
+  stands, and Thai does not wrap — which is what this tier did before the engine existed. `ct_thai_available()` is how
+  a caller or a case asks which machine it is on.
+- **THE ORACLE IS `th_brk()` from libthai 0.1.29**, called from a throwaway program in `/tmp` (never from this
+  repository, and never linked into it). It produced the 800-run differential recorded in `README.md` and it produced
+  EVERY expected value the suite asserts, so the Thai case measures the engine against the library the data came from.

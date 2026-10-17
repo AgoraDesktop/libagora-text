@@ -35,6 +35,7 @@
 /* **AND THE LINE-BREAKING ENGINE**, the third substrate built before it is wired in: `CTTypesetter.h` still says
  * the typesetter backs off to spaces, and this is the algorithm that will let it stop. */
 #include <CoreText/CTLineBreak_internal.h>
+#include <CoreText/CTLineBreakThai_internal.h>
 #include <CoreText/CTFont.h>
 /* AND THE ENGINE'S INTERNAL HEADER, FOR THE DOORS CORE TEXT OWNS BUT DOES NOT IMPLEMENT: the Unicode
  * glyph step and the face registry. */
@@ -7504,6 +7505,179 @@ static int case_run_direction_is_its_own(void)
 	return g_fail - before;
 }
 
+/* **AND THE `SA` TAILORING IS THE DICTIONARY'S, WHICH IS THE ONE THING THE RULE LIST CANNOT SUPPLY.** UAX #14 §6.1
+ * says the `SA` class — Thai and its neighbours — "require[s] morphological analysis to determine break opportunities",
+ * and LB1 resolves `SA` to `AL` for want of it, so a Thai sentence is ONE unbreakable word to the rule list. The
+ * dictionary is libthai's (`/usr/share/libthai/thbrk.tri`, read at runtime and never vendored — see
+ * `CTLineBreakThai_internal.h`), and the walk over it is greedy longest match.
+ *
+ * **AND EVERY EXPECTATION HERE IS THE ORACLE'S, NOT THIS TIER'S.** Each string below was put through `th_brk()`
+ * (libthai 0.1.29) and ITS answer is what the case asserts, so the engine is measured against the library the data
+ * came from rather than against itself. The one deviation in the algorithm — libthai contests candidate paths with
+ * penalties and this walks greedily — is measured separately and recorded in `README.md`: over 800 runs of real prose
+ * the two agree 774 times.
+ *
+ * **AND THE CONTROL IS WHAT MAKES THE MEASUREMENT MEAN SOMETHING**: the same characters through the RULE LIST alone
+ * offer nowhere to break, which is what this tier answered for Thai before the dictionary existed. */
+static int case_line_break_thai(void)
+{
+	int before = g_fail;
+	static const UniChar kThai0[] = {
+		0x0E20, 0x0E32, 0x0E29, 0x0E32, 0x0E44, 0x0E17, 0x0E22,
+	};
+	static const UniChar kThai1[] = {
+		0x0E1B, 0x0E23, 0x0E30, 0x0E40, 0x0E17, 0x0E28, 0x0E44, 0x0E17,
+		0x0E22,
+	};
+	static const UniChar kThai2[] = {
+		0x0E2D, 0x0E32, 0x0E2B, 0x0E32, 0x0E23, 0x0E44, 0x0E17, 0x0E22,
+	};
+	static const UniChar kThai3[] = {
+		0x0E2A, 0x0E27, 0x0E31, 0x0E2A, 0x0E14, 0x0E35, 0x0E04, 0x0E23,
+		0x0E31, 0x0E1A,
+	};
+	static const UniChar kThai4[] = {
+		0x0E20, 0x0E32, 0x0E29, 0x0E32,
+	};
+	static const UniChar kThai5[] = {
+		0x0E41, 0x0E21, 0x0E48, 0x0E19, 0x0E49, 0x0E33,
+	};
+	static const UniChar kThai6[] = {
+		0x0E01, 0x0E23, 0x0E38, 0x0E07, 0x0E40, 0x0E17, 0x0E1E, 0x0E21,
+		0x0E2B, 0x0E32, 0x0E19, 0x0E04, 0x0E23,
+	};
+
+	/* A MACHINE FACT, STATED RATHER THAN ASSUMED: without libthai's data the tailoring is inert and the rule list's
+	 * answer stands, which is the degradation `CTLineBreakThai_internal.h` names. */
+	if (!ct_thai_available()) {
+		printf("  (note: no Thai dictionary on this machine, so the SA tailoring is inert)\n");
+		return g_fail - before;
+	}
+	{
+		uint8_t breaks[7] = { 0 };
+		CFIndex k, count = 0;
+		const long idx = 0;
+
+		ct_thai_breaks(kThai0, 7, breaks);
+		for (k = 0; k < 7; k++) {
+			if (breaks[k]) {
+				count++;
+			}
+		}
+		printf("  (Thai string %ld of this case: %ld dictionary break(s))\n", (long)idx, (long)count);
+		check(count == 1, "ภาษาไทย has 1 dictionary word boundary");
+		check(breaks[4] == 1, "and one of them falls before index 4");
+		check(ct_lb_break_before_utf16(kThai0, 7, 1, 7) == 1,
+		      "while the RULE LIST alone offers nowhere to break");
+	}
+	{
+		uint8_t breaks[9] = { 0 };
+		CFIndex k, count = 0;
+		const long idx = 1;
+
+		ct_thai_breaks(kThai1, 9, breaks);
+		for (k = 0; k < 9; k++) {
+			if (breaks[k]) {
+				count++;
+			}
+		}
+		printf("  (Thai string %ld of this case: %ld dictionary break(s))\n", (long)idx, (long)count);
+		check(count == 1, "ประเทศไทย has 1 dictionary word boundary");
+		check(breaks[6] == 1, "and one of them falls before index 6");
+		check(ct_lb_break_before_utf16(kThai1, 9, 1, 9) == 1,
+		      "while the RULE LIST alone offers nowhere to break");
+	}
+	{
+		uint8_t breaks[8] = { 0 };
+		CFIndex k, count = 0;
+		const long idx = 2;
+
+		ct_thai_breaks(kThai2, 8, breaks);
+		for (k = 0; k < 8; k++) {
+			if (breaks[k]) {
+				count++;
+			}
+		}
+		printf("  (Thai string %ld of this case: %ld dictionary break(s))\n", (long)idx, (long)count);
+		check(count == 1, "อาหารไทย has 1 dictionary word boundary");
+		check(breaks[5] == 1, "and one of them falls before index 5");
+		check(ct_lb_break_before_utf16(kThai2, 8, 1, 8) == 1,
+		      "while the RULE LIST alone offers nowhere to break");
+	}
+	{
+		uint8_t breaks[10] = { 0 };
+		CFIndex k, count = 0;
+		const long idx = 3;
+
+		ct_thai_breaks(kThai3, 10, breaks);
+		for (k = 0; k < 10; k++) {
+			if (breaks[k]) {
+				count++;
+			}
+		}
+		printf("  (Thai string %ld of this case: %ld dictionary break(s))\n", (long)idx, (long)count);
+		check(count == 1, "สวัสดีครับ has 1 dictionary word boundary");
+		check(breaks[6] == 1, "and one of them falls before index 6");
+		check(ct_lb_break_before_utf16(kThai3, 10, 1, 10) == 1,
+		      "while the RULE LIST alone offers nowhere to break");
+	}
+	{
+		uint8_t breaks[4] = { 0 };
+		CFIndex k, count = 0;
+		const long idx = 4;
+
+		ct_thai_breaks(kThai4, 4, breaks);
+		for (k = 0; k < 4; k++) {
+			if (breaks[k]) {
+				count++;
+			}
+		}
+		printf("  (Thai string %ld of this case: %ld dictionary break(s))\n", (long)idx, (long)count);
+		check(count == 0, "ภาษา has 0 dictionary word boundaries");
+		check(ct_lb_break_before_utf16(kThai4, 4, 1, 4) == 1,
+		      "while the RULE LIST alone offers nowhere to break");
+	}
+	{
+		uint8_t breaks[6] = { 0 };
+		CFIndex k, count = 0;
+		const long idx = 5;
+
+		ct_thai_breaks(kThai5, 6, breaks);
+		for (k = 0; k < 6; k++) {
+			if (breaks[k]) {
+				count++;
+			}
+		}
+		printf("  (Thai string %ld of this case: %ld dictionary break(s))\n", (long)idx, (long)count);
+		check(count == 0, "แม่น้ำ has 0 dictionary word boundaries");
+		check(ct_lb_break_before_utf16(kThai5, 6, 1, 6) == 1,
+		      "while the RULE LIST alone offers nowhere to break");
+	}
+	{
+		uint8_t breaks[13] = { 0 };
+		CFIndex k, count = 0;
+		const long idx = 6;
+
+		ct_thai_breaks(kThai6, 13, breaks);
+		for (k = 0; k < 13; k++) {
+			if (breaks[k]) {
+				count++;
+			}
+		}
+		printf("  (Thai string %ld of this case: %ld dictionary break(s))\n", (long)idx, (long)count);
+		check(count == 2, "กรุงเทพมหานคร has 2 dictionary word boundaries");
+		check(breaks[7] == 1, "and one of them falls before index 7");
+		check(breaks[10] == 1, "and one of them falls before index 10");
+		check(ct_lb_break_before_utf16(kThai6, 13, 1, 13) == 1,
+		      "while the RULE LIST alone offers nowhere to break");
+	}
+
+	/* **AND THE LONGEST ONE SHOWS THE POINT OF ALL THIS**: 13 characters, 2 dictionary boundaries, and the rule list
+	 * finds none — a word that does not fit, which is the fallback a Thai paragraph took before this. */
+	printf("  (กรุงเทพมหานคร: 2 dictionary boundaries and none from the rules)\n");
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -7572,6 +7746,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "A run is itemized by script, and the caller can still state one", case_shaping_itemization },
 	{ "A face that cannot render a character is replaced, and only it moves", case_line_font_fallback },
 	{ "A run reports its own direction, because a run is one level", case_run_direction_is_its_own },
+	{ "Thai breaks where its dictionary says, which the rule list cannot", case_line_break_thai },
 	{ "A ligature is one glyph for three characters", case_shaping_ligatures },
 	{ "A pair adjustment reaches the advances", case_shaping_kerning },
 	{ "A combining mark, composed in one face and attached in another", case_shaping_marks },
