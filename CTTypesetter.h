@@ -14,8 +14,12 @@
  * and it is implemented honestly: a hard break ends the line wherever it is, and otherwise characters are taken
  * until the width is full.
  *
- * WHAT IS NOT ATTEMPTED, SAID WHERE A CALLER READS IT. The Unicode line-breaking rules (UAX #14), hyphenation, and the
- * rules for scripts whose words are not separated by spaces are NOT implemented. **AND HYPHENATION IS NOT MERELY
+ * WHAT IS NOT ATTEMPTED, SAID WHERE A CALLER READS IT — AND ONE OF THE THREE IS NO LONGER MISSING, ONLY UNWIRED.
+ * The Unicode line-breaking rules (UAX #14) are BUILT (`CTLineBreak.c`, over the UCD's `Line_Break` property, at
+ * the UCD's own conformance score: 10,274 of 10,274 of `LineBreakTest.txt`), and **THIS TYPESETTER DOES NOT CALL
+ * THEM YET** — so what it does below is what it always did, backing off to the last space, and the engine's arrival
+ * changes no line until the wiring slice lands. Hyphenation, and the rules for scripts whose words are not separated
+ * by spaces, are NOT implemented. **AND HYPHENATION IS NOT MERELY
  * ABSENT HERE, IT IS SOMEWHERE ELSE — WHICH IS A FACT WORTH STATING WHERE A CALLER LOOKS FOR IT.** Core Text's
  * typesetter does not hyphenate either, on the platform this follows; the resource is Core Foundation's, and this tree
  * now answers it (`libagora-core/CFHyphenation.c`: `CFStringGetHyphenationLocationBeforeIndex`). The door for a caller

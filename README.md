@@ -818,3 +818,34 @@ the user's decision is that they stay owed), the ATS pair (permanent), and the f
   **AND WHAT IS OWED IS NOW THE APPKIT'S**: the manager's glyph space is one glyph per character BY CONSTRUCTION
   (`glyphBase` advances by the range's length), so the shaped glyph count is not yet visible through it. That is
   stated in `NSLayoutManager.m` where the two mapping doors are, with what changing it takes.
+- **AND UAX #14 IS BUILT, WHICH IS THE ALGORITHM THE TYPESETTER HAS BEEN MISSING.** `CTLineBreak.c` implements the
+  Unicode Line Breaking Algorithm — the `Line_Break` property of every code point and all thirty-one numbered rules —
+  over a generated table (`CTLineBreakData.c`, `tools/gen-linebreak-data.py`, Unicode 15.1.0, **2,845 ranges** with
+  the file's OWN defaults for unlisted code points baked in). **THE RULES ARE A LIST AND THE ENGINE IS A TRANSCRIPTION
+  OF IT**: 31 rules, in the specification's order, with its numbers, because that is what makes the file checkable
+  against the specification rather than merely plausible.
+- **AND ITS MEASUREMENT IS A CONFORMANCE RUN RATHER THAN A SET OF EXAMPLES, WHICH IS THE WHOLE POINT.** The UCD
+  ships `LineBreakTest.txt` — every rule's own examples with Unicode's answer for every position — and the engine was
+  written against it: **10,274 of 10,274, NO FAILURES.** The file is 1.5 MB and is NOT in this repository (the same
+  standing the UCD's other files have): what is committed is `tools/gen-linebreak-cases.py`, which fetches it and
+  emits **one case per rule number** — the shortest case naming it, 69 rows — so the suite checks every rule the data
+  exercises without the file.
+- **AND EVERY HARD PART OF THE RULES WAS FOUND BY THAT RUN AND BY NOTHING ELSE.** Stated because each is a fact about
+  the specification that no amount of reading the obvious parts would have produced:
+  **(1)** LB9's fold — giving a combining mark its base's class — loses the BOUNDARY, so a base and its own mark looked
+  like two adjacent characters that happen to share a class; 1,547 cases failed on it, all tagged `[0.3]`.
+  **(2)** Unicode 15.1 **REPLACED LB15** (`QU SP* × OP`) **WITH LB15a AND LB15b**, which split a `QU` by whether
+  `General_Category` is `Pi` or `Pf` — a left quote and a right quote are the SAME `Line_Break` class and opposite
+  typography — which is 174 cases and a property the class cannot express.
+  **(3)** §8.2's Example 7 tailors the number rules to a REGULAR EXPRESSION **and requires LB13 to be tailored beside
+  it** ("if this is not done, single digits might be handled by rule LB13 before being handled in the regular
+  expression"), and the tailored LB25 differs from the rewritten pair rules on cases like `,0`, which the pair rules
+  make unbreakable and the tailoring breaks.
+  **(4)** LB28a has **FOUR** clauses, not three, and its third is `VI` where I had written `VF` — checked against
+  `tr14-51` rather than guessed, after six cases named rule numbers (`28.12`, `28.13`, `28.14`) that no clause of mine
+  could reach.
+  **(5)** And the last two cases of ten thousand turned on the same lesson as (1) one level up: several rules read the
+  BASE of a syllable, not the character next to the position, so a look-behind has to step over a base's own marks.
+  MEASURED: `100% tests passed, 0 tests failed out of 2` over `text: 66 of 66 cases passed, 0 failed`.
+  **AND THE TYPESETTER STILL DOES NOT CALL IT** — that is the next slice, and until it lands no line is laid out
+  differently than it was. `CTTypesetter.h` says so where a caller reads it.

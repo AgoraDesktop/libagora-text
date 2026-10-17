@@ -32,6 +32,9 @@
 /* **AND THE SHAPING ENGINE, WHICH IS THE SUBSTRATE THE LAYOUT WILL SIT ON RATHER THAN BE WIRED INTO IT YET** — the
  * same standing `CTBidi_internal.h` had while the bidi milestone was being built rule by rule. */
 #include <CoreText/CTShaping_internal.h>
+/* **AND THE LINE-BREAKING ENGINE**, the third substrate built before it is wired in: `CTTypesetter.h` still says
+ * the typesetter backs off to spaces, and this is the algorithm that will let it stop. */
+#include <CoreText/CTLineBreak_internal.h>
 #include <CoreText/CTFont.h>
 /* AND THE ENGINE'S INTERNAL HEADER, FOR THE DOORS CORE TEXT OWNS BUT DOES NOT IMPLEMENT: the Unicode
  * glyph step and the face registry. */
@@ -6587,6 +6590,152 @@ static int case_cluster_map(void)
 	return g_fail - before;
 }
 
+/* =================================================================================================
+ * UAX #14, AGAINST THE UNICODE CHARACTER DATABASE'S OWN CONFORMANCE DATA.
+ * =============================================================================================== */
+/* **EVERY CASE HERE IS UNICODE'S, NOT OURS.** The UCD ships `LineBreakTest.txt` — 10,274 sequences with Unicode's
+ * answer for every position and the rule number that decided it — and the engine was written against the WHOLE FILE:
+ * **10,274 of 10,274, no failures**, which is the measurement `CTLineBreak_internal.h` records. The file is 1.5 MB
+ * and is not in this repository, so what is committed is `tools/gen-linebreak-cases.py`'s output: **one case per
+ * rule number**, the shortest case naming it, which is every rule the data exercises in 69 rows and stays readable.
+ *
+ * **AND THE TABLE IS WHAT MAKES THE ENGINE'S CLAIM CHECKABLE WITHOUT THE FILE.** Each row is a sequence of code
+ * points and one mark per boundary — `1` for a break opportunity, `0` for none — exactly as the UCD file writes
+ * them with `÷` and `×`. The third field is the RULE NUMBER from the data's own comment, kept so that a failure
+ * names the rule rather than a row.
+ *
+ * The rows span the whole list: hard breaks and spaces (LB4-LB8), combining marks (LB9), the look-behind rules
+ * (LB14-LB17), quotes split by `Pi`/`Pf` (LB15a/LB15b, which Unicode 15.1 introduced), the numeric tailoring of
+ * §8.2's Example 7 (LB25), Hangul (LB26-LB27), the Brahmic clauses (LB28a, four of them), the East Asian bracket
+ * exclusion (LB30), regional indicator pairing (LB30a) and the emoji rules (LB30b) — ending with `999.0`, which is
+ * how the data spells LB31, the rule that says a break is the DEFAULT. */
+static int case_line_break_conformance(void)
+{
+	int before = g_fail;
+	static const struct { const char *points; const char *marks; const char *rule; } cases[] = {
+	{ "1B05 1B05", "011", "0.3" },
+	{ "000B 1B05", "011", "4.0" },
+	{ "000D 000A", "001", "5.01" },
+	{ "000D 1B05", "011", "5.02" },
+	{ "000A 1B05", "011", "5.03" },
+	{ "0085 1B05", "011", "5.04" },
+	{ "1B05 000B", "001", "6.0" },
+	{ "1B05 0020", "001", "7.01" },
+	{ "1B05 200B", "001", "7.02" },
+	{ "200B 1B05", "011", "8.0" },
+	{ "200D 1B05", "001", "8.1" },
+	{ "1B05 0001", "001", "9.0" },
+	{ "1B05 2060", "001", "11.01" },
+	{ "2060 1B05", "001", "11.02" },
+	{ "00A0 1B05", "001", "12.0" },
+	{ "1B05 00A0", "001", "12.1" },
+	{ "1B05 0308 00A0", "0001", "12.2" },
+	{ "0001 00A0", "001", "12.3" },
+	{ "1B05 0021", "001", "13.01" },
+	{ "1B05 007D", "001", "13.02" },
+	{ "1B05 0308 007D", "0001", "13.03" },
+	{ "0001 007D", "001", "13.04" },
+	{ "2329 1B05", "001", "14.0" },
+	{ "00AB 1B05", "001", "15.11" },
+	{ "1B05 00BB", "001", "15.21" },
+	{ "007D 17D6", "001", "16.0" },
+	{ "2014 2014", "001", "17.0" },
+	{ "0020 1B05", "011", "18.0" },
+	{ "1B05 0022", "001", "19.01" },
+	{ "0022 1B05", "001", "19.02" },
+	{ "1B05 FFFC", "011", "20.01" },
+	{ "FFFC 1B05", "011", "20.02" },
+	{ "1B05 0009", "001", "21.01" },
+	{ "05D0 002D 05D0", "0001", "21.1" },
+	{ "1B05 002D", "001", "21.02" },
+	{ "002F 05D0", "001", "21.2" },
+	{ "1B05 17D6", "001", "21.03" },
+	{ "00B4 1B05", "001", "21.04" },
+	{ "1B05 2024", "001", "22.0" },
+	{ "0023 0030", "001", "23.02" },
+	{ "0030 0023", "001", "23.03" },
+	{ "0024 1B50", "001", "23.12" },
+	{ "1B50 0025", "001", "23.13" },
+	{ "0025 0023", "001", "24.02" },
+	{ "0023 0025", "001", "24.03" },
+	{ "0025 0030", "001", "25.01" },
+	{ "002D 0030", "001", "25.02" },
+	{ "0030 002C", "001", "25.03" },
+	{ "0030 007D", "001", "25.04" },
+	{ "0030 0025", "001", "25.05" },
+	{ "1100 AC00", "001", "26.01" },
+	{ "AC00 11A8", "001", "26.02" },
+	{ "AC01 11A8", "001", "26.03" },
+	{ "AC00 0025", "001", "27.01" },
+	{ "0024 AC00", "001", "27.02" },
+	{ "0023 0023", "001", "28.0" },
+	{ "11003 1B05", "001", "28.11" },
+	{ "1B05 1BF2", "001", "28.12" },
+	{ "25CC 1B44 1B2C", "0001", "28.13" },
+	{ "1BD7 1BEC 1BD2 1BEA 1BC9 1BF3 1BC2 1BE7 1BC9 1BF3", "00100010001", "28.14" },
+	{ "002C 0023", "001", "29.0" },
+	{ "0023 0028", "001", "30.01" },
+	{ "0029 0023", "001", "30.02" },
+	{ "1F1E6 1F1E6", "001", "30.11" },
+	{ "1F1F7 1F1FA 200B 1F1F8 1F1EA", "000101", "30.12" },
+	{ "1F1F7 1F1FA 1F1F8", "0011", "30.13" },
+	{ "261D 1F3FB", "001", "30.21" },
+	{ "1F02C 1F3FF", "001", "30.22" },
+	{ "1B05 1B05", "011", "999.0" },
+	};
+	size_t i, total = sizeof cases / sizeof cases[0];
+	int passed = 0;
+
+	for (i = 0; i < total; i++) {
+		UTF32Char chars[64];
+		CFIndex count = 0, k;
+		const char *cursor = cases[i].points;
+		Boolean agrees = true;
+
+		while (*cursor != '\0' && count < 64) {
+			char *end = NULL;
+			unsigned long code = strtoul(cursor, &end, 16);
+
+			if (end == cursor) {
+				break;
+			}
+			chars[count++] = (UTF32Char)code;
+			cursor = end;
+			while (*cursor == ' ') {
+				cursor++;
+			}
+		}
+		check(count > 0 && (CFIndex)strlen(cases[i].marks) == count + 1,
+		      "the case for rule %s is malformed", cases[i].rule);
+		if (count == 0) {
+			continue;
+		}
+		/* EVERY BOUNDARY IS COMPARED, the two ends included: LB2 and LB3 have opinions about them and the data
+		 * states them. */
+		for (k = 0; k <= count; k++) {
+			Boolean want = (cases[i].marks[k] == '1');
+			Boolean got = ct_lb_break_at(chars, count, k);
+
+			if (got != want) {
+				agrees = false;
+				check(0, "rule %s: position %ld of `%s` should be %s", cases[i].rule, (long)k,
+				      cases[i].points, want ? "a break" : "unbreakable");
+			}
+		}
+		/* AND ONE POSITION THE RULES CANNOT SEE: a boundary one past the end of a run is the end of the text, and
+		 * asking about a position outside the run must not read past it. */
+		check(ct_lb_break_at(chars, count, count + 1) == true,
+		      "a position past the end of the run is the end of the text");
+		if (agrees) {
+			passed++;
+		}
+	}
+	printf("  (UAX #14: %d of %d of Unicode's own rule cases agree, one case per rule)\n", passed, (int)total);
+	check(passed == (int)total, "every rule's own case agrees with the Unicode data");
+	(void)passed;
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -6648,6 +6797,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The slant angle is the face's plus the matrix's, in degrees", case_font_slant_angle },
 	{ "The vertical origin is half the advance and the ascent", case_font_vertical_origin },
 	{ "The glyph-to-character map the caret doors read", case_cluster_map },
+	{ "UAX #14, against the Unicode data's own rule cases", case_line_break_conformance },
 	{ "A ligature is one glyph for three characters", case_shaping_ligatures },
 	{ "A pair adjustment reaches the advances", case_shaping_kerning },
 	{ "A combining mark, composed in one face and attached in another", case_shaping_marks },
