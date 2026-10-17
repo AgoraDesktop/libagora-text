@@ -49,6 +49,7 @@
  * declarations and the definitions below the SAME functions rather than two files agreeing by convention. */
 #include <CoreText/CTLine_internal.h>
 #include <CoreText/CTShaping_internal.h>
+#include <CoreText/CTGrapheme_internal.h>
 #include <CoreText/CTBidi_internal.h>
 #include <CoreText/CTBidi_internal.h>
 
@@ -97,6 +98,13 @@ struct __CTLine {
 	 * THE LINE IS NOT SHAPED**, so every door below reads one map and the one-glyph-per-character case is the case
 	 * where the map happens to be `clusters[g] == g`. */
 	CFIndex *clusters;		/* malloc'd, glyphCount entries */
+	/* **AND ONE ENTRY PER CHARACTER, WHICH IS THE CARET'S OWN MAP AND NOT THE SHAPER'S.** `graphemes[i]` is the
+	 * start of the UAX #29 extended grapheme cluster that character `i` belongs to, computed by `CTGrapheme.c` over
+	 * the line's own characters. THE TWO MAPS ANSWER DIFFERENT QUESTIONS AND BOTH ARE NEEDED: `clusters[g]` says
+	 * which character a GLYPH stands for (the shaper's answer, and what `CTRunGetStringIndices` must report), while a
+	 * caret must not land between a base and its mark, inside an emoji ZWJ sequence or inside a flag — and the
+	 * shaper draws a boundary wherever it likes, which is not the same thing. NULL when the line has no characters. */
+	CFIndex *graphemes;		/* malloc'd, range.length entries, non-decreasing */
 	/* **AND THE VISUAL ORDER, WHEN IT IS NOT THE LOGICAL ONE**: `visualOrder[k]` is the logical index in visual slot
 	 * `k`, which is what the hit test walks and what makes the run report `NonMonotonic`. NULL = logical order. */
 	CFIndex *visualOrder;		/* malloc'd, glyphCount entries, or NULL */
@@ -145,6 +153,7 @@ static void ct_line_finalize(CFTypeRef cf)
 	free(line->positions);
 	free(line->advances);
 	free(line->clusters);
+	free(line->graphemes);
 	free(line->visualOrder);
 	free(line->levels);
 	free(line->isBox);
@@ -664,11 +673,32 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 	}
 
 	chars = (UniChar *)malloc((size_t)n * sizeof(UniChar));
+	/* **THE CARET'S MAP, BUILT ONCE FROM THE TEXT ITSELF** — before any shaping, because it is a fact about the
+	 * CHARACTERS and not about the glyphs. See the field's comment for why it cannot be the shaper's map. */
+	if (n > 0) {
+		line->graphemes = (CFIndex *)malloc((size_t)n * sizeof(CFIndex));
+	}
 	if (chars == NULL) {
 		CFRelease((CFTypeRef)line);
 		return NULL;
 	}
 	CFStringGetCharacters(text, range, chars);
+	if (line->graphemes != NULL) {
+		CFIndex at = 0;
+		CFIndex clusterStart = 0;
+
+		while (at < n) {
+			CFIndex end = ct_grapheme_cluster_end(chars, n, at);
+
+			if (end <= at) {
+				end = at + 1;	/* never fails to advance, whatever the data says */
+			}
+			for (; at < end && at < n; at++) {
+				line->graphemes[at] = clusterStart;
+			}
+			clusterStart = at;
+		}
+	}
 
 	/* **AND THE BIDI PIPELINE RUNS HERE, BEFORE THE GLYPHS ARE SHAPED**, because L4 MIRRORS a character whose level is
 	 * odd and the MIRRORED character is the one the shaper has to be given: `(` in Arabic text is `)`. The visual order
@@ -1297,12 +1327,31 @@ static CGFloat ct_line_advance_at(const struct __CTLine *line, CFIndex i)
  * AND THE IDENTITY MAP MAKES BOTH OF THEM THE ARITHMETIC THEY REPLACE: with `clusters[g] == g`, "the glyph whose
  * cluster is the greatest at or before `c`" IS `c`, and "the next boundary after `c`" IS `c + 1`. That is why the
  * change that introduced them moved no answer in the suite. */
+/* **THE GRAPHEME CLUSTER A CHARACTER IS IN — THE SNAP BOTH CARET HELPERS START WITH.** An index inside a cluster
+ * answers with the cluster's OWN start, so no caret can land between a base and its mark, inside an emoji ZWJ
+ * sequence, or inside a flag. Out-of-range indices are clamped, and a line with no map (built without characters,
+ * or by an older path) answers with the index it was given. */
+static CFIndex fn_line_grapheme_start(const struct __CTLine *line, CFIndex charIndex)
+{
+	if (line->graphemes == NULL || line->range.length <= 0) {
+		return charIndex;
+	}
+	if (charIndex < 0) {
+		return 0;
+	}
+	if (charIndex >= line->range.length) {
+		return line->range.length - 1;
+	}
+	return line->graphemes[charIndex];
+}
+
 static CFIndex fn_line_cluster_owner(const struct __CTLine *line, CFIndex charIndex)
 {
 	CFIndex g, owner = -1;
+	const CFIndex snapped = fn_line_grapheme_start(line, charIndex);
 
 	for (g = 0; g < line->glyphCount; g++) {
-		if (line->clusters[g] <= charIndex && (owner < 0 || line->clusters[g] > line->clusters[owner])) {
+		if (line->clusters[g] <= snapped && (owner < 0 || line->clusters[g] > line->clusters[owner])) {
 			owner = g;
 		}
 	}
@@ -1312,7 +1361,20 @@ static CFIndex fn_line_cluster_owner(const struct __CTLine *line, CFIndex charIn
 static CFIndex fn_line_next_cluster(const struct __CTLine *line, CFIndex charIndex)
 {
 	CFIndex g, next = line->range.length;
+	const CFIndex snapped = fn_line_grapheme_start(line, charIndex);
 
+	/* **THE NEXT GRAPHEME BOUNDARY IS THE CARET'S NEXT STOP**, and the glyph map is only a second opinion: a shaper
+	 * boundary inside a cluster is not a place a caret may stand, so it must not become one here. */
+	if (line->graphemes != NULL) {
+		CFIndex i;
+
+		for (i = snapped + 1; i < line->range.length; i++) {
+			if (line->graphemes[i] != snapped) {
+				return line->graphemes[i];
+			}
+		}
+		return line->range.length;
+	}
 	for (g = 0; g < line->glyphCount; g++) {
 		if (line->clusters[g] > charIndex && line->clusters[g] < next) {
 			next = line->clusters[g];
@@ -1336,7 +1398,7 @@ CFIndex CTLineGetStringIndexForPosition(CTLineRef line, CGPoint position)
 
 		for (k = 0; k < l->glyphCount; k++) {
 			CFIndex logical = l->visualOrder[k];
-			CFIndex here = l->clusters[logical];
+			CFIndex here = fn_line_grapheme_start(l, l->clusters[logical]);
 			CFIndex after = fn_line_next_cluster(l, here);
 			CGFloat advance = ct_line_advance_at(l, logical);
 			CGFloat midpoint = l->positions[logical].x + advance / 2.0f;
@@ -1367,7 +1429,7 @@ CFIndex CTLineGetStringIndexForPosition(CTLineRef line, CGPoint position)
 		CGFloat midpoint = l->positions[i].x + ct_line_advance_at(l, i) / 2.0f;
 
 		if (position.x < midpoint) {
-			return l->clusters[i];
+			return fn_line_grapheme_start(l, l->clusters[i]);
 		}
 	}
 	return l->range.length;

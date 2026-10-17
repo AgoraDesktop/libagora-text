@@ -37,8 +37,18 @@
  * **AND IT IS NOT `CFStringGetRangeOfComposedCharactersAtIndex`, WHICH IS A DIFFERENT NOTION.** Core Foundation's
  * "composed character sequence" is base-plus-combining-marks, which is roughly a grapheme cluster but not UAX #29's:
  * it does not know about emoji ZWJ sequences, regional indicator pairs, or Hangul's arithmetic, and the two disagree
- * on exactly the cases this file exists to get right. Nothing here reinterprets that door; what the tier now has is
- * the algorithm, which the caret and cluster layers can be moved onto.
+ * on exactly the cases this file exists to get right. Nothing here reinterprets that door — what the tier did instead
+ * was move the CARET onto this algorithm.
+ *
+ * **AND IT IS WIRED INTO `CTLine` NOW, AS A SECOND MAP RATHER THAN AS A REPLACEMENT.** A line keeps `clusters[g]`
+ * (which character a glyph stands for — the SHAPER's answer, and what `CTRunGetStringIndices` must report) and
+ * `graphemes[i]` (this file's answer, one entry per character). `CTLineGetOffsetForStringIndex` and
+ * `CTLineGetStringIndexForPosition` snap a character index to its grapheme start before answering, so no caret lands
+ * between a base and its mark, inside an emoji ZWJ sequence or inside a flag — while the run's string indices keep
+ * reporting what the shaper actually did. **MEASURED, and the disagreement is the test**: an emoji ZWJ sequence is
+ * 3 glyphs over 3 runs with 3 distinct shaper string indices and ONE caret position, and a Devanagari aksara is 4
+ * glyphs over 3 runs with 3 indices and one caret; a flag and a composed mark are shapes the shaper already agreed
+ * about, and the case says so rather than asserting a disagreement that is not there.
  */
 #ifndef CORE_TEXT_CTGRAPHEME_INTERNAL_H
 #define CORE_TEXT_CTGRAPHEME_INTERNAL_H

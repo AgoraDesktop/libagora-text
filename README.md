@@ -983,7 +983,17 @@ the user's decision is that they stay owed), the ATS pair (permanent), and the f
   it reads before 15.1 is self-consistent and wrong.
   **AND IT IS NOT `CFStringGetRangeOfComposedCharactersAtIndex`.** Core Foundation's "composed character sequence" is
   base-plus-marks, which knows nothing of emoji ZWJ sequences, regional indicator pairs or Hangul's arithmetic; that
-  door is untouched, and moving the caret and cluster layers onto this engine is the next cut.
+  door is untouched.
+- **AND THE CARET MOVES BY GRAPHEME CLUSTER NOW — THE WIRING, AS A SECOND MAP RATHER THAN A REPLACEMENT.** A line keeps
+  two maps because the two questions are different: `clusters[g]` is the SHAPER's (which character a glyph stands for,
+  and what `CTRunGetStringIndices` must report) and `graphemes[i]` is this engine's (one entry per character).
+  `CTLineGetOffsetForStringIndex` and `CTLineGetStringIndexForPosition` snap a character index to its cluster start, so
+  no caret lands between a base and its mark, inside an emoji ZWJ sequence, or inside a flag — while the runs keep
+  reporting what the shaper truly did. **MEASURED, and the DISAGREEMENT is the test**: an emoji ZWJ sequence is 3
+  glyphs over 3 runs with **3 distinct shaper string indices and ONE caret position**; a Devanagari aksara is 4 glyphs
+  over 3 runs with 3 indices and one caret; a flag and a composed mark are shapes the shaper already agreed about, and
+  the case says so instead of asserting a disagreement that is not there. The control is `abc`: four indices, four
+  caret positions, so "one caret" cannot be satisfied by a line that has only one.
 - **AND BIDI IS NOW MEASURED THE WAY LINE BREAKING WAS — THE ASYMMETRY THE LAST STOCK-TAKE NAMED, CLOSED.**
   `BidiCharacterTest.txt` (Unicode 15.1.0) states 91,707 single-paragraph cases with their resolved paragraph level,
   their resolved level per character and their visual order; the engine is driven through the SAME phase order the

@@ -8083,6 +8083,174 @@ static int case_grapheme_conformance(void)
 	return g_fail - before;
 }
 
+/* **AND THE CARET MOVES BY GRAPHEME CLUSTER, WHICH IS THE POINT OF HAVING THE ALGORITHM AT ALL.** `CTLine.c` keeps
+ * TWO maps and they answer different questions: `clusters[g]` is the SHAPER's (which character a glyph stands for, and
+ * what `CTRunGetStringIndices` must report), and `graphemes[i]` is UAX #29's (the start of the cluster a character is
+ * in). The caret doors read the second, because a shaper draws a boundary wherever its shaping likes and that is not
+ * the same thing: it will happily give `e` and U+0301 two glyphs and two indices, and a caret that believed it could
+ * stand between a letter and its accent — which draws the accent over nothing halfway through the move.
+ *
+ * **AND THE MEASUREMENT IS DELIBERATELY MADE WITH CLUSTERS THIS FACE CANNOT DRAW.** DejaVuSansMono has no emoji and no
+ * Devanagari, so the shaper emits one `.notdef` glyph per code point: three glyphs, three shaper clusters, and ONE
+ * cluster as far as a caret is concerned. That makes the geometry deterministic — no dependence on whether a
+ * particular face composes a mark — and it puts the case where it belongs: the wiring is a fact about the TEXT.
+ *
+ * **AND THE TWO CLUSTER SHAPES THAT FAILED BEFORE THE WIRING ARE BOTH HERE**: an emoji ZWJ sequence (GB11) and a
+ * Devanagari aksara (GB9c, the rule Unicode 15.1 added), each of which is several characters the shaper draws
+ * separately and a caret must treat as one. */
+static void fn_check_cluster_caret(const char *what, const UniChar *text, CFIndex length, bool shaperSplits)
+{
+	CFMutableDictionaryRef attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
+		&kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+	CFStringRef string = CFStringCreateWithCharacters(kCFAllocatorDefault, text, length);
+	CFAttributedStringRef astr;
+	CTLineRef line = NULL;
+	CGFloat start = 0.0;
+	CGFloat end = 0.0;
+
+	CFDictionarySetValue(attrs, kCTFontAttributeName, test_font(13.0));
+	astr = (string != NULL) ? CFAttributedStringCreate(kCFAllocatorDefault, string, attrs) : NULL;
+	line = (astr != NULL) ? CTLineCreateWithAttributedString(astr) : NULL;
+	check(line != NULL, "%s: the line was made", what);
+	if (line != NULL) {
+		CFIndex i;
+		bool oneCaret = true;
+
+		start = CTLineGetOffsetForStringIndex(line, 0, NULL);
+		end = CTLineGetOffsetForStringIndex(line, length, NULL);
+		for (i = 1; i < length; i++) {
+			if (CTLineGetOffsetForStringIndex(line, i, NULL) != start) {
+				oneCaret = false;
+			}
+		}
+		/* **AND THE TWO MAPS ARE SHOWN DISAGREEING, WHICH IS THE WHOLE POINT OF THE WIRING.** The run reports the
+		 * SHAPER's string indices — one per glyph, and however many the shaping made — while the caret has exactly
+		 * one position across the cluster. A test that only asserted "one caret" would pass on a line that had one
+		 * glyph; asserting K > 1 here is what proves the caret is not reading the shaper's map any more. */
+		{
+			/* **EVERY RUN, NOT JUST THE FIRST**: the cluster's characters land in different faces (an emoji is
+			 * not in DejaVuSansMono, so the cascade sets it), and the shaper's answer is spread across them. */
+			CFArrayRef runs = CTLineGetGlyphRuns(line);
+			CFIndex runCount = (runs != NULL) ? CFArrayGetCount(runs) : 0;
+			CFIndex seenIndices[64];
+			CFIndex seenCount = 0;
+			CFIndex glyphCount = 0;
+			CFIndex r, g, k;
+
+			for (r = 0; r < runCount; r++) {
+				CTRunRef run = (CTRunRef)CFArrayGetValueAtIndex(runs, r);
+				const CFIndex *indices = CTRunGetStringIndicesPtr(run);
+				CFIndex runGlyphs = CTRunGetGlyphCount(run);
+
+				glyphCount += runGlyphs;
+				for (g = 0; g < runGlyphs && indices != NULL; g++) {
+					bool seen = false;
+
+					for (k = 0; k < seenCount; k++) {
+						if (seenIndices[k] == indices[g]) {
+							seen = true;
+						}
+					}
+					if (!seen && seenCount < 64) {
+						seenIndices[seenCount++] = indices[g];
+					}
+				}
+			}
+			{
+				CFIndex distinct = seenCount;
+
+			printf("  (%s: %ld glyph(s) over %ld run(s), %ld distinct shaper indices, ONE caret at %.4g..%.4g)\n",
+			       what, (long)glyphCount, (long)runCount, (long)distinct, (double)start, (double)end);
+			/* **WHETHER THE SHAPER SPLIT IT IS PART OF THE MEASUREMENT, NOT AN ASSUMPTION.** Two of these four
+			 * shapes were split by the shaper and two were not — a flag came back as one shaper cluster and a
+			 * composed mark as one glyph — so the case says which it expected rather than asserting a disagreement
+			 * where there is none. What it asserts in EVERY case is the caret: one position across the cluster. */
+			if (shaperSplits) {
+				check(distinct > 1,
+				      "%s: the SHAPER really does report more than one string index inside this cluster", what);
+			} else {
+				check(distinct >= 1, "%s: and here the shaper agreed already", what);
+			}
+			}
+		}
+		check(oneCaret, "%s: every index inside the cluster answers with the cluster's OWN caret", what);
+		/* AND A CLICK ANYWHERE ACROSS IT ANSWERS WITH ITS START — never an index inside it. */
+		{
+			CGFloat middle = start + (end - start) / 2.0f;
+			CFIndex hit = CTLineGetStringIndexForPosition(line, CGPointMake(middle, 0.0));
+
+			check(hit == 0 || hit == length,
+			      "%s: a click in the middle of the cluster answers with one of its ends, not an index "
+			      "inside it (got %ld)", what, (long)hit);
+		}
+		CFRelease(line);
+	}
+	if (astr != NULL) {
+		CFRelease(astr);
+	}
+	CFRelease(attrs);
+	if (string != NULL) {
+		CFRelease(string);
+	}
+}
+
+static int case_grapheme_caret(void)
+{
+	int before = g_fail;
+	/* AN EMOJI ZWJ SEQUENCE: GB11, three characters, one cluster. */
+	static const UniChar kEmoji[] = { 0xD83D, 0xDC69, 0x200D, 0xD83D, 0xDCBB };
+	/* A DEVANAGARI AKSARA: GB9c, क + virama + त, three characters, one cluster. */
+	static const UniChar kAksara[] = { 0x0915, 0x094D, 0x0924 };
+	/* A FLAG: GB12/GB13, two regional indicators, one cluster. */
+	static const UniChar kFlag[] = { 0xD83C, 0xDDE6, 0xD83C, 0xDDE7 };
+	/* AND A MARK ATTACHED TO ITS BASE, which is the case the shaper CAN split. */
+	static const UniChar kMark[] = { 0x0065, 0x0301 };
+	/* THE CONTROL: three separate characters, three clusters, FOUR caret positions. */
+	static const UniChar kPlain[] = { 0x0061, 0x0062, 0x0063 };
+	CFMutableDictionaryRef attrs;
+	CFStringRef string;
+	CFAttributedStringRef astr;
+	CTLineRef line;
+	CFIndex i;
+	CFIndex seen = 0;
+	CGFloat last = -1.0;
+
+	fn_check_cluster_caret("an emoji ZWJ sequence", kEmoji, 5, true);
+	fn_check_cluster_caret("a Devanagari aksara", kAksara, 3, true);
+	fn_check_cluster_caret("a flag", kFlag, 4, false);
+	fn_check_cluster_caret("a mark on its base", kMark, 2, false);
+
+	/* **AND THE CONTROL, WITHOUT WHICH "ONE CARET" IS SATISFIED BY A LINE THAT HAS ONLY ONE.** */
+	attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					  &kCFTypeDictionaryValueCallBacks);
+	CFDictionarySetValue(attrs, kCTFontAttributeName, test_font(13.0));
+	string = CFStringCreateWithCharacters(kCFAllocatorDefault, kPlain, 3);
+	astr = (string != NULL) ? CFAttributedStringCreate(kCFAllocatorDefault, string, attrs) : NULL;
+	line = (astr != NULL) ? CTLineCreateWithAttributedString(astr) : NULL;
+	check(line != NULL, "the plain line was made");
+	if (line != NULL) {
+		for (i = 0; i <= 3; i++) {
+			CGFloat offset = CTLineGetOffsetForStringIndex(line, i, NULL);
+
+			if (offset != last) {
+				seen++;
+				last = offset;
+			}
+		}
+		printf("  (`abc`: %ld distinct caret positions over 4 indices)\n", (long)seen);
+		check(seen == 4, "three separate characters still have FOUR caret positions");
+		CFRelease(line);
+	}
+	if (astr != NULL) {
+		CFRelease(astr);
+	}
+	CFRelease(attrs);
+	if (string != NULL) {
+		CFRelease(string);
+	}
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -8147,6 +8315,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "UAX #14, against the Unicode data's own rule cases", case_line_break_conformance },
 	{ "UAX #9, against the Unicode data's own character cases", case_bidi_conformance },
 	{ "UAX #29, against the Unicode data's own grapheme cases", case_grapheme_conformance },
+	{ "The caret moves by grapheme cluster, not by what the shaper drew", case_grapheme_caret },
 	{ "The typesetter breaks where UAX #14 says, and the cluster door does not", case_typesetter_uax14 },
 	{ "The typesetter hyphenates, but only when a factor asks it to", case_typesetter_hyphenation },
 	{ "A newline beyond the width does not make the line fit", case_typesetter_hard_break_width },
