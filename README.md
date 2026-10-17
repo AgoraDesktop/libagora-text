@@ -969,6 +969,21 @@ the user's decision is that they stay owed), the ATS pair (permanent), and the f
   it. And "a right-to-left paragraph's run reports RightToLeft" is now answered by `abc` being raised to level 2 by I2 —
   an EVEN level, drawn left to right — so its status is none; the paragraph's direction is measured in a NEUTRAL run
   instead, which takes the paragraph's level and reports it directly.
+- **AND GRAPHEME CLUSTERS ARE AN ENGINE NOW, AND THE RUN FOUND A RULE UNICODE ADDED IN 15.1.** There was no UAX #29
+  implementation in the tree at all — only an `Extend` bitmap used for string comparison — so caret movement could
+  stand between a letter and its accent, or inside an emoji. `CTGrapheme.c` is §3.1's rule list over THREE generated
+  properties (`Grapheme_Cluster_Break`, `Extended_Pictographic`, and `Indic_Conjunct_Break`), with the data from
+  `tools/gen-grapheme-data.py`. **MEASURED: `GraphemeBreakTest.txt` (Unicode 15.1.0), 1,187 of 1,187 strings**, plus
+  16 committed cases — the shortest the data has for each rule — on every build, and the whole file when
+  `GRABREAK_TEST` names it.
+  **AND THE FIRST RUN WAS 1,180, because the engine was written from ELEVEN rules and Unicode 15.1 has TWELVE.** The
+  seven failures were every case the data marks rule 9.3, all one shape: `क` + virama + `त`. GB9c — added in 15.1 —
+  makes a consonant, its extenders and a LINKER, and the next consonant ONE cluster, an aksara, and it needs a
+  property in neither of the other two tables. Nothing but the conformance run would have found it: the rule list as
+  it reads before 15.1 is self-consistent and wrong.
+  **AND IT IS NOT `CFStringGetRangeOfComposedCharactersAtIndex`.** Core Foundation's "composed character sequence" is
+  base-plus-marks, which knows nothing of emoji ZWJ sequences, regional indicator pairs or Hangul's arithmetic; that
+  door is untouched, and moving the caret and cluster layers onto this engine is the next cut.
 - **AND BIDI IS NOW MEASURED THE WAY LINE BREAKING WAS — THE ASYMMETRY THE LAST STOCK-TAKE NAMED, CLOSED.**
   `BidiCharacterTest.txt` (Unicode 15.1.0) states 91,707 single-paragraph cases with their resolved paragraph level,
   their resolved level per character and their visual order; the engine is driven through the SAME phase order the

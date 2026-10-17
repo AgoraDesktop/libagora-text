@@ -36,6 +36,7 @@
  * the typesetter backs off to spaces, and this is the algorithm that will let it stop. */
 #include <CoreText/CTLineBreak_internal.h>
 #include <CoreText/CTLineBreakThai_internal.h>
+#include <CoreText/CTGrapheme_internal.h>
 #include <CoreText/CTFont.h>
 /* AND THE ENGINE'S INTERNAL HEADER, FOR THE DOORS CORE TEXT OWNS BUT DOES NOT IMPLEMENT: the Unicode
  * glyph step and the face registry. */
@@ -7879,6 +7880,209 @@ static int case_bidi_conformance(void)
 	return g_fail - before;
 }
 
+/* **UAX #29, AGAINST THE UNICODE DATA'S OWN GRAPHEME CASES.** `GraphemeBreakTest.txt` states, for 1,187 strings,
+ * exactly where a grapheme cluster boundary falls — `÷` for a boundary, `×` for none — and its comments name the rule
+ * that decided each position. The engine is UAX #29 §3.1: eleven rules over two properties, `Grapheme_Cluster_Break`
+ * and `Extended_Pictographic`, which are SEPARATE facts about the same character (see `CTGrapheme_internal.h`).
+ *
+ * **AND THE POINT OF THE ALGORITHM IS THE CARET, NOT THE GLYPH.** A caret that moved by character instead of by
+ * cluster would let a user stand between an `e` and its U+0301, or delete half an emoji; the case that matters here
+ * is not any single string but that the boundary positions agree with Unicode's for all of them.
+ *
+ * **AND IT RUNS IN TWO LAYERS, the arrangement `LineBreakTest`, `BidiCharacterTest` and `NormalizationTest` have**:
+ * the table below is COMMITTED — the shortest case the data has for each rule, so every rule has a case a reader can
+ * read — and if `GRABREAK_TEST` names the downloaded file, the WHOLE 1,187-string run happens as well and its score
+ * is asserted. The file is not in this repository; `tools/gen-grapheme-cases.py` produces the table and
+ * `tools/gen-grapheme-data.py` produces the two property tables.
+ *
+ * **AND THE LAST ROW IS THE ONE THAT LOOKS LIKE A BUG AND IS NOT**: three regional indicators are a flag and a stray,
+ * so the boundary between the second and third IS a cluster boundary. GB12/GB13 pair them, and only in pairs. */
+static int case_grapheme_conformance(void)
+{
+	int before = g_fail;
+	static const struct { const char *points; const char *marks; const char *rule; } cases[] = {
+	{ "0020 0020", "111", "0.2" },
+	{ "0020 0020", "111", "0.3" },
+	{ "000D 000A", "101", "3.0" },
+	{ "000D 0020", "111", "4.0" },
+	{ "0020 000D", "111", "5.0" },
+	{ "1100 1100", "101", "6.0" },
+	{ "1160 1160", "101", "7.0" },
+	{ "11A8 11A8", "101", "8.0" },
+	{ "0020 034F", "101", "9.0" },
+	{ "0020 0A03", "101", "9.1" },
+	{ "0600 0020", "101", "9.2" },
+	{ "0915 094D 0924", "1001", "9.3" },
+	{ "1F6D1 200D 1F6D1", "1001", "11.0" },
+	{ "1F1E6 1F1E6", "101", "12.0" },
+	{ "0061 1F1E6 1F1E7 1F1E8 0062", "110111", "13.0" },
+	{ "0020 0020", "111", "999.0" },
+	};
+	const size_t caseCount = sizeof cases / sizeof cases[0];
+	size_t index;
+
+	for (index = 0; index < caseCount; index++) {
+		UniChar units[256];
+		CFIndex unitOf[128];
+		CFIndex points = 0, unitCount = 0, k;
+		CFIndex at = 0;
+		bool found[130];
+		bool pass = true;
+		const char *cursor = cases[index].points;
+
+		/* THE STRING, decoding hex and remembering EVERY CODE POINT'S UNIT OFFSET — which is how a boundary the door
+		 * reports in UTF-16 units is turned back into a position in the data's own notation. */
+		while (*cursor != '\0' && points < 128) {
+			char *end = NULL;
+			unsigned long code = strtoul(cursor, &end, 16);
+
+			if (end == cursor) {
+				break;
+			}
+			unitOf[points] = unitCount;
+			if (code <= 0xFFFF) {
+				units[unitCount++] = (UniChar)code;
+			} else {
+				code -= 0x10000;
+				units[unitCount++] = (UniChar)(0xD800 + (code >> 10));
+				units[unitCount++] = (UniChar)(0xDC00 + (code & 0x3FF));
+			}
+			points++;
+			cursor = end;
+		}
+		for (k = 0; k <= points; k++) {
+			found[k] = false;
+		}
+		found[0] = true;
+		found[points] = true;
+		while (at < unitCount) {
+			CFIndex next = ct_grapheme_cluster_end(units, unitCount, at);
+
+			if (next <= at) {
+				pass = false;
+				break;
+			}
+			for (k = 0; k < points; k++) {
+				if (unitOf[k] == next) {
+					found[k] = true;
+				}
+			}
+			at = next;
+		}
+		/* AND THE DATA'S OWN ANSWER, position by position. */
+		{
+			CFIndex m;
+
+			for (m = 0; m <= points; m++) {
+				bool want = (cases[index].marks[m] == '1');
+
+				if (found[m] != want) {
+					pass = false;
+				}
+			}
+		}
+		check(pass, "rule %s: the boundaries in `%s` are the data's own", cases[index].rule,
+		      cases[index].points);
+	}
+	printf("  (%ld curated UAX #29 cases, one per rule)\n", (long)caseCount);
+	/* AND THE WHOLE FILE, WHEN SOMEONE HAS DOWNLOADED IT. */
+	{
+		const char *path = getenv("GRABREAK_TEST");
+		FILE *file = (path != NULL) ? fopen(path, "r") : NULL;
+
+		if (file != NULL) {
+			char line[4096];
+			long total = 0, bad = 0;
+
+			while (fgets(line, sizeof line, file) != NULL) {
+				UniChar units[256];
+				CFIndex unitOf[128];
+				CFIndex points = 0, unitCount = 0, k;
+				CFIndex at = 0;
+				bool found[130];
+				bool want[130];
+				CFIndex wantCount = 0;
+				bool pass = true;
+				char *cursor = line;
+				char *hash = strchr(line, '#');
+
+				if (hash != NULL) {
+					*hash = '\0';
+				}
+				while (*cursor != '\0') {
+					unsigned long code;
+
+					while (*cursor == ' ' || *cursor == '\t') {
+						cursor++;
+					}
+					if (*cursor == '\0') {
+						break;
+					}
+					/* `÷` is U+00F7 and `×` is U+00D7; both arrive as two bytes, and the first is the same. */
+					if ((unsigned char)cursor[0] == 0xC3
+					    && ((unsigned char)cursor[1] == 0xB7 || (unsigned char)cursor[1] == 0x97)) {
+						if (wantCount < 130) {
+							want[wantCount++] = ((unsigned char)cursor[1] == 0xB7);
+						}
+						cursor += 2;
+						continue;
+					}
+					code = strtoul(cursor, &cursor, 16);
+					if (points >= 128) {
+						pass = false;
+						break;
+					}
+					unitOf[points] = unitCount;
+					if (code <= 0xFFFF) {
+						units[unitCount++] = (UniChar)code;
+					} else {
+						code -= 0x10000;
+						units[unitCount++] = (UniChar)(0xD800 + (code >> 10));
+						units[unitCount++] = (UniChar)(0xDC00 + (code & 0x3FF));
+					}
+					points++;
+				}
+				if (points == 0 || wantCount != points + 1) {
+					continue;
+				}
+				total++;
+				for (k = 0; k <= points; k++) {
+					found[k] = false;
+				}
+				found[0] = true;
+				found[points] = true;
+				while (at < unitCount) {
+					CFIndex next = ct_grapheme_cluster_end(units, unitCount, at);
+
+					if (next <= at) {
+						pass = false;
+						break;
+					}
+					for (k = 0; k < points; k++) {
+						if (unitOf[k] == next) {
+							found[k] = true;
+						}
+					}
+					at = next;
+				}
+				for (k = 0; k <= points; k++) {
+					if (found[k] != want[k]) {
+						pass = false;
+					}
+				}
+				if (!pass) {
+					bad++;
+				}
+			}
+			fclose(file);
+			printf("  (full GraphemeBreakTest: %ld of %ld strings, %ld open)\n", total - bad, total, bad);
+			check(bad == 0, "every one of the data's strings segments where it says");
+			check(total == 1187, "and the file is the one that score was measured on (1,187 strings)");
+		}
+	}
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -7942,6 +8146,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The glyph-to-character map the caret doors read", case_cluster_map },
 	{ "UAX #14, against the Unicode data's own rule cases", case_line_break_conformance },
 	{ "UAX #9, against the Unicode data's own character cases", case_bidi_conformance },
+	{ "UAX #29, against the Unicode data's own grapheme cases", case_grapheme_conformance },
 	{ "The typesetter breaks where UAX #14 says, and the cluster door does not", case_typesetter_uax14 },
 	{ "The typesetter hyphenates, but only when a factor asks it to", case_typesetter_hyphenation },
 	{ "A newline beyond the width does not make the line fit", case_typesetter_hard_break_width },
