@@ -27,15 +27,19 @@
  * WHAT THIS FILE IS NOT, SAID PLAINLY, because a shaping engine that looks finished and is not is worse than one
  * that says what it is missing:
  *
- *   - IT DOES NOT ITEMIZE. There is no "split this text into runs of one script, one direction and one face" here.
- *     The caller says what a run is; the script and the language are the caller's, and NULL means "read it off the
- *     characters", which is right only for a run that already is one script.
- *   - IT DOES NOT DO FONT FALLBACK. A character the face has no glyph for shapes to `.notdef` and stays there.
- *   - IT IS NOT WIRED INTO `CTLine` YET, and that is deliberate rather than incomplete. The line's arrays are one
- *     glyph per character, its caret doors index by character, and the AppKit's layout manager counts glyphs one per
- *     character — so shaping the line means changing the correspondence those three rely on, in one change, with the
- *     clusters as the new source of truth. That is the next slice and it is named; what is here is the engine, and
- *     NOTHING IN THE LAYOUT PATH CALLS IT, so nothing that exists today has been made silently wrong.
+ *   - **IT ITEMIZES BY SCRIPT AND NOT BY FACE.** A run whose characters change script IS cut where the script changes
+ *     and each piece is shaped with its own — see `fn_itemize` — which is a CORRECTION rather than an addition: the
+ *     answer used to be one script for the whole run, read off its first strong character, and A WRONG SCRIPT STILL
+ *     PRODUCES GLYPHS, so the damage was silent. MEASURED: `a` followed by the Devanagari conjunct `kssa` is **2
+ *     glyphs** itemized and **4** when the run is stated as `Latn`, which is the control that shows the itemizer did
+ *     it. What it does NOT itemize by is the FACE: a character the face has no glyph for shapes to `.notdef` and
+ *     stays there. **AND THAT HALF HAS ITS DOOR ALREADY** — `CTFontCreateForString` answers "a font that renders this
+ *     string" over the cascade list, implemented and measured in `CTFont.c` — so what is owed is the LINE CALLING IT,
+ *     which is a cut of its own: a line's runs are the ATTRIBUTED FONT's, and a fallback face is not in the
+ *     attributes.
+ *   - IT IS WIRED INTO `CTLine` NOW, and this bullet used to say it was not. The correspondence it needed is the
+ *     line's cluster map, which landed first; what the line passes here is a run it has cut by FONT and by LEVEL, and
+ *     the SCRIPT cut is this file's.
  *   - AND THE ORDER IT ANSWERS IN IS HARFBUZZ'S: logical for a left-to-right run, VISUAL for a right-to-left one.
  *     A line that has already run UAX #9 has its own order (L2 reorders by resolved level), so the two are
  *     reconciled in the wiring slice rather than guessed at here.
@@ -229,10 +233,13 @@ static CGFloat fn_shaper_points(const struct __CTShaper *shaper, int units)
 	return (CGFloat)units * shaper->size / (CGFloat)shaper->upem;
 }
 
-bool CTShaperShape(CTShaperRef shaper, const UniChar *chars, CFIndex count, CTWritingDirection direction,
-		   const char *scriptTag, CFStringRef language, CTShapedRun *out)
+/* **ONE PIECE, SHAPED WITH ONE SCRIPT — the body of `CTShaperShape` without the itemization around it.** The script
+ * is an `hb_script_t` rather than a tag because the itemizer below has one already and a tag would be a string it
+ * would have to write and re-parse. `HB_SCRIPT_INVALID` means "let HarfBuzz read it off the characters", which is
+ * what the door does for a caller that states no script and whose run is one script. */
+static bool fn_shape_piece(struct __CTShaper *s, const UniChar *chars, CFIndex count, CTWritingDirection direction,
+			   hb_script_t script, CFStringRef language, CTShapedRun *out)
 {
-	struct __CTShaper *s = (struct __CTShaper *)shaper;
 	hb_buffer_t *buffer;
 	hb_glyph_info_t *info;
 	hb_glyph_position_t *positions;
@@ -240,9 +247,6 @@ bool CTShaperShape(CTShaperRef shaper, const UniChar *chars, CFIndex count, CTWr
 	CFIndex i;
 
 	CTShapedRunZero(out);
-	if (s == NULL || out == NULL || chars == NULL || count <= 0) {
-		return false;
-	}
 	buffer = hb_buffer_create();
 	if (buffer == NULL) {
 		return false;
@@ -250,12 +254,8 @@ bool CTShaperShape(CTShaperRef shaper, const UniChar *chars, CFIndex count, CTWr
 	hb_buffer_add_utf16(buffer, (const uint16_t *)chars, (int)count, 0, (int)count);
 	hb_buffer_set_direction(buffer, (direction == kCTWritingDirectionRightToLeft) ? HB_DIRECTION_RTL
 										    : HB_DIRECTION_LTR);
-	/* **A SCRIPT TAG FROM THE CALLER IS A STATEMENT AND IS OBEYED; NO TAG IS A QUESTION.** HarfBuzz reads an
-	 * ISO 15924 tag off the first strong character, which is right for the runs a line is made of and is the
-	 * caller's business to get right when its run is not one script. The LANGUAGE works the same way, and it is
-	 * converted through Foundation because the caller holds a `CFStringRef` and HarfBuzz wants a C string. */
-	if (scriptTag != NULL && scriptTag[0] != '\0') {
-		hb_buffer_set_script(buffer, hb_script_from_string(scriptTag, -1));
+	if (script != HB_SCRIPT_INVALID) {
+		hb_buffer_set_script(buffer, script);
 	}
 	if (language != NULL) {
 		char langTag[64];
@@ -264,7 +264,7 @@ bool CTShaperShape(CTShaperRef shaper, const UniChar *chars, CFIndex count, CTWr
 			hb_buffer_set_language(buffer, hb_language_from_string(langTag, -1));
 		}
 	}
-	if (scriptTag == NULL || scriptTag[0] == '\0') {
+	if (script == HB_SCRIPT_INVALID) {
 		/* Fills in the script, the language AND the direction from the characters — the direction is set above and
 		 * is not overwritten, because a line that knows its direction from UAX #9 knows better than a guess. */
 		hb_buffer_guess_segment_properties(buffer);
@@ -309,4 +309,181 @@ bool CTShaperShape(CTShaperRef shaper, const UniChar *chars, CFIndex count, CTWr
 	}
 	hb_buffer_destroy(buffer);
 	return true;
+}
+
+/* =================================================================================================
+ * ITEMIZATION: WHERE ONE SCRIPT ENDS AND THE NEXT BEGINS.
+ * =============================================================================================== */
+/* **A RUN OF CHARACTERS IS NOT A RUN OF ONE SCRIPT, AND A SHAPER THAT ASSUMES IT IS WRONG FOR EVERY MIXED RUN.**
+ * HarfBuzz's own answer to "no script was stated" is to read one off the FIRST STRONG CHARACTER of the buffer
+ * (`hb_buffer_guess_segment_properties`), which is right for a run that already IS one script and wrong for every
+ * other: a Devanagari syllable inside a Latin sentence would be shaped with `latn` — no conjunct, no reordering —
+ * and the damage is silent, because a wrong script still produces glyphs.
+ *
+ * SO THE RUN IS CUT WHERE THE SCRIPT CHANGES, and each piece is shaped with its own. **THE CUTS ARE HARFBUZZ'S OWN
+ * ANSWER** (`hb_unicode_script`, over the Unicode data HarfBuzz carries), so this tier still links one shaping
+ * library and not two, and the script a piece is shaped with is the same script the shaper would have guessed if the
+ * run had been that piece alone.
+ *
+ * **AND `COMMON` AND `INHERITED` ARE NOT SCRIPTS FOR THIS PURPOSE.** A space, a digit, a punctuation mark and a
+ * combining mark belong to no script and to EVERY script — Zyyy, Zinh and Zzzz are the three reserved tags — so they
+ * take the script of their NEIGHBOURS: the preceding one when there is one, and the following one when the run
+ * begins with them, which is the rule every itemizer uses and the reason a leading quote does not become its own
+ * piece. */
+#define CT_SHAPER_SCRIPT_PIECES 64
+
+static bool fn_shaper_is_real_script(hb_script_t script)
+{
+	return script != HB_SCRIPT_COMMON && script != HB_SCRIPT_INHERITED && script != HB_SCRIPT_UNKNOWN;
+}
+
+/* THE PIECES OF A RUN, as (start, count, script) triples. At most `CT_SHAPER_SCRIPT_PIECES` of them, and a run with
+ * more alternations than that is shaped as ONE piece with no script stated — a degradation that is named here and
+ * that answers a question HarfBuzz's guess would have answered anyway. */
+static CFIndex fn_itemize(struct __CTShaper *s, const UniChar *chars, CFIndex count, CFIndex *starts, CFIndex *counts,
+			  hb_script_t *scripts)
+{
+	hb_script_t *resolved;
+	CFIndex i, pieces = 0, runStart = 0;
+	hb_script_t runScript = HB_SCRIPT_INVALID;
+
+	resolved = (hb_script_t *)calloc((size_t)count, sizeof(hb_script_t));
+	if (resolved == NULL) {
+		return 0;
+	}
+	for (i = 0; i < count; i++) {
+		resolved[i] = hb_unicode_script(hb_unicode_funcs_get_default(), (hb_codepoint_t)chars[i]);
+	}
+	/* **A NEUTRAL TAKES THE PRECEDING REAL SCRIPT**, which is ICU's rule and the one that keeps a full stop, a space
+	 * or a combining mark with the text before it. */
+	{
+		hb_script_t previous = HB_SCRIPT_INVALID;
+
+		for (i = 0; i < count; i++) {
+			if (fn_shaper_is_real_script(resolved[i])) {
+				previous = resolved[i];
+			} else if (previous != HB_SCRIPT_INVALID) {
+				resolved[i] = previous;
+			}
+		}
+	}
+	/* **AND THE LEADING NEUTRALS — THE ONES BEFORE EVERY REAL SCRIPT — TAKE THE FIRST REAL ONE**, so a run that opens
+	 * with a quote or a space is not its own piece. */
+	{
+		hb_script_t first = HB_SCRIPT_INVALID;
+
+		for (i = 0; i < count; i++) {
+			if (fn_shaper_is_real_script(resolved[i])) {
+				first = resolved[i];
+				break;
+			}
+		}
+		if (first != HB_SCRIPT_INVALID) {
+			for (i = 0; i < count && !fn_shaper_is_real_script(resolved[i]); i++) {
+				resolved[i] = first;
+			}
+		}
+	}
+	/* AND THE RUNS OF ONE SCRIPT BECOME THE PIECES. A script that never resolved — a run of digits and spaces with no
+	 * letter in it — is passed on as `HB_SCRIPT_INVALID`, which is the shaper's "read it off the characters". */
+	for (i = 0; i <= count; i++) {
+		bool atEnd = (i == count);
+		hb_script_t script = atEnd ? HB_SCRIPT_INVALID : resolved[i];
+
+		if (atEnd || script != runScript) {
+			CFIndex length = i - runStart;
+
+			if (length > 0) {
+				if (pieces >= CT_SHAPER_SCRIPT_PIECES) {
+					free(resolved);
+					return 0;	/* the named degradation: one piece, no script stated */
+				}
+				starts[pieces] = runStart;
+				counts[pieces] = length;
+				scripts[pieces] = runScript;
+				pieces++;
+			}
+			runStart = i;
+			runScript = script;
+		}
+	}
+	free(resolved);
+	(void)s;
+	return pieces;
+}
+
+bool CTShaperShape(CTShaperRef shaper, const UniChar *chars, CFIndex count, CTWritingDirection direction,
+		   const char *scriptTag, CFStringRef language, CTShapedRun *out)
+{
+	struct __CTShaper *s = (struct __CTShaper *)shaper;
+
+	CTShapedRunZero(out);
+	if (s == NULL || out == NULL || chars == NULL || count <= 0) {
+		return false;
+	}
+	/* **A SCRIPT TAG FROM THE CALLER IS A STATEMENT AND IS OBEYED**: the run is one piece and it is shaped with the
+	 * script the caller named, whatever the characters say. A tag of NULL IS NOT A QUESTION ANY MORE — see
+	 * `fn_itemize` — it is the RUN BEING CUT WHERE THE SCRIPT CHANGES, which is what the caller means by handing over
+	 * a run it has not analysed. */
+	if (scriptTag != NULL && scriptTag[0] != '\0') {
+		return fn_shape_piece(s, chars, count, direction, hb_script_from_string(scriptTag, -1), language, out);
+	}
+	{
+		CFIndex starts[CT_SHAPER_SCRIPT_PIECES], counts[CT_SHAPER_SCRIPT_PIECES];
+		hb_script_t scripts[CT_SHAPER_SCRIPT_PIECES];
+		CTShapedRun pieces[CT_SHAPER_SCRIPT_PIECES];
+		CFIndex pieceCount = fn_itemize(s, chars, count, starts, counts, scripts);
+		CFIndex p, total = 0, at = 0;
+
+		if (pieceCount <= 0) {
+			/* NOTHING TO ITEMIZE, OR TOO MANY ALTERNATIONS: one piece, and no script stated. */
+			return fn_shape_piece(s, chars, count, direction, HB_SCRIPT_INVALID, language, out);
+		}
+		for (p = 0; p < pieceCount; p++) {
+			CTShapedRunZero(&pieces[p]);
+			if (!fn_shape_piece(s, chars + starts[p], counts[p], direction, scripts[p], language, &pieces[p])) {
+				CFIndex q;
+
+				for (q = 0; q < p; q++) {
+					CTShapedRunFree(&pieces[q]);
+				}
+				return false;
+			}
+			total += pieces[p].glyphCount;
+		}
+		if (total <= 0) {
+			for (p = 0; p < pieceCount; p++) {
+				CTShapedRunFree(&pieces[p]);
+			}
+			return false;
+		}
+		out->glyphs = (CGGlyph *)malloc((size_t)total * sizeof(CGGlyph));
+		out->offsets = (CGPoint *)malloc((size_t)total * sizeof(CGPoint));
+		out->advances = (CGSize *)malloc((size_t)total * sizeof(CGSize));
+		out->clusters = (CFIndex *)malloc((size_t)total * sizeof(CFIndex));
+		if (out->glyphs == NULL || out->offsets == NULL || out->advances == NULL || out->clusters == NULL) {
+			for (p = 0; p < pieceCount; p++) {
+				CTShapedRunFree(&pieces[p]);
+			}
+			CTShapedRunFree(out);
+			return false;
+		}
+		out->glyphCount = total;
+		/* **AND THE CLUSTERS ARE OFFSET BY THE PIECE'S OWN START**, because every piece was shaped as its own buffer
+		 * and answered indices into ITSELF: a caller must not be able to tell that the run was cut at all, and the
+		 * indices it gets back are indices into the `chars` it passed. */
+		for (p = 0; p < pieceCount; p++) {
+			CFIndex k;
+
+			for (k = 0; k < pieces[p].glyphCount; k++) {
+				out->glyphs[at] = pieces[p].glyphs[k];
+				out->offsets[at] = pieces[p].offsets[k];
+				out->advances[at] = pieces[p].advances[k];
+				out->clusters[at] = starts[p] + pieces[p].clusters[k];
+				at++;
+			}
+			CTShapedRunFree(&pieces[p]);
+		}
+		return true;
+	}
 }

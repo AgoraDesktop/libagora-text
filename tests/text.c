@@ -7114,6 +7114,99 @@ static int case_typesetter_hard_break_width(void)
 	return g_fail - before;
 }
 
+/* **AND A RUN IS NOT ONE SCRIPT, WHICH IS WHAT ITEMIZATION IS FOR.** The shaper's answer to "no script was stated"
+ * used to be HarfBuzz's: read one off the FIRST STRONG CHARACTER of the buffer. That is right for a run that already
+ * IS one script and wrong for every other — and the damage is SILENT, because a wrong script still produces glyphs.
+ * `deva` forms a conjunct from `KA` + VIRAMA + `SSA` and `latn` does not, so the difference is a glyph count.
+ *
+ * **AND THE CASE CARRIES A CONTROL, WHICH IS WHAT MAKES IT A MEASUREMENT RATHER THAN AN EXPECTATION**: the same four
+ * characters are shaped twice, once with NO script (itemized — the script changes in the middle) and once with an
+ * explicit `Latn` tag (one piece, the caller's statement obeyed). If the itemizer were not doing the work, the two
+ * would agree. MEASURED: **2 glyphs against 4**. */
+static int case_shaping_itemization(void)
+{
+	int before = g_fail;
+	CTFontRef font = shaping_font("/usr/share/fonts/truetype/freefont/FreeSerif.ttf", 13.0);
+	CTShaperRef shaper = (font != NULL) ? CTShaperCreate(font) : NULL;
+	/* LATIN `a`, THEN THE DEVANAGARI CONJUNCT `kssa`: KA, VIRAMA, SSA. */
+	UniChar mixed[] = { 'a', 0x0915, 0x094D, 0x0937 };
+	CTShapedRun itemized, stated;
+
+	CTShapedRunZero(&itemized);
+	CTShapedRunZero(&stated);
+	check(font != NULL && shaper != NULL, "the itemization case could make its face or its shaper");
+	if (font == NULL || shaper == NULL) {
+		if (shaper != NULL) CTShaperRelease(shaper);
+		if (font != NULL) CFRelease(font);
+		return g_fail - before;
+	}
+	/* THE ITEMIZED SHAPING: no script stated, so the run is cut where the script changes. */
+	check(CTShaperShape(shaper, mixed, 4, kCTWritingDirectionLeftToRight, NULL, NULL, &itemized),
+	      "the mixed run could be shaped");
+	/* AND THE CONTROL: the caller STATES one script, and the statement is obeyed even though it is wrong for half
+	 * the run — which is what "a script tag from the caller is a statement" means. */
+	check(CTShaperShape(shaper, mixed, 4, kCTWritingDirectionLeftToRight, "Latn", NULL, &stated),
+	      "and it could be shaped as one stated script");
+	printf("  (`a` + the Devanagari conjunct: %ld glyphs itemized, %ld with `Latn` stated)\n",
+	       (long)itemized.glyphCount, (long)stated.glyphCount);
+	/* THE CONJUNCT IS ONE GLYPH IN THE ITEMIZED SHAPING — `a` plus the conjunct is two — AND THREE OR FOUR IN THE
+	 * STATED ONE, because `latn` has no conjunct rule to apply. */
+	check(itemized.glyphCount == 2, "the itemized run is TWO glyphs: `a` and ONE conjunct, not %ld",
+	      (long)itemized.glyphCount);
+	check(stated.glyphCount > itemized.glyphCount,
+	      "and shaping it as one stated `Latn` run gives MORE glyphs (%ld), because the Devanagari piece was not "
+	      "shaped as Devanagari — so the itemizer is what formed the conjunct", (long)stated.glyphCount);
+	/* **AND THE CLUSTERS ARE INDICES INTO THE RUN THE CALLER PASSED**, which is the property that lets a line cut a
+	 * run without its callers knowing: the conjunct begins at character 1 whether it was shaped alone or inside. */
+	if (itemized.glyphCount == 2) {
+		check(itemized.clusters[0] == 0 && itemized.clusters[1] == 1,
+		      "and its clusters are the caller's own indices — 0 and 1 — not the piece's (%ld and %ld)",
+		      (long)itemized.clusters[0], (long)itemized.clusters[1]);
+	}
+	CTShapedRunFree(&itemized);
+	CTShapedRunFree(&stated);
+	/* **AND THE LINE GETS THIS WITHOUT ASKING**, because the only script it ever states is none: `CTLine.c` hands the
+	 * shaper a run it has cut by FONT and by LEVEL, and the SCRIPT cut is this door's. The end-to-end check is that a
+	 * line over the same four characters has the conjunct's glyph and reports the caller's own string indices. */
+	{
+		CFStringRef text = CFStringCreateWithCharacters(kCFAllocatorDefault, mixed, 4);
+		CFMutableDictionaryRef attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
+			&kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+		CFAttributedStringRef astr;
+		CTLineRef line;
+
+		CFDictionarySetValue(attrs, kCTFontAttributeName, font);
+		astr = (text != NULL) ? CFAttributedStringCreate(kCFAllocatorDefault, text, attrs) : NULL;
+		line = (astr != NULL) ? CTLineCreateWithAttributedString(astr) : NULL;
+		check(line != NULL, "the mixed-script line was made");
+		if (line != NULL) {
+			CFArrayRef runs = CTLineGetGlyphRuns(line);
+			CTRunRef run = (runs != NULL && CFArrayGetCount(runs) > 0)
+				? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
+			const CFIndex *indices = (run != NULL) ? CTRunGetStringIndicesPtr(run) : NULL;
+
+			printf("  (and a LINE over the same four characters is %ld glyph(s))\n",
+			       (long)CTLineGetGlyphCount(line));
+			check(CTLineGetGlyphCount(line) == 2,
+			      "a LINE over the same text has the conjunct too, %ld glyphs",
+			      (long)CTLineGetGlyphCount(line));
+			check(indices != NULL && indices[0] == 0 && indices[1] == 1,
+			      "and reports the caller's own string indices, so nothing above can tell the run was cut");
+			CFRelease(line);
+		}
+		if (astr != NULL) {
+			CFRelease(astr);
+		}
+		CFRelease(attrs);
+		if (text != NULL) {
+			CFRelease(text);
+		}
+	}
+	CTShaperRelease(shaper);
+	CFRelease(font);
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -7179,6 +7272,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The typesetter breaks where UAX #14 says, and the cluster door does not", case_typesetter_uax14 },
 	{ "The typesetter hyphenates, but only when a factor asks it to", case_typesetter_hyphenation },
 	{ "A newline beyond the width does not make the line fit", case_typesetter_hard_break_width },
+	{ "A run is itemized by script, and the caller can still state one", case_shaping_itemization },
 	{ "A ligature is one glyph for three characters", case_shaping_ligatures },
 	{ "A pair adjustment reaches the advances", case_shaping_kerning },
 	{ "A combining mark, composed in one face and attached in another", case_shaping_marks },

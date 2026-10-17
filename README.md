@@ -908,3 +908,23 @@ the user's decision is that they stay owed), the ATS pair (permanent), and the f
   case in this suite that involved a newline used a line short enough to fit, which is exactly why it survived — and
   the engine's own suite now holds both sides of the rule: a newline INSIDE the width still ends the line, newline
   included, and one BEYOND it does not.
+- **AND THE SHAPER ITEMIZES BY SCRIPT NOW, WHICH IS A CORRECTION RATHER THAN A FEATURE.** Its answer to "no script was
+  stated" was HarfBuzz's: read ONE script off the FIRST STRONG CHARACTER of the buffer. That is right for a run that
+  already is one script and wrong for every other — and **A WRONG SCRIPT STILL PRODUCES GLYPHS, SO THE DAMAGE WAS
+  SILENT**: a Devanagari syllable inside a Latin sentence was shaped with `latn`, which forms no conjunct. Now the run
+  is cut where the script changes (`fn_itemize`, over `hb_unicode_script`, so the tree still links ONE shaping
+  library) and each piece is shaped with its own script; `Common`, `Inherited` and `Unknown` are not scripts for this
+  purpose and take their neighbour's, by ICU's rule — the preceding one, and the first following one for a run that
+  opens with them. **AN EXPLICIT TAG IS STILL A STATEMENT AND IS OBEYED**, which is what makes the case a measurement:
+  MEASURED, `a` + `KA`+VIRAMA+`SSA` is **2 glyphs** itemized (the letter and ONE conjunct) and **4** when the run is
+  stated as `Latn` — the control that shows the itemizer did the work rather than HarfBuzz getting it right anyway.
+  **AND A LINE GETS IT WITHOUT ASKING** (`CTLine.c` states no script, only font and level cuts): a line over the same
+  four characters is **2 glyphs**, with the run reporting the caller's OWN string indices, so nothing above can tell
+  the run was cut at all.
+- **AND THE OTHER HALF — ITEMIZATION BY FACE — HAS ITS DOOR ALREADY, WHICH IS WORTH SAYING BECAUSE IT LOOKS MISSING.**
+  `CTFontCreateForString` answers "a font that renders this string" over the cascade list, and it is implemented and
+  measured (`CTFont.c`, ten cases in this suite, including a `kCTFontCascadeListAttribute` the caller supplies). What
+  is owed is the LINE CALLING IT — and that is a cut of its own rather than a call added: a line's runs are the
+  ATTRIBUTED FONT's today, and a fallback face is not in the attributes, so a substituted run would report an
+  attribute that does not name the face it was drawn in. That is the next slice, and the shaper's own header says so
+  where a reader looks.
