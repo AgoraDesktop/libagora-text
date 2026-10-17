@@ -42,8 +42,15 @@
  * runs in the LINE (see `CTLine.c`). **BOTH OPTIONS ARE OBEYED NOW**, by being read into a `CTLineBidiDirective` and
  * handed to `CTLineCreateWithAttributedStringAndRangeWithBidi` — so the typesetter consults neither while BREAKING
  * (bidi changes no advance, which is why it costs nothing to keep the breaker ignorant of it) and both change the line
- * this typesetter makes. A caller who needs the LEVELS is still owed that door; what is here is the layout, and a line
- * whose glyphs were reordered says so with `kCTRunStatusNonMonotonic`.
+ * this typesetter makes.
+ *
+ * **AND A CALLER WHO NEEDS THE LEVELS IS NOT OWED A DOOR, WHICH CORRECTS WHAT THIS SENTENCE USED TO CLAIM.** Core Text
+ * declares no door that reports resolved levels, so there is none to owe; the door that answers the question a caller
+ * is actually asking — "which way does this piece of the line run?" — is `CTRunGetStatus`, and it answers PROPERLY now.
+ * It used to report the LINE's direction from every run, which is wrong on any line whose parts point different ways;
+ * the line's runs are cut at the level boundaries, so each run is one direction and `kCTRunStatusRightToLeft` is the
+ * fact about the run that `CTRun.h` says it is. And a line whose glyphs were reordered says so, as before, with
+ * `kCTRunStatusNonMonotonic`.
  */
 #ifndef CORE_TEXT_CTTYPESETTER_H
 #define CORE_TEXT_CTTYPESETTER_H

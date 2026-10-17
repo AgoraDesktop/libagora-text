@@ -5210,10 +5210,29 @@ static int case_base_writing_direction(void)
 	run = (runs != NULL && CFArrayGetCount(runs) > 0) ? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
 	status = (run != NULL) ? CTRunGetStatus(run) : kCTRunStatusNoStatus;
 	printf("  (a right-to-left paragraph's run reports status %u)\n", (unsigned)status);
-	check(run != NULL && status == kCTRunStatusRightToLeft,
-	      "a right-to-left paragraph's run reports kCTRunStatusRightToLeft");
+	/* **AND `kCTRunStatusRightToLeft` IS NOW A FACT ABOUT THE RUN, WHICH CHANGED THIS CASE'S ANSWER — TOWARDS THE
+	 * TRUTH.** The status used to be the LINE's, reported by every run, so a run in a right-to-left paragraph said
+	 * "right to left" whether or not it was. A run is one level now, and `abc` in a right-to-left paragraph is
+	 * raised to level 2 by I2 — an EVEN level, drawn left to right, which L2 does not move — so the honest status is
+	 * NONE. The paragraph's direction is still observable in a run: a NEUTRAL string takes the paragraph's level,
+	 * and that is the check below. */
+	check(run != NULL && status == kCTRunStatusNoStatus,
+	      "a Latin word in a right-to-left paragraph is raised to level 2 by I2, so its run is NOT right-to-left");
 	check((status & kCTRunStatusNonMonotonic) == 0,
 	      "and nothing was REORDERED yet, so the non-monotonic flag stays clear");
+	if (line != NULL) CFRelease(line);
+	if (astr != NULL) CFRelease(astr);
+	/* **AND THE PARAGRAPH'S DIRECTION IS VISIBLE IN A RUN AFTER ALL — IN A NEUTRAL ONE.** N2 gives neutrals the
+	 * paragraph's level, so `()` has no level of its own to be raised from and reports the base direction directly. */
+	astr = CFAttributedStringCreate(kCFAllocatorDefault, CFSTR("()"), attrs);
+	line = (astr != NULL) ? CTLineCreateWithAttributedString(astr) : NULL;
+	runs = (line != NULL) ? CTLineGetGlyphRuns(line) : NULL;
+	run = (runs != NULL && CFArrayGetCount(runs) > 0) ? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
+	status = (run != NULL) ? CTRunGetStatus(run) : kCTRunStatusNoStatus;
+	printf("  (and a NEUTRAL run's status %u is the paragraph's own direction)\n", (unsigned)status);
+	check(run != NULL && (status & kCTRunStatusRightToLeft) != 0,
+	      "while a NEUTRAL run in that paragraph reports kCTRunStatusRightToLeft, which IS the base direction "
+	      "(and it is also NonMonotonic, because L2 reversed it and L4 mirrored it)");
 	if (line != NULL) CFRelease(line);
 	if (astr != NULL) CFRelease(astr);
 
@@ -6039,9 +6058,14 @@ static int case_typesetter_bidi_options(void)
 			 * and an RTL run inside an LTR paragraph is reordered either way. The DIRECTION bit is the proof that
 			 * the level was forced, because the same string with no options reports it. A check demanding no
 			 * NonMonotonic here would be demanding the algorithm get its own rules wrong. */
-			check(run != NULL && (status & kCTRunStatusRightToLeft) == 0,
-			      "a forced level of 0 takes the RightToLeft bit off a Hebrew paragraph (status %u)",
-			      (unsigned)status);
+			/* **AND THIS CHECK FLIPPED WHEN THE STATUS BECAME THE RUN'S OWN.** It asserted that forcing level 0
+			 * took the RightToLeft bit OFF, which was true only while the bit was the LINE's: a Hebrew letter in a
+			 * level-0 paragraph is a strong RTL character and gets level 1, so its run is right-to-left with the
+			 * option and without it. What the option changes is the PARAGRAPH, whose direction the caret below
+			 * measures — the run is not the paragraph. */
+			check(run != NULL && (status & kCTRunStatusRightToLeft) != 0,
+			      "a forced level of 0 leaves the HEBREW RUN right-to-left, because a run is not the paragraph "
+			      "(status %u)", (unsigned)status);
 			check(run != NULL && (status & kCTRunStatusNonMonotonic) != 0,
 			      "while its Hebrew RUN is still reordered, because a run inside a paragraph is not the paragraph");
 			if (line != NULL) CFRelease(line);
@@ -6064,9 +6088,13 @@ static int case_typesetter_bidi_options(void)
 
 			printf("  (a Latin line with level 1 forced: status %u, carets %g then %g)\n",
 			       (unsigned)status, (double)first, (double)last);
-			check((status & kCTRunStatusRightToLeft) != 0,
-			      "a forced level of 1 puts the RightToLeft bit on a LATIN paragraph (status %u)",
-			      (unsigned)status);
+			/* **AND I2 IS WHY THE LATIN RUN STILL REPORTS NO DIRECTION OF ITS OWN.** Forcing level 1 makes the
+			 * PARAGRAPH right-to-left; I2 then raises every L character to level 2, so the run is an EVEN-level run
+			 * drawn left to right, and the honest status has no direction bit. The directive's effect is in the
+			 * caret pair below — which is what the algorithm did with it — rather than in the run's status. */
+			check((status & kCTRunStatusRightToLeft) == 0 && (status & kCTRunStatusNonMonotonic) == 0,
+			      "a forced level of 1 raises a LATIN run to level 2 by I2, so the run reports no direction of "
+			      "its own (status %u)", (unsigned)status);
 			/* **AND THE LATIN RUN KEEPS ITS OWN ORDER, WHICH IS I2 AND NOT A MISSING REORDER.** I2 raises the level
 			 * of every L character in an odd-level paragraph, so "abc" becomes an EVEN-level run inside a
 			 * right-to-left paragraph and L2 leaves it where it is. The caret pair is what MEASURES that the run's
@@ -7397,6 +7425,85 @@ static int case_line_font_fallback(void)
 	return g_fail - before;
 }
 
+/* **AND A RUN IS ONE DIRECTION, WHICH IS WHAT APPLE'S `kCTRunStatusRightToLeft` IS A FACT ABOUT.** The status used to be
+ * the LINE's, reported by every run: a line that began in Latin and continued in Hebrew said "left to right" for the
+ * Hebrew too, because the only direction in it was the line's first. A run is a piece of the line that shares one set
+ * of attributes, and the attribute that decides its direction is the RESOLVED LEVEL — so the font runs are cut at the
+ * level boundaries (`fn_level_runs`) and each run reports its own.
+ *
+ * **AND THE MEASUREMENT IS A LINE WHOSE TWO HALVES POINT DIFFERENT WAYS**, which is the only kind of line that can tell
+ * the two arrangements apart: `ab` then two Hebrew letters is one font run and one fallback cut, and it is TWO LEVELS —
+ * 0 and 1 — so it is two runs that disagree about their direction. Before the cut both would have said `NoStatus`,
+ * because the line's own direction is left to right.
+ *
+ * **AND THE LINE'S STATED DIRECTION STILL ANSWERS WHEN THERE ARE NO LEVELS.** A caller that turns bidi processing off
+ * gets no levels at all, and a run then has nothing of its own to read — but the paragraph's direction is STATED rather
+ * than computed, and every run is drawn in it. Reporting nothing there would call a forced right-to-left paragraph
+ * directionless, which is why that path is in the same door. */
+static int case_run_direction_is_its_own(void)
+{
+	int before = g_fail;
+	CTFontRef mono = test_font(13.0);
+	UniChar mixed[] = { 'a', 'b', 0x05D0, 0x05D1 };
+	CTWritingDirection rtl = kCTWritingDirectionRightToLeft;
+	CTParagraphStyleSetting setting;
+
+	setting.spec = kCTParagraphStyleSpecifierBaseWritingDirection;
+	setting.valueSize = sizeof(rtl);
+	setting.value = &rtl;
+	(void)setting;
+	if (mono != NULL) {
+		int pass;
+
+		for (pass = 0; pass < 2; pass++) {
+			CFMutableDictionaryRef attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
+				&kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+			CFStringRef text = CFStringCreateWithCharacters(kCFAllocatorDefault, mixed, 4);
+			CTParagraphStyleRef style = (pass == 1)
+				? CTParagraphStyleCreate(&setting, 1) : NULL;
+			CFAttributedStringRef astr;
+			CTLineRef line;
+
+			CFDictionarySetValue(attrs, kCTFontAttributeName, mono);
+			if (style != NULL) {
+				CFDictionarySetValue(attrs, kCTParagraphStyleAttributeName, style);
+			}
+			astr = (text != NULL) ? CFAttributedStringCreate(kCFAllocatorDefault, text, attrs) : NULL;
+			line = (astr != NULL) ? CTLineCreateWithAttributedString(astr) : NULL;
+			check(line != NULL, "the mixed line was made");
+			if (line != NULL) {
+				CFArrayRef runs = CTLineGetGlyphRuns(line);
+				CFIndex runCount = (runs != NULL) ? CFArrayGetCount(runs) : 0;
+				CTRunStatus first = (runCount > 0)
+					? CTRunGetStatus((CTRunRef)CFArrayGetValueAtIndex(runs, 0))
+					: kCTRunStatusNoStatus;
+				CTRunStatus second = (runCount > 1)
+					? CTRunGetStatus((CTRunRef)CFArrayGetValueAtIndex(runs, 1))
+					: kCTRunStatusNoStatus;
+
+				printf("  (pass %d: %ld run(s) over `ab` + two Hebrew letters — statuses %u then %u)\n", pass,
+				       (long)runCount, (unsigned)first, (unsigned)second);
+				check(runCount >= 2, "the Latin and the Hebrew are in DIFFERENT runs, which is the level cut");
+				/* **AND THE LATIN RUN'S STATUS IS EXACTLY NOTHING, WHICH TOOK A SECOND CORRECTION.** The
+				 * NON-MONOTONIC bit was the line's flag copied into every run, so this run reported that its string
+				 * indices were out of order because a HEBREW run elsewhere had been reversed. Both bits are the
+				 * run's own now: this run ascends and runs left to right, so it has nothing to report. */
+				check(first == kCTRunStatusNoStatus,
+				      "and the LATIN run's status is exactly NOTHING — it moved nowhere and runs left to right");
+				check(second == (kCTRunStatusRightToLeft | kCTRunStatusNonMonotonic),
+				      "while the HEBREW run reports both facts about ITSELF: right to left, and reversed");
+				CFRelease(line);
+			}
+			if (astr != NULL) CFRelease(astr);
+			if (style != NULL) CFRelease(style);
+			CFRelease(attrs);
+			if (text != NULL) CFRelease(text);
+		}
+		CFRelease(mono);
+	}
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -7464,6 +7571,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "A newline beyond the width does not make the line fit", case_typesetter_hard_break_width },
 	{ "A run is itemized by script, and the caller can still state one", case_shaping_itemization },
 	{ "A face that cannot render a character is replaced, and only it moves", case_line_font_fallback },
+	{ "A run reports its own direction, because a run is one level", case_run_direction_is_its_own },
 	{ "A ligature is one glyph for three characters", case_shaping_ligatures },
 	{ "A pair adjustment reaches the advances", case_shaping_kerning },
 	{ "A combining mark, composed in one face and attached in another", case_shaping_marks },

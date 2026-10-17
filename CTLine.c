@@ -102,9 +102,11 @@ struct __CTLine {
 	CFIndex *visualOrder;		/* malloc'd, glyphCount entries, or NULL */
 	bool nonMonotonic;
 	/* **AND THE RESOLVED LEVELS, WHEN THE PIPELINE RAN.** An ODD level is what makes a character's LEADING edge its
-	 * RIGHT one — the caret convention the offset door owes — so the levels are kept rather than freed. NULL when the
-	 * line never ran the pipeline, which means logical order and a left leading edge. */
-	uint8_t *levels;		/* malloc'd, glyphCount entries, or NULL */
+	 * RIGHT one — the caret convention the offset door owes — so the levels are kept rather than freed, and they are
+	 * what `CTRunGetStatus` reports a run's `kCTRunStatusRightToLeft` from. INDEXED BY CHARACTER: `range.length`
+	 * entries, the pipeline's own array, which is why a glyph offset may not be used to read it. NULL when the line
+	 * never ran the pipeline, which means logical order and a left leading edge. */
+	uint8_t *levels;		/* malloc'd, ONE ENTRY PER CHARACTER of `range`, or NULL */
 	/* **AND WHICH OF THE GLYPHS IS NOT A GLYPH BUT A BOX.** A character carrying a run delegate occupies the width its
 	 * delegate answers and draws no ink; this flag is the one thing that tells the two apart, and it is carried
 	 * alongside the glyphs so a DRAW can skip a box and the `CTRun` built from the line can too. */
@@ -542,6 +544,56 @@ static void fn_fallback_runs(struct __CTLine *line, CFAttributedStringRef string
 	(void)string;
 }
 
+/* **AND A RUN IS WHERE THE RESOLVED LEVEL CHANGES, WHICH IS WHAT APPLE'S RUNS ARE.** A run is, in `CTRun.h`'s own
+ * words, "the piece of a line that shares one set of attributes", and the attribute that decides a run's DIRECTION is
+ * the resolved level: `kCTRunStatusRightToLeft` is a fact about a RUN, and a run that held both a Latin word and a
+ * Hebrew one could only report one of them. **SO THE FONT RUNS ARE CUT AT THE LEVEL BOUNDARIES TOO**, and each run is
+ * then one direction.
+ *
+ * IT RUNS AFTER THE PIPELINE, because that is when the levels exist: the FONT runs are known from the attributed
+ * string and the levels are not. The fallback cut (`fn_fallback_runs`) has already happened by then and this does not
+ * disturb it — this pass only ever SPLITS, so a substituted face stays on its own characters.
+ *
+ * A LINE THAT NEVER RAN THE PIPELINE HAS NO LEVELS, and then there is nothing to cut: one run per face, level zero by
+ * implication, which is what the line did before any of this. */
+static void fn_level_runs(struct __CTLine *line, const uint8_t *levels)
+{
+	struct ct_line_run *scratch;
+	CFIndex original = line->runCount;
+	CFIndex r, out = 0;
+
+	if (original <= 0 || levels == NULL) {
+		return;
+	}
+	scratch = (struct ct_line_run *)malloc((size_t)original * sizeof(struct ct_line_run));
+	if (scratch == NULL) {
+		return;
+	}
+	memcpy(scratch, line->runInfo, (size_t)original * sizeof(struct ct_line_run));
+	for (r = 0; r < original; r++) {
+		struct ct_line_run *run = &scratch[r];
+		CFIndex i = 0;
+
+		while (i < run->count) {
+			int level = (int)levels[run->start + i];
+			CFIndex end = i + 1;
+
+			while (end < run->count && (int)levels[run->start + end] == level) {
+				end++;
+			}
+			line->runInfo[out] = *run;
+			line->runInfo[out].start = run->start + i;
+			line->runInfo[out].count = end - i;
+			line->runInfo[out].glyphStart = 0;	/* the segment pass sets these */
+			line->runInfo[out].glyphCount = 0;
+			out++;
+			i = end;
+		}
+	}
+	free(scratch);
+	line->runCount = out;
+}
+
 /* THE ONE PLACE A LINE IS MADE, AND IT IS ALWAYS MADE OVER A RANGE. A whole-string line and a typeset line differ in
  * ONE number — where the glyphs begin — so they are one function with the range as a parameter rather than two
  * functions that could drift apart. `font` is BORROWED by the callers and RETAINED here. */
@@ -642,6 +694,10 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 			visualOrder = NULL;
 		}
 	}
+
+	/* **AND THE FONT RUNS ARE CUT AT THE LEVEL BOUNDARIES NOW THAT THE LEVELS EXIST** — see `fn_level_runs`, which is
+	 * what makes each run one direction and so makes `kCTRunStatusRightToLeft` a fact about the run it is reported on. */
+	fn_level_runs(line, levels);
 
 	/* =============================================================================================
 	 * SHAPING: WHAT GLYPHS THE FACE ACTUALLY SETS THESE CHARACTERS IN.
@@ -1403,8 +1459,11 @@ CFArrayRef CTLineGetGlyphRuns(CTLineRef line)
 	 * RELATIVE TO THE LINE, so a run's index array is its own slice of the line's. The attributes are the string's own
 	 * for the run's range — Apple's sentence allows either that or a dictionary "manufactured by the layout engine", and
 	 * this tier has nothing to manufacture: the font came from these very attributes. */
-	status = ((l->direction == kCTWritingDirectionRightToLeft) ? kCTRunStatusRightToLeft : kCTRunStatusNoStatus)
-	       | (l->nonMonotonic ? kCTRunStatusNonMonotonic : 0);
+	/* **AND THE STATUS IS THE RUN'S OWN, BECAUSE A RUN IS ONE DIRECTION NOW.** It used to be the LINE's, reported by
+	 * every run: a line that began in Latin and continued in Hebrew said `NoStatus` for the Hebrew too, because the
+	 * only level consulted was the line's first. With the runs cut at the level boundaries (`fn_level_runs`) each run
+	 * has one level, and `kCTRunStatusRightToLeft` is the fact about the run that `CTRun.h` says it is. */
+	status = kCTRunStatusNoStatus;
 	runs = CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks);
 	if (runs == NULL) {
 		return NULL;
@@ -1419,7 +1478,38 @@ CFArrayRef CTLineGetGlyphRuns(CTLineRef line)
 		CGSize *advances;
 		CTRunRef created;
 		CFIndex k;
+		CTRunStatus runStatus;
 
+		/* **THE RUN'S DIRECTION IS ITS LEVEL'S — AND THE LEVEL IS INDEXED BY CHARACTER, NOT BY GLYPH**, which the first
+		 * version of this got wrong: `line->levels` has one entry per CHARACTER of the line's range (it is the pipeline's
+		 * own array), while `start` is a GLYPH offset, and the two diverge as soon as a face composes or ligates. The
+		 * measured symptom was every status being off on any line where they did — the forced-level cases first, then
+		 * the Hebrew paragraph's run. The run's CHARACTER start is `runInfo[r].start`; its own level is there.
+		 * **AND THE NON-MONOTONIC BIT IS THE RUN'S OWN TOO, WHICH THE MIXED-LINE CASE MADE VISIBLE.** It used to be
+		 * the line's flag copied into every run, so a Latin run that had not moved reported that its indices were out
+		 * of order because a HEBREW run elsewhere on the line had been reversed — a false claim about that run. Apple's
+		 * flag is about the run's own string indices: they ascend, or they do not. */
+		runStatus = status;
+		if (l->levels != NULL && l->runCount > 0 && l->runInfo[r].start >= 0
+		    && l->runInfo[r].start < l->range.length && l->runInfo[r].count > 0) {
+			if ((l->levels[l->runInfo[r].start] % 2) != 0) {
+				runStatus |= kCTRunStatusRightToLeft;
+			}
+		}
+		for (k = 1; k < count; k++) {
+			if (l->clusters[start + k] < l->clusters[start + k - 1]) {
+				runStatus |= kCTRunStatusNonMonotonic;
+				break;
+			}
+		}
+		if (l->levels == NULL && l->direction == kCTWritingDirectionRightToLeft) {
+			/* **AND WITH NO LEVELS THERE IS STILL A DIRECTION: THE LINE'S OWN.** A caller that turned bidi
+			 * processing off gets no levels, so a run has nothing of its own to read — but the paragraph's direction
+			 * is STATED (by the document or by `kCTTypesetterOptionForcedEmbeddingLevel`) and it is the direction
+			 * every run on that line is drawn in. Reporting nothing there would say a forced right-to-left paragraph
+			 * is directionless. */
+			runStatus |= kCTRunStatusRightToLeft;
+		}
 		indices = (CFIndex *)malloc((size_t)((count > 0) ? count : 1) * sizeof(CFIndex));
 		advances = (CGSize *)malloc((size_t)((count > 0) ? count : 1) * sizeof(CGSize));
 		if (indices == NULL || advances == NULL) {
@@ -1461,7 +1551,7 @@ CFArrayRef CTLineGetGlyphRuns(CTLineRef line)
 				}
 			}
 		}
-		created = CTRunCreateWithAttributesAndGlyphs(attributes, font, status,
+		created = CTRunCreateWithAttributesAndGlyphs(attributes, font, runStatus,
 			CFRangeMake(l->range.location + start, count), indices, l->glyphs + start, l->positions + start,
 			advances, (l->isBox != NULL) ? l->isBox + start : NULL, count);
 		free(indices);

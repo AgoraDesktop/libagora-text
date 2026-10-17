@@ -941,6 +941,31 @@ the user's decision is that they stay owed), the ATS pair (permanent), and the f
   came back as **two runs in the same face**. A NULL is now normalized to the attributed face, which is what it means,
   and the case asserts both sides: `A` + U+05D0 is 2 runs with a real alef, and `A` + U+0378 is **1 run** with glyph
   0 — `.notdef` — because no face answers for it.
+- **AND A RUN IS ONE DIRECTION NOW — the bidi levels door, resolved by finding out that there is none.** The typesetter's
+  note said a caller who needs the resolved LEVELS was "still owed that door". Research settled it the other way: **Core
+  Text declares no door that reports levels**, so there is none to owe, and the door a caller actually uses — asks "which
+  way does this piece run?" — is `CTRunGetStatus`. That door was answering with the LINE's direction from every run,
+  which is wrong on any line whose parts point different ways. The font runs are now cut at the LEVEL BOUNDARIES
+  (`fn_level_runs`, after the pipeline because that is when levels exist) and each run reports its own two bits.
+  MEASURED: `ab` + two Hebrew letters is **2 runs**, statuses **0 then 3** — the Latin run has nothing to report, the
+  Hebrew run is right-to-left AND reversed. Before, both said the line's own direction, and both inherited the line's
+  non-monotonic flag, so the Latin run claimed its indices were out of order because a run elsewhere had been reversed.
+- **AND CORRECTING THIS FOUND TWO ERRORS OF MY OWN, IN THE CODE AND IN MY HEAD.** Indexing the level array by the run's
+  GLYPH offset rather than its CHARACTER offset was wrong — `line->levels` is the pipeline's own array, one entry per
+  character — and the note beside it claiming "the caret doors read it" was false, because nothing read it at all. And I
+  spent a build misreading `kCTRunStatusRightToLeft` as `1 << 1`; it is `1 << 0`, with `NonMonotonic` as `1 << 1`, so
+  "status 2" was the non-monotonic bit and I diagnosed the opposite of the truth. Recorded because the wrong reading is
+  the plausible one: two bits, and the status INTEGER does not say which.
+- **AND A LINE WITH NO LEVELS STILL HAS A DIRECTION.** Turning bidi processing off leaves no levels, so a run has nothing
+  of its own to read — but the paragraph's direction is STATED (by the document or by the forced-level option) and every
+  run is drawn in it. That path reports the line's direction, because the alternative is calling a forced right-to-left
+  paragraph directionless.
+- **AND TWO ASSERTIONS IN THE SUITE HAD TO FLIP, BECAUSE THEY ENCODED THE LINE-LEVEL LIMITATION.** "A forced level of 0
+  takes the RightToLeft bit off a Hebrew paragraph" was true only while the bit was the line's: a Hebrew letter in a
+  level-0 paragraph is a strong RTL character and gets level 1, so its run is right to left with the option and without
+  it. And "a right-to-left paragraph's run reports RightToLeft" is now answered by `abc` being raised to level 2 by I2 —
+  an EVEN level, drawn left to right — so its status is none; the paragraph's direction is measured in a NEUTRAL run
+  instead, which takes the paragraph's level and reports it directly.
 - **AND FALLBACK CHANGED THE MEASUREMENTS OF THREE CASES THAT ASSUMED ONE FACE RENDERED EVERYTHING**, which is a
   property of the change rather than a surprise: they read `CTLineGetGlyphRuns(line)[0]` and took their expectations
   from the attributed font, and with fallback the Hebrew and Hangul characters are in runs of their own, set in faces
