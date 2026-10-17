@@ -33,10 +33,10 @@
  *     PRODUCES GLYPHS, so the damage was silent. MEASURED: `a` followed by the Devanagari conjunct `kssa` is **2
  *     glyphs** itemized and **4** when the run is stated as `Latn`, which is the control that shows the itemizer did
  *     it. What it does NOT itemize by is the FACE: a character the face has no glyph for shapes to `.notdef` and
- *     stays there. **AND THAT HALF HAS ITS DOOR ALREADY** — `CTFontCreateForString` answers "a font that renders this
- *     string" over the cascade list, implemented and measured in `CTFont.c` — so what is owed is the LINE CALLING IT,
- *     which is a cut of its own: a line's runs are the ATTRIBUTED FONT's, and a fallback face is not in the
- *     attributes.
+ *     stays there. **AND THAT HALF IS THE LINE'S NOW**: `CTFontCreateForString` answers "a font that renders this
+ *     string" over the cascade list and `CTLine.c` calls it PER CHARACTER, so a run whose face cannot render its
+ *     characters is set in a face that can — see `fn_fallback_runs`, which also records why the substitution is per
+ *     character rather than per run (asking once for a whole run moves characters nobody asked to move).
  *   - IT IS WIRED INTO `CTLine` NOW, and this bullet used to say it was not. The correspondence it needed is the
  *     line's cluster map, which landed first; what the line passes here is a run it has cut by FONT and by LEVEL, and
  *     the SCRIPT cut is this file's.

@@ -439,6 +439,109 @@ static CTFontRef fn_run_font(const struct __CTLine *line, CFIndex charIndex)
 	return line->runInfo[fn_run_index(line, charIndex)].font;
 }
 
+/* **AND WHERE A FACE CANNOT RENDER A CHARACTER, ANOTHER ONE IS ASKED FOR — WHICH IS FONT FALLBACK, AND IT IS A
+ * PROPERTY OF A RUN RATHER THAN OF A LINE.** `CTFontCreateForString` answers "a font that renders this string": the
+ * SAME font when it covers the whole range and a face from the CASCADE LIST otherwise, and it is implemented and
+ * measured in `CTFont.c`. This is where the line calls it.
+ *
+ * **EACH CHARACTER IS RESOLVED ON ITS OWN, AND THE RUNS ARE THE SPANS THAT AGREE** — which is what makes the
+ * substitution MINIMAL, and the obvious-looking shortcut is what shows why. Asking once for the WHOLE run answers a
+ * face that covers all of it, and for `A` followed by a Hebrew letter that face is `DejaVuSans` — so the Latin `A`
+ * would move to a face nobody asked for as well, and the line would be set in a font the caller did not choose. That
+ * is a worse answer even though every character IS rendered. **THE COMMON CASE IS STILL ONE QUERY**: a run the
+ * current face covers answers the current face, and only a run it does NOT cover pays for the per-character walk.
+ *
+ * A FACE THE CASCADE CANNOT ANSWER LEAVES THE CHARACTER WHERE IT WAS, which is glyph 0 — `.notdef` — and that is the
+ * honest answer rather than a refusal: this tier draws it, and it is what the line did before this existed.
+ *
+ * THE LINE'S `runFonts` RETAINS EVERY FACE THAT ENDS UP IN A RUN, including the substituted ones, which is what lets
+ * the runs BORROW from it — see the field's own comment. */
+static void fn_fallback_runs(struct __CTLine *line, CFAttributedStringRef string, CFStringRef text)
+{
+	struct ct_line_run *scratch;
+	CFIndex original = line->runCount;
+	CFIndex r, out = 0;
+
+	if (original <= 0 || text == NULL) {
+		return;
+	}
+	scratch = (struct ct_line_run *)malloc((size_t)original * sizeof(struct ct_line_run));
+	if (scratch == NULL) {
+		return;
+	}
+	memcpy(scratch, line->runInfo, (size_t)original * sizeof(struct ct_line_run));
+	for (r = 0; r < original; r++) {
+		struct ct_line_run *run = &scratch[r];
+		CTFontRef font = run->font;
+		CFIndex i;
+
+		/* ONE QUERY FOR THE WHOLE RUN, and the per-character walk only when it says the face cannot do it. */
+		{
+			CTFontRef whole = CTFontCreateForString(font, text,
+								CFRangeMake(line->range.location + run->start,
+									    run->count));
+			Boolean covered = (whole != NULL) && CFEqual(whole, font);
+
+			if (whole != NULL) {
+				CFRelease(whole);
+			}
+			if (covered) {
+				line->runInfo[out++] = *run;
+				continue;
+			}
+		}
+		for (i = 0; i < run->count;) {
+			CFIndex end = i + 1;
+			CTFontRef face = CTFontCreateForString(font, text,
+							       CFRangeMake(line->range.location + run->start + i, 1));
+
+			/* **A CHARACTER NOTHING ANSWERS FOR IS NORMALIZED TO THE ATTRIBUTED FACE, NOT LEFT AS A NULL.** The door
+			 * answers NULL when no face covers the character, and the line's answer for that is the face it already
+			 * has — glyph 0, `.notdef` — so a NULL IS that face. MEASURED, and it is what the normalization is for:
+			 * treating NULL as a face of its own SPLIT A RUN WITHOUT SUBSTITUTING ANYTHING, so a line of `A` and an
+			 * unassigned code point came back as two runs both in the same face. */
+			if (face == NULL) {
+				face = (CTFontRef)CFRetain(font);
+			}
+			/* AND THE SPAN IS EVERY FOLLOWING CHARACTER THE SAME FACE ANSWERS FOR, normalized the same way. */
+			while (end < run->count) {
+				CTFontRef next = CTFontCreateForString(font, text,
+								       CFRangeMake(line->range.location + run->start + end,
+										   1));
+				Boolean same;
+
+				if (next == NULL) {
+					next = (CTFontRef)CFRetain(font);
+				}
+				same = CFEqual(next, face);
+				CFRelease(next);
+				if (!same) {
+					break;
+				}
+				end++;
+			}
+			line->runInfo[out].start = run->start + i;
+			line->runInfo[out].count = end - i;
+			line->runInfo[out].glyphStart = 0;	/* the segment pass sets these */
+			line->runInfo[out].glyphCount = 0;
+			line->runInfo[out].ascent = CTFontGetAscent(face);
+			line->runInfo[out].descent = CTFontGetDescent(face);
+			line->runInfo[out].leading = CTFontGetLeading(face);
+			if (!CFEqual(face, font)) {
+				/* A FACE THIS LINE DID NOT HAVE: kept, so the run can borrow it. */
+				CFArrayAppendValue((CFMutableArrayRef)line->runFonts, face);
+			}
+			line->runInfo[out].font = face;
+			CFRelease(face);
+			out++;
+			i = end;
+		}
+	}
+	free(scratch);
+	line->runCount = out;
+	(void)string;
+}
+
 /* THE ONE PLACE A LINE IS MADE, AND IT IS ALWAYS MADE OVER A RANGE. A whole-string line and a typeset line differ in
  * ONE number — where the glyphs begin — so they are one function with the range as a parameter rather than two
  * functions that could drift apart. `font` is BORROWED by the callers and RETAINED here. */
@@ -479,6 +582,10 @@ static CTLineRef ct_line_create_with_font(CFAttributedStringRef string, CTFontRe
 		return NULL;
 	}
 	line->runCount = fn_font_runs(string, range, font, (CFMutableArrayRef)line->runFonts, line->runInfo);
+	/* **AND THE ATTRIBUTE'S RUNS ARE RECUT WHERE A FACE CANNOT RENDER A CHARACTER** — see `fn_fallback_runs`. The
+	 * line's own `font` is taken AFTER this, because the face the first run is set in may no longer be the one the
+	 * attributed string names. */
+	fn_fallback_runs(line, string, text);
 	line->font = (CTFontRef)CFRetain((line->runCount > 0) ? line->runInfo[0].font : font);
 	/* THE HEIGHTS ARE THE RUNS' UNION — the tallest ascent, the deepest descent — which is what a framesetter needs:
 	 * line after line placed without measuring glyph by glyph. They are read even for a line of nothing. */
@@ -1307,6 +1414,7 @@ CFArrayRef CTLineGetGlyphRuns(CTLineRef line)
 		CFIndex count = (l->runCount > 0) ? l->runInfo[r].glyphCount : l->glyphCount;
 		CTFontRef font = (l->runCount > 0) ? l->runInfo[r].font : l->font;
 		CFDictionaryRef attributes;
+		Boolean substituted = false;
 		CFIndex *indices;
 		CGSize *advances;
 		CTRunRef created;
@@ -1329,6 +1437,30 @@ CFArrayRef CTLineGetGlyphRuns(CTLineRef line)
 		}
 		attributes = (l->string == NULL) ? NULL
 			: CFAttributedStringGetAttributes(l->string, l->range.location + start, NULL);
+		/* **AND A RUN SET IN A FACE THE ATTRIBUTED STRING DOES NOT NAME SAYS SO.** Font fallback means a run's face
+		 * can be a face the caller never asked for — chosen by `CTFontCreateForString` — and the attributes are the
+		 * ONLY public way to find out which: `CTRun` has no font door, so a run reporting the ORIGINAL attributes
+		 * would leave a caller unable to learn the face its glyphs are indexed in, which is the one fact a glyph
+		 * index is useless without.
+		 *
+		 * **APPLE'S OWN SENTENCE COVERS THIS**, which is why it is a copy rather than an invention: the run's
+		 * attributes are "either the original attributes, or a dictionary MANUFACTURED BY THE LAYOUT ENGINE, which
+		 * may contain font substitution information". This is that dictionary, made only where the faces differ, so
+		 * a line with no substitution hands out the attributed string's own dictionary exactly as before. */
+		if (attributes != NULL) {
+			CFTypeRef named = CFDictionaryGetValue(attributes, kCTFontAttributeName);
+
+			if (named != NULL && CFGetTypeID(named) == CTFontGetTypeID() && !CFEqual(named, font)) {
+				CFMutableDictionaryRef made = CFDictionaryCreateMutableCopy(kCFAllocatorDefault, 0,
+											    attributes);
+
+				if (made != NULL) {
+					CFDictionarySetValue(made, kCTFontAttributeName, font);
+					attributes = (CFDictionaryRef)made;	/* OWNED now, and released below */
+					substituted = true;
+				}
+			}
+		}
 		created = CTRunCreateWithAttributesAndGlyphs(attributes, font, status,
 			CFRangeMake(l->range.location + start, count), indices, l->glyphs + start, l->positions + start,
 			advances, (l->isBox != NULL) ? l->isBox + start : NULL, count);
@@ -1340,6 +1472,9 @@ CFArrayRef CTLineGetGlyphRuns(CTLineRef line)
 		}
 		CFArrayAppendValue(runs, created);
 		CFRelease(created);
+		if (substituted) {
+			CFRelease(attributes);
+		}
 	}
 	l->runs = runs;
 	return l->runs;

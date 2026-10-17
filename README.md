@@ -921,10 +921,28 @@ the user's decision is that they stay owed), the ATS pair (permanent), and the f
   **AND A LINE GETS IT WITHOUT ASKING** (`CTLine.c` states no script, only font and level cuts): a line over the same
   four characters is **2 glyphs**, with the run reporting the caller's OWN string indices, so nothing above can tell
   the run was cut at all.
-- **AND THE OTHER HALF — ITEMIZATION BY FACE — HAS ITS DOOR ALREADY, WHICH IS WORTH SAYING BECAUSE IT LOOKS MISSING.**
-  `CTFontCreateForString` answers "a font that renders this string" over the cascade list, and it is implemented and
-  measured (`CTFont.c`, ten cases in this suite, including a `kCTFontCascadeListAttribute` the caller supplies). What
-  is owed is the LINE CALLING IT — and that is a cut of its own rather than a call added: a line's runs are the
-  ATTRIBUTED FONT's today, and a fallback face is not in the attributes, so a substituted run would report an
-  attribute that does not name the face it was drawn in. That is the next slice, and the shaper's own header says so
-  where a reader looks.
+- **AND THE OTHER HALF — ITEMIZATION BY FACE — IS DONE: THE LINE CALLS `CTFontCreateForString` NOW.** The door answers
+  "a font that renders this string" over the cascade list and was already implemented and measured; what was owed was
+  the LINE CALLING IT, and `fn_fallback_runs` is that call. **AND THE SUBSTITUTION IS PER CHARACTER, WHICH IS THE
+  PART THAT LOOKS LIKE A DETAIL AND IS NOT**: asking once for the whole run answers a face covering ALL of it, and for
+  `A` followed by a Hebrew letter that face has both — so the Latin `A` would move to a face NOBODY ASKED FOR. Each
+  character is resolved on its own and the runs are the spans that agree. MEASURED: `A` + U+05D0 is **2 runs**, the
+  first still the attributed face and the second a cascade face whose glyph for the alef is a real one, not `.notdef`.
+  The common case is still ONE query, because a run the current face covers answers the current face.
+- **AND A SUBSTITUTED RUN SAYS WHICH FACE IT IS IN, WHICH TOOK A CORRECTION.** `CTRun` has no font door, so a
+  substituted run reporting the ORIGINAL attributes would leave a caller unable to learn the face its glyph indices
+  are in — the one fact a glyph index is useless without. The run now manufactures a dictionary naming its own face,
+  which is inside Apple's own sentence for `CTRunGetAttributes`: "either the original attributes, or a dictionary
+  MANUFACTURED BY THE LAYOUT ENGINE, which may contain font substitution information". A line with no substitution
+  hands out the attributed string's own dictionary exactly as before.
+- **AND A BUG IN THAT WIRING WAS FOUND BY THE CASE WRITTEN TO MEASURE IT, WHICH IS THE PART WORTH RECORDING.** A
+  character NOTHING answers for made `CTFontCreateForString` return NULL, and the per-character loop treated that NULL
+  as a face of its own — so the run was SPLIT WITHOUT ANY SUBSTITUTION, and a line of `A` and an unassigned code point
+  came back as **two runs in the same face**. A NULL is now normalized to the attributed face, which is what it means,
+  and the case asserts both sides: `A` + U+05D0 is 2 runs with a real alef, and `A` + U+0378 is **1 run** with glyph
+  0 — `.notdef` — because no face answers for it.
+- **AND FALLBACK CHANGED THE MEASUREMENTS OF THREE CASES THAT ASSUMED ONE FACE RENDERED EVERYTHING**, which is a
+  property of the change rather than a surprise: they read `CTLineGetGlyphRuns(line)[0]` and took their expectations
+  from the attributed font, and with fallback the Hebrew and Hangul characters are in runs of their own, set in faces
+  the cascade chose. They now find the run BY THE CHARACTER and take the expectation from the face THAT RUN NAMES —
+  which is a better test than the one it replaced, because it also checks that a substitution is DISCOVERABLE.

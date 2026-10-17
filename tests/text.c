@@ -5145,6 +5145,30 @@ static CGGlyph glyph_for_character(CTRunRef run, CFIndex character)
 	return 0;
 }
 
+/* **AND A CHARACTER CAN BE IN A RUN OF ITS OWN NOW.** Font fallback means a line's runs are not one per attributed
+ * font any more: a character the attributed face cannot render is set in a face the cascade chose, in a run of its
+ * own. So a case that wants "the glyph this line uses for character N" must ASK THE RUNS rather than assume the
+ * first one holds everything — and it must take its expectation from THE FACE THAT RUN IS IN, which the run's own
+ * attributes name. */
+static CTRunRef run_for_character_in_line(CTLineRef line, CFIndex character)
+{
+	CFArrayRef runs = (line != NULL) ? CTLineGetGlyphRuns(line) : NULL;
+	CFIndex r, runCount = (runs != NULL) ? CFArrayGetCount(runs) : 0;
+
+	for (r = 0; r < runCount; r++) {
+		CTRunRef run = (CTRunRef)CFArrayGetValueAtIndex(runs, r);
+		const CFIndex *indices = CTRunGetStringIndicesPtr(run);
+		CFIndex k, glyphs = CTRunGetGlyphCount(run);
+
+		for (k = 0; k < glyphs; k++) {
+			if (indices != NULL && indices[k] == character) {
+				return run;
+			}
+		}
+	}
+	return NULL;
+}
+
 static int case_base_writing_direction(void)
 {
 	int before = g_fail;
@@ -5748,12 +5772,22 @@ static int case_bidi_mirroring(void)
 		line = (astr != NULL) ? CTLineCreateWithAttributedString(astr) : NULL;
 		check(line != NULL, "the mirroring line was made");
 		if (line != NULL) {
-			CFArrayRef runs = CTLineGetGlyphRuns(line);
-			CTRunRef run = (runs != NULL && CFArrayGetCount(runs) > 0)
-				? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
-			CGGlyph bracket = glyph_for_character(run, 1);	/* character 1 is the `(` */
+			/* **AND THE EXPECTATION COMES FROM THE FACE THE RUN IS IN**, which with font fallback need not be the
+			 * attributed one: the Hebrew character is set in a cascade face, so this asks the RUN'S OWN ATTRIBUTES
+			 * for its font and reads the bracket's glyph out of THAT. The run is found BY THE CHARACTER rather than
+			 * assumed to be the first, because the substitution put the Hebrew in a run of its own. */
+			CTRunRef run = run_for_character_in_line(line, 1);	/* character 1 is the `(` */
+			CFDictionaryRef runAttrs = (run != NULL) ? CTRunGetAttributes(run) : NULL;
+			CTFontRef runFont = (runAttrs != NULL)
+				? (CTFontRef)CFDictionaryGetValue(runAttrs, kCTFontAttributeName) : NULL;
+			CGGlyph bracket;
 
-			printf("  (the line's glyph for `(` is %u; the font's `)` glyph is %u)\n",
+			if (runFont != NULL && CFGetTypeID(runFont) == CTFontGetTypeID()) {
+				(void)CTFontGetGlyphsForCharacters(runFont, &openChar, &openGlyph, 1);
+				(void)CTFontGetGlyphsForCharacters(runFont, &closeChar, &closeGlyph, 1);
+			}
+			bracket = glyph_for_character(run, 1);
+			printf("  (the line's glyph for `(` is %u; the RUN'S OWN face gives `)` glyph %u)\n",
 			       (unsigned)bracket, (unsigned)closeGlyph);
 			check(closeGlyph != 0 && openGlyph != closeGlyph && bracket == closeGlyph,
 			      "L4: the LINE looks up the MIRRORED character, not the one in the string");
@@ -5940,7 +5974,10 @@ static int case_typesetter_bidi_options(void)
 			CTRunRef run = (runs != NULL && CFArrayGetCount(runs) > 0)
 				? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
 			CTRunStatus status = (run != NULL) ? CTRunGetStatus(run) : kCTRunStatusNoStatus;
-			CGGlyph bracket = glyph_for_character(run, 2);	/* character 2 is the `(` */
+			/* **AND THE BRACKET IS FOUND BY ITS CHARACTER RATHER THAN ASSUMED TO BE IN THE FIRST RUN**: with font
+			 * fallback the Hebrew letters are set in a cascade face and the bracket is in the attributed one, so a
+			 * line over this string has TWO runs and run 0 does not hold the bracket. */
+			CGGlyph bracket = glyph_for_character(run_for_character_in_line(line, 2), 2);
 
 			printf("  (no options: status %u, the bracket is glyph %u)\n", (unsigned)status,
 			       (unsigned)bracket);
@@ -5966,13 +6003,13 @@ static int case_typesetter_bidi_options(void)
 			CTRunRef run = (runs != NULL && CFArrayGetCount(runs) > 0)
 				? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
 			CTRunStatus status = (run != NULL) ? CTRunGetStatus(run) : kCTRunStatusNoStatus;
-			const CGGlyph *glyphs = (run != NULL) ? CTRunGetGlyphsPtr(run) : NULL;
+			CGGlyph bracket = glyph_for_character(run_for_character_in_line(line, 2), 2);
 
 			printf("  (bidi disabled: status %u, the bracket is glyph %u)\n", (unsigned)status,
-			       (unsigned)((glyphs != NULL) ? glyphs[2] : 0));
+			       (unsigned)bracket);
 			check(run != NULL && status == kCTRunStatusNoStatus,
 			      "a line with bidi processing disabled reports NO status at all, not %u", (unsigned)status);
-			check(glyphs != NULL && glyphs[2] == openGlyph,
+			check(bracket == openGlyph,
 			      "and the MIRRORING is off too, so the font is asked for the `(` it was given");
 			if (line != NULL) CFRelease(line);
 			if (ts != NULL) CFRelease(ts);
@@ -6118,7 +6155,10 @@ static int case_typesetter_bidi_options(void)
 			CTRunRef run = (runs != NULL && CFArrayGetCount(runs) > 0)
 				? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
 			CTRunStatus status = (run != NULL) ? CTRunGetStatus(run) : kCTRunStatusNoStatus;
-			CGGlyph bracket = glyph_for_character(run, 2);	/* character 2 is the `(` */
+			/* **AND THE BRACKET IS FOUND BY ITS CHARACTER RATHER THAN ASSUMED TO BE IN THE FIRST RUN**: with font
+			 * fallback the Hebrew letters are set in a cascade face and the bracket is in the attributed one, so a
+			 * line over this string has TWO runs and run 0 does not hold the bracket. */
+			CGGlyph bracket = glyph_for_character(run_for_character_in_line(line, 2), 2);
 
 			printf("  (both given: status %u, the bracket is glyph %u)\n", (unsigned)status,
 			       (unsigned)bracket);
@@ -6873,17 +6913,30 @@ static int case_typesetter_uax14(void)
 				? CTTypesetterCreateWithAttributedString(astr) : NULL;
 			double runWidth = 0.0;
 
+			/* **AND THE WIDTH COMES FROM ONE SYLLABLE RATHER THAN FROM THE WHOLE RUN.** The first version took
+			 * seven eighths of all four characters' width, which assumes the characters are equally wide — true of
+			 * a monospace face and NOT true of whatever the cascade answers for jamo, so with font fallback the
+			 * assumption moved the overflow to a character boundary and the case measured nothing. One and a half
+			 * syllables puts the overflow INSIDE the second one whatever the advances are. */
 			{
-				CTLineRef whole = (astr != NULL) ? CTLineCreateWithAttributedString(astr) : NULL;
+				UniChar firstSyllable[] = { 0x1100, 0x1161 };
+				CFStringRef two = CFStringCreateWithCharacters(kCFAllocatorDefault, firstSyllable, 2);
+				CFAttributedStringRef twoStr = CFAttributedStringCreate(kCFAllocatorDefault, two, attrs);
+				CTLineRef whole = (twoStr != NULL) ? CTLineCreateWithAttributedString(twoStr) : NULL;
 
 				if (whole != NULL) {
 					runWidth = (double)CTLineGetTypographicBounds(whole, NULL, NULL, NULL);
 					CFRelease(whole);
 				}
+				if (twoStr != NULL) {
+					CFRelease(twoStr);
+				}
+				if (two != NULL) {
+					CFRelease(two);
+				}
 			}
-			/* THREE AND A HALF OF THE FOUR, so the overflow falls INSIDE the second syllable. */
 			{
-				double threeAndAHalf = runWidth * 0.875;
+				double threeAndAHalf = runWidth * 1.5;
 
 				printf("  (note: two Hangul syllables are %g wide, so %g broke after %ld; the cluster door says "
 				       "%ld)\n", runWidth, threeAndAHalf,
@@ -7207,6 +7260,143 @@ static int case_shaping_itemization(void)
 	return g_fail - before;
 }
 
+/* **AND A FACE THAT CANNOT RENDER A CHARACTER IS REPLACED — FONT FALLBACK, WHICH THE LINE DOES NOW.** The door
+ * existed (`CTFontCreateForString`, over the cascade list, measured in this suite); what was owed was the LINE
+ * CALLING IT, and the line is where it has to be: a fallback is a RUN, and the line is what knows a run.
+ *
+ * **AND THE SUBSTITUTION IS MINIMAL, WHICH IS THE PART THAT LOOKS LIKE A DETAIL AND IS NOT.** Asking the door once
+ * for the whole run answers a face that covers ALL of it, and for `A` followed by a Hebrew letter that face is one
+ * that has both — so the Latin `A` would move to a face nobody asked for. Each character is resolved on its own and
+ * the runs are the spans that agree, so `A` keeps the attributed face and only the Hebrew moves. MEASURED: two runs,
+ * the first in the face the caller named and the second in a cascade face.
+ *
+ * **AND WHICH FACE THAT IS IS DISCOVERABLE**, which took a correction: `CTRun` has no font door, so a substituted run
+ * reporting the ORIGINAL attributes would leave a caller unable to learn the face its glyph indices are in. The run
+ * manufactures a dictionary naming its own face — Apple's own sentence allows "a dictionary manufactured by the
+ * layout engine, which may contain font substitution information" — and the case asserts it by reading the fallback's
+ * glyph for the character out of the face THE RUN NAMES. */
+static int case_line_font_fallback(void)
+{
+	int before = g_fail;
+	CTFontRef mono = test_font(13.0);
+	UniChar mixed[] = { 'A', 0x05D0 };	/* LATIN A, HEBREW ALEF — and this suite's face has no Hebrew */
+	UniChar unassigned[] = { 'A', 0x0378 };	/* and U+0378 is UNASSIGNED, so nothing covers it */
+	CFMutableDictionaryRef attrs = NULL;
+
+	check(mono != NULL, "the fallback case has a face");
+	if (mono == NULL) {
+		return g_fail - before;
+	}
+	attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+					  &kCFTypeDictionaryValueCallBacks);
+	CFDictionarySetValue(attrs, kCTFontAttributeName, mono);
+	{
+		int pass;
+
+		for (pass = 0; pass < 2; pass++) {
+			UniChar *chars = (pass == 0) ? mixed : unassigned;
+			CFStringRef text = CFStringCreateWithCharacters(kCFAllocatorDefault, chars, 2);
+			CFAttributedStringRef astr = (text != NULL)
+				? CFAttributedStringCreate(kCFAllocatorDefault, text, attrs) : NULL;
+			CTLineRef line = (astr != NULL) ? CTLineCreateWithAttributedString(astr) : NULL;
+
+			check(line != NULL, "the two-character line was made");
+			if (line != NULL) {
+				CFArrayRef runs = CTLineGetGlyphRuns(line);
+				CFIndex runCount = (runs != NULL) ? CFArrayGetCount(runs) : 0;
+
+				printf("  (note: `A` + U+%04X is %ld run(s) over %ld glyph(s))\n", (unsigned)chars[1],
+				       (long)runCount, (long)CTLineGetGlyphCount(line));
+				if (pass == 0) {
+					/* **THE HEBREW MOVED AND THE LATIN DID NOT.** */
+					CTRunRef first = (runCount > 0) ? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
+					CTRunRef second = (runCount > 1) ? (CTRunRef)CFArrayGetValueAtIndex(runs, 1) : NULL;
+					CFDictionaryRef a1 = (second != NULL) ? CTRunGetAttributes(second) : NULL;
+					CTFontRef face = (a1 != NULL)
+						? (CTFontRef)CFDictionaryGetValue(a1, kCTFontAttributeName) : NULL;
+					const CGGlyph *glyphs = (second != NULL) ? CTRunGetGlyphsPtr(second) : NULL;
+					CGGlyph want = 0;
+					CFStringRef name = (face != NULL) ? CTFontCopyPostScriptName(face) : NULL;
+					char nameBuf[128] = "?";
+
+					if (name != NULL) {
+						(void)CFStringGetCString(name, nameBuf, (CFIndex)sizeof(nameBuf),
+									 kCFStringEncodingUTF8);
+					}
+					check(runCount == 2, "the line has TWO runs: the attributed face and the substituted one");
+					check(first != NULL && CTRunGetAttributes(first) != NULL
+					      && CFDictionaryGetValue(CTRunGetAttributes(first),
+								      kCTFontAttributeName) != NULL
+					      && CFEqual(CFDictionaryGetValue(CTRunGetAttributes(first),
+									      kCTFontAttributeName), mono),
+					      "and the FIRST run is still the face the caller named, so the Latin did not move");
+					check(face != NULL && !CFEqual(face, mono),
+					      "while the second is a face the cascade chose, `%s`", nameBuf);
+					if (face != NULL) {
+						(void)CTFontGetGlyphsForCharacters(face, chars + 1, &want, 1);
+					}
+					check(glyphs != NULL && want != 0 && glyphs[0] == want,
+					      "and the Hebrew glyph is THAT face's (%u), not `.notdef`", (unsigned)want);
+					if (name != NULL) {
+						CFRelease(name);
+					}
+				} else {
+					/* **AND A CHARACTER NOTHING COVERS STAYS WHERE IT WAS**, which is glyph 0 — `.notdef` —
+					 * rather than a refusal or a face that cannot draw it either. */
+					CTRunRef only = (runCount > 0) ? (CTRunRef)CFArrayGetValueAtIndex(runs, 0) : NULL;
+					const CGGlyph *glyphs = (only != NULL) ? CTRunGetGlyphsPtr(only) : NULL;
+
+					/* **AND A CHARACTER NOTHING ANSWERS FOR STAYS WHERE IT WAS**, which is glyph 0 — `.notdef` —
+					 * rather than a refusal or a face that cannot draw it either. **THE FIRST VERSION OF THIS CASE
+					 * MEASURED TWO RUNS AND FOUND A BUG IN THE WIRING**: a NULL answer was being treated as a face
+					 * of its own, so the run was split WITHOUT ANY SUBSTITUTION, and a line of `A` and an unassigned
+					 * code point came back as two runs in the same face. */
+					check(runCount == 1 && glyphs != NULL && glyphs[1] == 0,
+					      "an UNASSIGNED code point, which no face answers for, stays in the attributed face "
+					      "as `.notdef`");
+					(void)only;
+					{
+						CFIndex r;
+						Boolean mapped = true;
+
+						for (r = 0; r < runCount; r++) {
+							CTRunRef run = (CTRunRef)CFArrayGetValueAtIndex(runs, r);
+							CFDictionaryRef a = CTRunGetAttributes(run);
+							CTFontRef face = (a != NULL)
+								? (CTFontRef)CFDictionaryGetValue(a, kCTFontAttributeName) : NULL;
+							CGGlyph got = 0;
+
+							(void)CTFontGetGlyphsForCharacters(face, chars + r, &got, 1);
+							if (face == NULL || CFGetTypeID(face) != CTFontGetTypeID()) {
+								mapped = false;
+								continue;
+							}
+							if (!CTFontGetGlyphsForCharacters(face, chars + r, &got, 1) || got == 0) {
+								/* ONLY THE ATTRIBUTED FACE MAY HOLD A .notdef, and only if nothing answered. */
+								if (r == 0 && runCount == 1) {
+									continue;
+								}
+								mapped = false;
+							}
+						}
+						check(mapped, "every run is in a face that MAPS every character it holds");
+					}
+				}
+				CFRelease(line);
+			}
+			if (astr != NULL) {
+				CFRelease(astr);
+			}
+			if (text != NULL) {
+				CFRelease(text);
+			}
+		}
+	}
+	CFRelease(attrs);
+	CFRelease(mono);
+	return g_fail - before;
+}
+
 static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The symbolic traits carry Apple's published values", case_symbolic_trait_values },
 	{ "The four trait keys are the AppKit's strings", case_trait_key_strings },
@@ -7273,6 +7463,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "The typesetter hyphenates, but only when a factor asks it to", case_typesetter_hyphenation },
 	{ "A newline beyond the width does not make the line fit", case_typesetter_hard_break_width },
 	{ "A run is itemized by script, and the caller can still state one", case_shaping_itemization },
+	{ "A face that cannot render a character is replaced, and only it moves", case_line_font_fallback },
 	{ "A ligature is one glyph for three characters", case_shaping_ligatures },
 	{ "A pair adjustment reaches the advances", case_shaping_kerning },
 	{ "A combining mark, composed in one face and attached in another", case_shaping_marks },
