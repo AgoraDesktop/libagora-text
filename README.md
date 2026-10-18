@@ -969,6 +969,32 @@ the user's decision is that they stay owed), the ATS pair (permanent), and the f
   it. And "a right-to-left paragraph's run reports RightToLeft" is now answered by `abc` being raised to level 2 by I2 —
   an EVEN level, drawn left to right — so its status is none; the paragraph's direction is measured in a NEUTRAL run
   instead, which takes the paragraph's level and reports it directly.
+- **AND THE MEMORY-SAFETY SWEEP EXISTS NOW, AND IT FOUND A BUG THE SUITE COULD NOT.** `libagora-text` was rebuilt with
+  `-fsanitize=address,undefined` (clang-19, the tier's compiler) and every case re-run, and `tools/fuzz-text.c` feeds
+  random text through every door and random *damaged font bytes* through the font parser. **THE FIRST RUN FOUND A
+  HEAP-BUFFER-OVERFLOW IN `CTLineGetGlyphRuns`**: the slice that cut runs at level boundaries indexed the level array
+  by the run's CHARACTER start while the array is re-indexed PER GLYPH (`glyphLevels[i] = levels[clusters[i]]`), and it
+  read past the end of a three-byte array on an emoji ZWJ sequence — five UTF-16 units, three glyphs. **AND A COMMENT
+  WAS THE CAUSE**: the field said "one entry per character", and the code believed it. It gave the right answer on
+  every line where the two counts coincided, which is every line the 76-case suite had.
+- **AND THE SWEEP FOUND TWO PERFORMANCE DEFECTS, BOTH IN FONT LOOKUP, ONE OF THEM MINE.** Per-character font fallback
+  asks `CTFontCreateForString` once per character so substitution stays minimal — and a character NO installed face
+  covers cost a full walk of `/usr/share/fonts` EVERY TIME, because `libagora-drawing`'s name cache stored hits and not
+  misses (25 ms per character; a line of 512 odd characters took 13 seconds, which is what the fuzz run looked like: a
+  hang). Misses are cached now, and the cache is 64 entries rather than 8, because a fallback walks more names than
+  eight and evicted its own entries before reusing them. **MEASURED after: a repeated hit 0.0000 s, a repeated miss
+  0.0000 s, against 0.025 s and 0.035 s before.**
+- **AND ONE COST IS MEASURED AND NOT YET FIXED, WHICH IS STATED RATHER THAN LEFT AS A SURPRISE.** A repeated miss
+  still costs **7 ms**, so a per-character fallback over a long line of exotic characters is still seconds of file I/O:
+  the search is RE-ENUMERATED per call even when every name in it is cached. It is recorded here because it is the one
+  number a reader of the fuzz harness needs to interpret it.
+- **AND WHAT THE SWEEP MEASURED, SO THE CLAIM IS NOT MERELY THAT IT RAN**: the ASan+UBSan suite is **76 of 76 cases
+  with zero sanitizer reports**; **20,000 mutated fonts** (one to eight bytes changed, the header first) through
+  `CGFontCreateWithDataProvider`, `CTFontCreateWithGraphicsFont` and every table-reading door — **zero reports**; and
+  roughly **1,000 random lines** — mixing surrogate halves, bidi controls, Devanagari viramas, Hangul jamo, emoji,
+  combining marks and line breaks — through the bidi, line-breaking, grapheme, normalization, shaping and caret
+  doors — **zero reports**. The harness is `tools/fuzz-text.c`, whose header records the exact build and run commands;
+  the UCD conformance runs are what cover CORRECTNESS, and this covers the other question.
 - **AND GRAPHEME CLUSTERS ARE AN ENGINE NOW, AND THE RUN FOUND A RULE UNICODE ADDED IN 15.1.** There was no UAX #29
   implementation in the tree at all — only an `Extend` bitmap used for string comparison — so caret movement could
   stand between a letter and its accent, or inside an emoji. `CTGrapheme.c` is §3.1's rule list over THREE generated

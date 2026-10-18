@@ -111,10 +111,16 @@ struct __CTLine {
 	bool nonMonotonic;
 	/* **AND THE RESOLVED LEVELS, WHEN THE PIPELINE RAN.** An ODD level is what makes a character's LEADING edge its
 	 * RIGHT one — the caret convention the offset door owes — so the levels are kept rather than freed, and they are
-	 * what `CTRunGetStatus` reports a run's `kCTRunStatusRightToLeft` from. INDEXED BY CHARACTER: `range.length`
-	 * entries, the pipeline's own array, which is why a glyph offset may not be used to read it. NULL when the line
-	 * never ran the pipeline, which means logical order and a left leading edge. */
-	uint8_t *levels;		/* malloc'd, ONE ENTRY PER CHARACTER of `range`, or NULL */
+	 * what `CTRunGetStatus` reports a run's `kCTRunStatusRightToLeft` from.
+	 *
+	 * **INDEXED BY GLYPH, NOT BY CHARACTER** — `glyphCount` entries, because the pipeline's per-character array is
+	 * RE-INDEXED through the cluster map before it is stored (`glyphLevels[i] = levels[clusters[i]]`). **THIS COMMENT
+	 * SAID THE OPPOSITE, AND THE COMMENT WAS THE BUG**: the slice that cut runs at level boundaries read
+	 * `levels[run.start]` with a CHARACTER index, which is out of bounds whenever a line has fewer glyphs than
+	 * characters, and it produced right answers on every line where the two counts coincided. ASan found it on an
+	 * emoji ZWJ sequence — five UTF-16 units, three glyphs, so a read at index 3 or 4 of a three-byte array. NULL
+	 * when the line never ran the pipeline, which means logical order and a left leading edge. */
+	uint8_t *levels;		/* malloc'd, ONE ENTRY PER GLYPH, or NULL */
 	/* **AND WHICH OF THE GLYPHS IS NOT A GLYPH BUT A BOX.** A character carrying a run delegate occupies the width its
 	 * delegate answers and draws no ink; this flag is the one thing that tells the two apart, and it is carried
 	 * alongside the glyphs so a DRAW can skip a box and the `CTRun` built from the line can too. */
@@ -1542,21 +1548,20 @@ CFArrayRef CTLineGetGlyphRuns(CTLineRef line)
 		CFIndex k;
 		CTRunStatus runStatus;
 
-		/* **THE RUN'S DIRECTION IS ITS LEVEL'S — AND THE LEVEL IS INDEXED BY CHARACTER, NOT BY GLYPH**, which the first
-		 * version of this got wrong: `line->levels` has one entry per CHARACTER of the line's range (it is the pipeline's
-		 * own array), while `start` is a GLYPH offset, and the two diverge as soon as a face composes or ligates. The
-		 * measured symptom was every status being off on any line where they did — the forced-level cases first, then
-		 * the Hebrew paragraph's run. The run's CHARACTER start is `runInfo[r].start`; its own level is there.
+		/* **THE RUN'S DIRECTION IS ITS LEVEL'S, AND THE LEVEL IS INDEXED BY GLYPH** — `start` is the run's GLYPH start
+		 * and `line->levels` has one entry per GLYPH, so the two agree by construction. **THIS CODE ONCE USED THE
+		 * CHARACTER START, ON THE STRENGTH OF A COMMENT THAT SAID THE ARRAY WAS CHARACTER-INDEXED**, and it read past
+		 * the end of the array on any line whose glyph count was smaller than its character count: MEASURED by ASan,
+		 * an emoji ZWJ sequence of five UTF-16 units and three glyphs. It gave the right answer on every line where
+		 * the counts coincided, which is why nothing in the suite had ever complained.
 		 * **AND THE NON-MONOTONIC BIT IS THE RUN'S OWN TOO, WHICH THE MIXED-LINE CASE MADE VISIBLE.** It used to be
 		 * the line's flag copied into every run, so a Latin run that had not moved reported that its indices were out
 		 * of order because a HEBREW run elsewhere on the line had been reversed — a false claim about that run. Apple's
 		 * flag is about the run's own string indices: they ascend, or they do not. */
 		runStatus = status;
-		if (l->levels != NULL && l->runCount > 0 && l->runInfo[r].start >= 0
-		    && l->runInfo[r].start < l->range.length && l->runInfo[r].count > 0) {
-			if ((l->levels[l->runInfo[r].start] % 2) != 0) {
-				runStatus |= kCTRunStatusRightToLeft;
-			}
+		if (l->levels != NULL && start >= 0 && start < l->glyphCount && count > 0
+		    && (l->levels[start] % 2) != 0) {
+			runStatus |= kCTRunStatusRightToLeft;
 		}
 		for (k = 1; k < count; k++) {
 			if (l->clusters[start + k] < l->clusters[start + k - 1]) {
