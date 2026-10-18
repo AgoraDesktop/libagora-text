@@ -1063,3 +1063,11 @@ the user's decision is that they stay owed), the ATS pair (permanent), and the f
   from the attributed font, and with fallback the Hebrew and Hangul characters are in runs of their own, set in faces
   the cascade chose. They now find the run BY THE CHARACTER and take the expectation from the face THAT RUN NAMES —
   which is a better test than the one it replaced, because it also checks that a substitution is DISCOVERABLE.
+- **AND THE FONT SET IS LISTED ONCE NOW, WHICH WAS THE TREE'S MOST EXPENSIVE DEFECT.** `CTFontMatchingCopyAvailableDescriptors`
+  opened every installed font file — to read its names — on every call, and per-character fallback calls it once per
+  character no face covers. It is cached and keyed on the facts that change its answer: the font set's own generation
+  (`cg_font_registry_generation`, moving on a registration, an unregistration and an `FN_FONT_PATH` change) AND this
+  file's visibility state. **THE VISIBILITY HALF WAS FOUND BY THE SUITE, NOT BY REVIEW**: a cache keyed on the font set
+  alone answered "a disabled face leaves every matching answer, and comes back" from before the disabling. MEASURED: a
+  repeated fallback miss **0.0001 s against 0.0070 s**; the app's sanitizer hyphenation case **13 s against more than
+  280 s** (most of that half being `libagora-drawing`'s name cache, sized for a cascade when a search walks a font set).

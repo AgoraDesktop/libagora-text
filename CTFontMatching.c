@@ -55,6 +55,13 @@
  * naming it again.
  * =============================================================================================== */
 static pthread_mutex_t ct_match_visibility_lock = PTHREAD_MUTEX_INITIALIZER;
+/* **AND A GENERATION FOR THE VISIBILITY STATE TOO**, because the available-descriptor cache is keyed on the facts that
+ * change its answer and VISIBILITY IS ONE OF THEM — a font that is disabled leaves the list, and a cache that could not
+ * notice would keep offering a face the caller just removed. The font set's own generation (`cg_font_registry_generation`)
+ * covers registrations and the search path; this one covers what only this file knows. MEASURED by the suite: without it
+ * "a disabled face leaves every matching answer, and comes back" failed, because the cache answered from before the
+ * disabliing. */
+static unsigned long ct_match_visibility_generation = 1;
 static CFMutableArrayRef ct_match_disabled = NULL;
 
 static CFDictionaryRef ct_match_query_attributes(CTFontDescriptorRef descriptor);	/* THE TWO HELPERS THIS ONE NEEDS
@@ -264,19 +271,55 @@ static CFComparisonResult ct_match_compare(const void *first, const void *second
 	return result;
 }
 
+/* **AND THE LIST IS BUILT ONCE PER FONT SET, NOT ONCE PER CALL, WHICH WAS THE TREE'S MOST EXPENSIVE DEFECT.** Building
+ * it walks the font directories and OPENS EVERY FONT FILE to read its names; per-character font fallback calls this door
+ * for every character no installed face covers, so the cost was a directory walk per character. MEASURED: a suite that
+ * takes NO MEASURABLE TIME with a single-directory search path ran for MORE THAN 280 SECONDS without this cache.
+ *
+ * **AND THE CACHE CANNOT GO STALE, BECAUSE ITS KEY IS THE FONT SET'S OWN GENERATION** (`cg_font_registry_generation`,
+ * which moves on a registration, an unregistration and an `FN_FONT_PATH` change — the three things that change which
+ * faces exist). A cache that could not notice a font registered after it was built would answer for a machine that no
+ * longer exists; the generation is what makes reuse sound rather than merely fast.
+ *
+ * THE CONTRACT IS STILL `Copy`: the caller gets a `+1` array and may keep or release it as it likes, so the cache's own
+ * reference is separate from the caller's and the array handed out is immutable. */
+static pthread_mutex_t ct_match_list_lock = PTHREAD_MUTEX_INITIALIZER;
+static CFArrayRef ct_match_list_cache = NULL;
+static unsigned long ct_match_list_generation = 0;
+static unsigned long ct_match_list_visibility_generation = 0;
+
 CFArrayRef CTFontMatchingCopyAvailableDescriptors(void)
 {
-	CFMutableArrayRef list;
+	unsigned long generation = cg_font_registry_generation();
+	CFArrayRef answer;
 
-	list = CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks);
-	if (list == NULL) {
-		return NULL;
+	pthread_mutex_lock(&ct_match_list_lock);
+	/* **THE KEY IS THE FONT SET AND THE VISIBILITY STATE BOTH**, because the list is a function of the two: a face
+	 * that is disabled leaves it, and the registry's generation knows nothing about that. Reading the visibility
+	 * generation under THIS lock rather than the visibility one is deliberate — it is written under that lock by the
+	 * door above, and a torn read of a `unsigned long` would at worst rebuild the cache once. */
+	if (ct_match_list_cache == NULL
+	    || generation != ct_match_list_generation
+	    || ct_match_visibility_generation != ct_match_list_visibility_generation) {
+		CFMutableArrayRef list = CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks);
+
+		if (list != NULL) {
+			cg_font_enumerate(ct_match_visit, list);
+			if (CFArrayGetCount(list) > 1) {
+				CFArraySortValues(list, CFRangeMake(0, CFArrayGetCount(list)), ct_match_compare,
+						  NULL);
+			}
+			if (ct_match_list_cache != NULL) {
+				CFRelease(ct_match_list_cache);
+			}
+			ct_match_list_cache = list;	/* the cache's own reference */
+			ct_match_list_generation = generation;
+			ct_match_list_visibility_generation = ct_match_visibility_generation;
+		}
 	}
-	cg_font_enumerate(ct_match_visit, list);
-	if (CFArrayGetCount(list) > 1) {
-		CFArraySortValues(list, CFRangeMake(0, CFArrayGetCount(list)), ct_match_compare, NULL);
-	}
-	return list;
+	answer = (ct_match_list_cache != NULL) ? (CFArrayRef)CFRetain(ct_match_list_cache) : NULL;
+	pthread_mutex_unlock(&ct_match_list_lock);
+	return answer;
 }
 
 /* =================================================================================================
@@ -487,6 +530,7 @@ void CTFontManagerEnableFontDescriptors(CFArrayRef descriptors, bool enable)
 		return;
 	}
 	pthread_mutex_lock(&ct_match_visibility_lock);
+	ct_match_visibility_generation++;
 	if (ct_match_disabled == NULL) {
 		ct_match_disabled = CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks);
 	}
