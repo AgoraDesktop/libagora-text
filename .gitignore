@@ -1,2 +1,5 @@
 # build/ is where artefacts go
 build/
+
+# CTest writes its run logs here, including a LastTest.log that is not source.
+Testing/
