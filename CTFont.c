@@ -653,16 +653,33 @@ struct ct_role_request {
  * family a UI uses is genuinely a theme, and this tier has no such setting" — which was true, and is no longer the
  * answer, because a theme has to be SOMEWHERE and this is the only tier that knows what a UI font is for.
  *
- * `Inter` first, by request. The rest are the faces a Linux or BSD desktop actually has, in the order a person
- * would pick them, so that a machine without Inter still gets a SANS face rather than a serif one. */
+ * `Inter` first, by request. The rest are the bundled set's own sans faces first, then the faces a Linux or BSD
+ * desktop actually has, in the order a person would pick them, so that a machine without Inter still gets a SANS
+ * face rather than a serif one. `Inter Display` is deliberately NOT here: it is the large-size optical grade, and
+ * a UI role is the text grade. */
 static const char *const ct_ui_families[] = {
 	"Inter",
+	"Liberation Sans",
+	"Fira Sans",
 	"Noto Sans",
 	"Cantarell",
 	"Lato",
 	"DejaVu Sans",
-	"Liberation Sans",
 	"FreeSans",
+};
+
+/* **THE MONOSPACED PREFERENCE, AND IT HAS TO BE A LIST FOR THE SAME REASON THE UI ONE DOES.** The fixed-pitch role
+ * used to take the first monospaced regular face in FAMILY-NAME order, which on a host with the bundled set is
+ * whichever monospace sorts first — `Cousine`, `DejaVu Sans Mono`, `FreeMono` — and none of those is the face this
+ * desktop should draw code and tabular numbers in. IBM Plex Mono is the SF Mono/Menlo role (see
+ * `libagora-drawing/fonts/PROVENANCE.md`), Liberation Mono the Courier role, and DejaVu Sans Mono the face this
+ * tree's tests and most Linux hosts already have. */
+static const char *const ct_mono_families[] = {
+	"IBM Plex Mono",
+	"Liberation Mono",
+	"DejaVu Sans Mono",
+	"Noto Sans Mono",
+	"FreeMono",
 };
 
 /* **AND IT IS OVERRIDABLE WITHOUT A REBUILD**, because a preference list nobody can argue with is a hardcoded
@@ -703,11 +720,15 @@ static bool ct_ui_name_is_in(CFStringRef family, const char *list)
  * two alternatives, and the reason is what a caller means by naming a family: "this one, please" — not "this one,
  * and if it is not installed then anything at all". MEASURED with the lists kept apart: `AGORA_UI_FONT=Nonexistent`
  * fell past this file's whole preference list and answered `C059-Roman`, a URW SERIF, which is the one outcome the
- * list exists to prevent. A caller who names a family that is not here gets what a caller who names nothing gets. */
-static bool ct_ui_family_at(int index, char *out, size_t size)
+ * list exists to prevent. A caller who names a family that is not here gets what a caller who names nothing gets.
+ *
+ * THE SAME WALK ANSWERS BOTH ROLES, because the only difference between them is which list and which variable:
+ * `AGORA_UI_FONT` names the UI sans and `AGORA_MONO_FONT` names the fixed-pitch face. */
+static bool ct_family_at(const char *env_name, const char *const *defaults_list, size_t defaults_count,
+			 int index, char *out, size_t size)
 {
-	const char *env = getenv("AGORA_UI_FONT");
-	const int defaults = (int)(sizeof ct_ui_families / sizeof ct_ui_families[0]);
+	const char *env = getenv(env_name);
+	const int defaults = (int)defaults_count;
 	const char *p;
 	size_t len;
 
@@ -744,19 +765,69 @@ static bool ct_ui_family_at(int index, char *out, size_t size)
 	if (index >= defaults) {
 		return false;
 	}
-	snprintf(out, size, "%s", ct_ui_families[index]);
+	snprintf(out, size, "%s", defaults_list[index]);
 	return true;
 }
 
-/* **THE FIRST REGULAR FACE OF A NAMED FAMILY, ASKED OF THE DESCRIPTORS RATHER THAN OF THE FONTS.** Every candidate
+static bool ct_ui_family_at(int index, char *out, size_t size)
+{
+	return ct_family_at("AGORA_UI_FONT", ct_ui_families,
+			     sizeof ct_ui_families / sizeof ct_ui_families[0], index, out, size);
+}
+
+static bool ct_mono_family_at(int index, char *out, size_t size)
+{
+	return ct_family_at("AGORA_MONO_FONT", ct_mono_families,
+			     sizeof ct_mono_families / sizeof ct_mono_families[0], index, out, size);
+}
+
+/* **THE REGULAR FACE OF A NAMED FAMILY, ASKED OF THE DESCRIPTORS RATHER THAN OF THE FONTS.** Every candidate
  * carries its family as an ATTRIBUTE, so a family nobody wants costs a dictionary lookup instead of opening a font
  * file off the disk — WHICH IS WHAT MAKES TRYING A LIST OF FAMILIES AFFORDABLE rather than seven walks through every
  * font on the host. That distinction is the whole reason this function exists instead of a loop around
  * `ct_font_search`: the acceptance predicate there is handed a FONT, and by then the file has already been read. */
+
+/* **`Regular` IS A STYLE NAME AND A FAMILY CAN CARRY SEVERAL UNSTYLED FACES.** Inter ships Regular, Medium and
+ * SemiBold; none of them is bold or italic, so "the first face that is neither" is whatever the directory lists
+ * first — MEASURED, `Inter-Medium` — and a UI role drawn in Medium is a real difference from one drawn in Regular.
+ * The names below are the spellings regular faces actually use; an unknown spelling ranks below a known one but
+ * above a styled face, so a family that calls its regular face something else still answers. */
+static bool ct_font_style_is_regular(CTFontRef font)
+{
+	static const char *const regular_words[] = { "Regular", "Book", "Roman", "Normal", "Plain" };
+	CFStringRef style = CTFontCopyName(font, kCTFontStyleNameKey);
+	char name[64];
+	bool regular = false;
+	size_t i;
+
+	if (style != NULL) {
+		if (CFStringGetCString(style, name, (CFIndex)sizeof name, kCFStringEncodingUTF8)) {
+			for (i = 0; i < sizeof regular_words / sizeof regular_words[0]; i++) {
+				if (strcasecmp(name, regular_words[i]) == 0) {
+					regular = true;
+					break;
+				}
+			}
+		}
+		CFRelease(style);
+	}
+	return regular;
+}
+
+static int ct_font_family_rank(CTFontRef font)
+{
+	if ((CTFontGetSymbolicTraits(font) & (kCTFontBoldTrait | kCTFontItalicTrait)) != 0) {
+		return 0;
+	}
+	return ct_font_style_is_regular(font) ? 2 : 1;
+}
+
 static CTFontRef ct_font_search_family(CFArrayRef candidates, CGFloat size, const CGAffineTransform *matrix,
 				       const char *family)
 {
 	CFIndex i, count = (candidates != NULL) ? CFArrayGetCount(candidates) : 0;
+	CTFontRef best = NULL;
+	int best_rank = -1;
 
 	for (i = 0; i < count; i++) {
 		CTFontDescriptorRef descriptor = (CTFontDescriptorRef)CFArrayGetValueAtIndex(candidates, i);
@@ -764,6 +835,7 @@ static CTFontRef ct_font_search_family(CFArrayRef candidates, CGFloat size, cons
 		char name[256];
 		bool matches = false;
 		CTFontRef font;
+		int rank;
 
 		if (got != NULL) {
 			matches = CFStringGetCString(got, name, (CFIndex)sizeof name, kCFStringEncodingUTF8) &&
@@ -777,12 +849,21 @@ static CTFontRef ct_font_search_family(CFArrayRef candidates, CGFloat size, cons
 		if (font == NULL) {
 			continue;
 		}
-		if ((CTFontGetSymbolicTraits(font) & (kCTFontBoldTrait | kCTFontItalicTrait)) == 0) {
-			return font;
+		rank = ct_font_family_rank(font);
+		if (rank > best_rank) {
+			if (best != NULL) {
+				CFRelease(best);
+			}
+			best = font;
+			best_rank = rank;
+		} else {
+			CFRelease(font);
 		}
-		CFRelease(font);
+		if (best_rank == 2) {
+			break;		/* the regular face itself; nothing can beat that */
+		}
 	}
-	return NULL;
+	return best;
 }
 
 static bool ct_accept_role(CTFontRef candidate, void *info)
@@ -861,15 +942,27 @@ CTFontRef CTFontCreateUIFontForLanguage(CTFontUIFontType uiType, CGFloat size, C
 	want.fixed_pitch = (uiType == kCTFontUserFixedPitchFontType);
 	candidates = CTFontMatchingCopyAvailableDescriptors();
 	base = NULL;
-	if (!want.fixed_pitch) {
+	{
 		/* **THE LIST IS WALKED IN ORDER, WHICH IS THE ONLY THING THAT MAKES IT A PREFERENCE.** MEASURED with a
 		 * two-pass search that asked "is this family one of ours": the system font came back as `Cantarell`
 		 * while `Inter` was installed and first in the list — because the candidate list is sorted by FAMILY NAME
-		 * and `Cantarell` sorts first. A set has no order; a list does, and this is why the door takes one. */
+		 * and `Cantarell` sorts first. A set has no order; a list does, and this is why the door takes one.
+		 *
+		 * **AND THE FIXED-PITCH ROLE HAS ITS OWN LIST**, because "the first monospaced regular face" is the same
+		 * absence of a decision the UI list was written to end: on a host with the bundled set it is whichever
+		 * monospace sorts first, not the face this desktop means by a system monospace. The walks differ only in
+		 * which list and which environment variable they read. */
 		char family[256];
 		int i;
 
-		for (i = 0; base == NULL && ct_ui_family_at(i, family, sizeof family); i++) {
+		for (i = 0; base == NULL; i++) {
+			bool have = want.fixed_pitch
+					    ? ct_mono_family_at(i, family, sizeof family)
+					    : ct_ui_family_at(i, family, sizeof family);
+
+			if (!have) {
+				break;
+			}
 			base = ct_font_search_family(candidates, size, NULL, family);
 		}
 	}

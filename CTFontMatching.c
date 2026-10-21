@@ -149,7 +149,18 @@ static CTFontDescriptorRef ct_match_descriptor_for_path(const char *path)
 		CFDictionarySetValue(attributes, kCTFontNameAttribute, made);
 		CFRelease(made);
 	}
-	written = cg_font_name_entry(face, 1, buffer, sizeof buffer);	/* nameID 1 is the family */
+	/* **THE TYPOGRAPHIC FAMILY FIRST (nameID 16), THEN THE LEGACY ONE (nameID 1), AND THE ORDER IS WHAT MAKES A
+	 * FAMILY ACTUALLY A FAMILY.** nameID 1 is allowed to carry the style — Inter's Medium face calls its family
+	 * `Inter Medium`, and Libre Baskerville's Italic calls its family `Libre Baskerville Italic` — so a matcher
+	 * built only on nameID 1 sees several one-child families instead of one family with several faces. MEASURED
+	 * against the bundled set: `Inter` resolved to its Regular and Bold faces but not to Medium or SemiBold, and
+	 * `CTFontCreateCopyWithSymbolicTraits` could not find the italic of a family whose nameID 1 spelled it out.
+	 * nameID 16 exists exactly to answer this question; nameID 1 is the fallback for the faces that do not carry
+	 * one, and a face with neither is a face whose family this tier still knows less about. */
+	written = cg_font_name_entry(face, 16, buffer, sizeof buffer);	/* typographic family */
+	if (written <= 0) {
+		written = cg_font_name_entry(face, 1, buffer, sizeof buffer);	/* legacy family */
+	}
 	if (written > 0) {
 		made = CFStringCreateWithBytes(kCFAllocatorDefault, (const UInt8 *)buffer, (CFIndex)written,
 					       kCFStringEncodingUTF8, false);
