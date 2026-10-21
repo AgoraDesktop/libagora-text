@@ -395,8 +395,7 @@ static void ct_font_copy_defaults(const struct __CTFont *original, CGFloat *size
 
 struct ct_traits_request {
 	CFStringRef family;		/* NULL when the original named no family */
-	CTFontSymbolicTraits value;	/* the traits the masked bits should END UP carrying */
-	CTFontSymbolicTraits mask;	/* the bits the caller asked to change */
+	CTFontSymbolicTraits value;	/* the traits the result should carry */
 };
 
 static bool ct_accept_traits(CTFontRef candidate, void *info)
@@ -412,7 +411,15 @@ static bool ct_accept_traits(CTFontRef candidate, void *info)
 			CFRelease(family);
 		}
 	}
-	return ok && (CTFontGetSymbolicTraits(candidate) & want->mask) == (want->value & want->mask);
+	/* **THE WHOLE STYLE WORD IS COMPARED, AND THE FIRST VERSION'S MASKED COMPARISON IS WHY A BOLD ROLE CAME
+	 * BACK ITALIC.** Comparing only the bits the caller named accepts ANY face that carries them: a request for
+	 * `kCTFontBoldTrait` on a regular Figtree was satisfied by `FigtreeItalic-BoldItalic` because that face is
+	 * bold, and the candidate list happened to reach it before `Figtree-Bold`. The computed `value` already carries
+	 * the original's unchosen style bits, so comparing every bit of `ct_font_style_mask` is the same request stated
+	 * exactly: bold means bold and not italic, and a caller who started from an italic face still gets bold italic
+	 * because `value` kept the italic bit. */
+	return ok && (CTFontGetSymbolicTraits(candidate) & ct_font_style_mask) ==
+		    (want->value & ct_font_style_mask);
 }
 
 /* SAME FAMILY, THESE TRAITS. Apple's own sentence: "Returns a new font reference in the same family with the given
@@ -443,7 +450,6 @@ CTFontRef CTFontCreateCopyWithSymbolicTraits(CTFontRef font, CGFloat size, const
 	}
 	ct_font_copy_defaults(original, &size, &matrix);
 	want.value = (CTFontGetSymbolicTraits(font) & ~symTraitMask) | (symTraitValue & symTraitMask);
-	want.mask = symTraitMask;
 	want.family = CTFontCopyFamilyName(font);
 	candidates = CTFontMatchingCopyAvailableDescriptors();
 	found = ct_font_search(candidates, size, matrix, ct_accept_traits, &want);
@@ -653,11 +659,13 @@ struct ct_role_request {
  * family a UI uses is genuinely a theme, and this tier has no such setting" — which was true, and is no longer the
  * answer, because a theme has to be SOMEWHERE and this is the only tier that knows what a UI font is for.
  *
- * `Inter` first, by request. The rest are the bundled set's own sans faces first, then the faces a Linux or BSD
- * desktop actually has, in the order a person would pick them, so that a machine without Inter still gets a SANS
- * face rather than a serif one. `Inter Display` is deliberately NOT here: it is the large-size optical grade, and
- * a UI role is the text grade. */
+ * `Figtree` first, by request; `Inter` remains the bundled fallback and the face a caller gets when it asks for
+ * `Inter` by name. The rest are the bundled set's own sans faces first, then the faces a Linux or BSD desktop
+ * actually has, in the order a person would pick them, so that a machine without either still gets a SANS face
+ * rather than a serif one. `Inter Display` is deliberately NOT here: it is the large-size optical grade, and a UI
+ * role is the text grade. */
 static const char *const ct_ui_families[] = {
+	"Figtree",
 	"Inter",
 	"Liberation Sans",
 	"Fira Sans",
@@ -791,25 +799,46 @@ static bool ct_mono_family_at(int index, char *out, size_t size)
  * SemiBold; none of them is bold or italic, so "the first face that is neither" is whatever the directory lists
  * first — MEASURED, `Inter-Medium` — and a UI role drawn in Medium is a real difference from one drawn in Regular.
  * The names below are the spellings regular faces actually use; an unknown spelling ranks below a known one but
- * above a styled face, so a family that calls its regular face something else still answers. */
+ * above a styled face, so a family that calls its regular face something else still answers.
+ *
+ * **AND THE STYLE COMES FROM nameID 17 BEFORE nameID 2, WHICH IS THE CORRECTION THE FIRST VERSION NEEDED.** A
+ * variable font instanced by fontTools keeps the LEGACY subfamily (nameID 2) as `Regular` on Medium and SemiBold
+ * and puts the real style in the TYPOGRAPHIC subfamily (nameID 17): MEASURED on the bundled Figtree, `Figtree
+ * Medium` says `nameID 2 = Regular, nameID 17 = Medium`, so a rank built on `CTFontCopyName(kCTFontStyleNameKey)`
+ * — which reads nameID 2 — called Medium the regular face and the UI role was drawn in Figtree Medium. nameID 17
+ * is the same reason the matching tier reads nameID 16 for the family, one entry over. */
 static bool ct_font_style_is_regular(CTFontRef font)
 {
 	static const char *const regular_words[] = { "Regular", "Book", "Roman", "Normal", "Plain" };
-	CFStringRef style = CTFontCopyName(font, kCTFontStyleNameKey);
+	const struct __CTFont *f = (const struct __CTFont *)font;
 	char name[64];
+	bool have_name = false;
 	bool regular = false;
 	size_t i;
 
-	if (style != NULL) {
-		if (CFStringGetCString(style, name, (CFIndex)sizeof name, kCFStringEncodingUTF8)) {
-			for (i = 0; i < sizeof regular_words / sizeof regular_words[0]; i++) {
-				if (strcasecmp(name, regular_words[i]) == 0) {
-					regular = true;
-					break;
-				}
+	if (f != NULL && f->graphics != NULL) {
+		int written = cg_font_name_entry(f->graphics, 17, name, sizeof name);
+
+		if (written > 0) {
+			name[sizeof name - 1] = '\0';
+			have_name = true;
+		}
+	}
+	if (!have_name) {
+		CFStringRef style = CTFontCopyName(font, kCTFontStyleNameKey);
+
+		if (style != NULL) {
+			have_name = CFStringGetCString(style, name, (CFIndex)sizeof name, kCFStringEncodingUTF8);
+			CFRelease(style);
+		}
+	}
+	if (have_name) {
+		for (i = 0; i < sizeof regular_words / sizeof regular_words[0]; i++) {
+			if (strcasecmp(name, regular_words[i]) == 0) {
+				regular = true;
+				break;
 			}
 		}
-		CFRelease(style);
 	}
 	return regular;
 }
