@@ -1,9 +1,9 @@
+#!/usr/bin/env python3
 # Copyright © 2026 Kyle J. Cardoza.
 # SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
 
-#!/usr/bin/env python3
 """Emit CTBidiBracketsData.c from the Unicode Character Database's BidiBrackets.txt.
 
 The Bidi_Paired_Bracket and Bidi_Paired_Bracket_Type properties are DATA — a table of ~120 lines —

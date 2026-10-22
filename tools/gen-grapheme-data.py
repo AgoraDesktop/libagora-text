@@ -1,9 +1,9 @@
+#!/usr/bin/env python3
 # Copyright © 2026 Kyle J. Cardoza.
 # SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
 
-#!/usr/bin/env python3
 """Emit `CTGraphemeData.c`: the Grapheme_Cluster_Break classes and the Extended_Pictographic ranges.
 
 Two UCD files are read, both Unicode 15.1.0, neither committed (the same standing every other UCD file has):

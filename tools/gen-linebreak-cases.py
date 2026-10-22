@@ -1,9 +1,9 @@
+#!/usr/bin/env python3
 # Copyright © 2026 Kyle J. Cardoza.
 # SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
 
-#!/usr/bin/env python3
 """Emit the C case table for the UAX #14 conformance cases, one case per rule.
 
 The Unicode Character Database ships `LineBreakTest.txt` — every rule's own examples, with Unicode's

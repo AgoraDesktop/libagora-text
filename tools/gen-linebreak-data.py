@@ -1,9 +1,9 @@
+#!/usr/bin/env python3
 # Copyright © 2026 Kyle J. Cardoza.
 # SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
 
-#!/usr/bin/env python3
 """Emit CTLineBreakData.c from the Unicode Character Database's LineBreak.txt and EastAsianWidth.txt.
 
 The Line_Break property is DATA, not a rule: LineBreak.txt is a table of ~3500 ranges, and the only

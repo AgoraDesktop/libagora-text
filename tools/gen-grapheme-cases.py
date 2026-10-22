@@ -1,9 +1,9 @@
+#!/usr/bin/env python3
 # Copyright © 2026 Kyle J. Cardoza.
 # SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
 
-#!/usr/bin/env python3
 """Emit the C case table for the UAX #29 conformance cases, one case per rule.
 
 `GraphemeBreakTest.txt` states, for 1,187 strings, where a grapheme cluster boundary falls — `÷` where there is one and

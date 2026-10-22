@@ -1,9 +1,9 @@
+#!/usr/bin/env python3
 # Copyright © 2026 Kyle J. Cardoza.
 # SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
 
-#!/usr/bin/env python3
 """Emit CTBidiData.c from the Unicode Character Database that Python carries.
 
 The Bidi_Class of a code point is DATA, not a rule: `DerivedBidiClass.txt` is a table of ~1400
