@@ -1,8 +1,10 @@
 /*
  * CTGlyphInfo.h — the glyph substitution: the glyph that should be drawn in place of a character.
  *
- * Copyright © 2026 Kyle J. Cardoza. MIT licensed — see LICENSE.
- * SPDX-License-Identifier: MIT
+ * Copyright © 2026 Kyle J. Cardoza.
+ * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * WRITTEN FROM APPLE'S 10.6 HEADER (PROVENANCE.md), whose ONLY include is `CTFont.h` — and that is the type's whole
  * story: a glyph substitution is A GLYPH, A FACE AND THE CHARACTER IT STANDS FOR, so this header needs the font and

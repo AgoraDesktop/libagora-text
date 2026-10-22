@@ -1,8 +1,10 @@
 /*
  * CTBidi.c — the two rules built so far: which class a code point is, and which way the paragraph runs.
  *
- * Copyright © 2026 Kyle J. Cardoza. MIT licensed — see LICENSE.
- * SPDX-License-Identifier: MIT
+ * Copyright © 2026 Kyle J. Cardoza.
+ * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * **THE TABLE ANSWERS THE CLASS; P2 AND P3 ANSWER THE PARAGRAPH.** A binary search over `CTBidiData.c` is the whole
  * of the first, and the second is the fourteen lines below it: find the first strong character while stepping over

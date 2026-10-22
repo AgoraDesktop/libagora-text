@@ -2,8 +2,10 @@
  * CTLineBreak_internal.h — UAX #14: where a line may be broken, which is the one thing a TYPESETTER needs that no
  * font can answer.
  *
- * Copyright © 2026 Kyle J. Cardoza. MIT licensed — see LICENSE.
- * SPDX-License-Identifier: MIT
+ * Copyright © 2026 Kyle J. Cardoza.
+ * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * NOT PART OF CORE TEXT'S SURFACE. Apple applies the Unicode Line Breaking Algorithm inside the typesetter and
  * publishes no door for it — `CTTypesetterSuggestLineBreak` is the whole of what a caller sees — so this header is

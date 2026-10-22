@@ -2,8 +2,10 @@
  * CTLineBreakThai_internal.h — the UAX #14 `SA` tailoring for Thai: where a DICTIONARY says a word ends, which is
  * the one thing the rule list cannot answer.
  *
- * Copyright © 2026 Kyle J. Cardoza. MIT licensed — see LICENSE.
- * SPDX-License-Identifier: MIT
+ * Copyright © 2026 Kyle J. Cardoza.
+ * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * NOT PART OF CORE TEXT'S SURFACE, for the reason `CTLineBreak_internal.h` gives for itself: Apple publishes no door
  * for line breaking, the algorithm runs inside the typesetter, and this tier's rules and this tier's typesetter are

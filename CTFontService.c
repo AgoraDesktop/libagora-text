@@ -1,4 +1,11 @@
 /*
+ * Copyright © 2026 Kyle J. Cardoza.
+ * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
+ */
+
+/*
  * CTFontService.c -- THE WIRE. See CTFontService_internal.h for what it is FOR and why the format is what it is.
  *
  * AND WHAT IS NOT HERE IS AS DELIBERATE AS WHAT IS: no socket, no name, no run loop, no process. Those are Agora's

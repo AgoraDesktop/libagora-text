@@ -1,8 +1,10 @@
 /*
  * CTGlyphInfo.c — the glyph substitution: three creators, three getters, and one boundary.
  *
- * Copyright © 2026 Kyle J. Cardoza. MIT licensed — see LICENSE.
- * SPDX-License-Identifier: MIT
+ * Copyright © 2026 Kyle J. Cardoza.
+ * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * THE OBJECT KEEPS WHAT IT WAS GIVEN AND RESOLVES WHAT IT CAN. A glyph info made from a NAME keeps the name and the
  * glyph the face answered for it; one made from an INDEX keeps the index and RESOLVES THE NAME LAZILY through the

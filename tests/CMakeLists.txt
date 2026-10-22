@@ -1,3 +1,8 @@
+# Copyright © 2026 Kyle J. Cardoza.
+# SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
+
 # libagora-text's own suite.
 #
 # IT LINKS THE LIBRARY AND CORE FOUNDATION, AND REACHES CORE GRAPHICS THROUGH THE LIBRARY: every door in the

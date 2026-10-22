@@ -1,8 +1,10 @@
 /*
  * CTTypesetter.c — the typesetter: the first thing in this library that DECIDES rather than measures.
  *
- * Copyright © 2026 Kyle J. Cardoza. MIT licensed — see LICENSE.
- * SPDX-License-Identifier: MIT
+ * Copyright © 2026 Kyle J. Cardoza.
+ * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * APPLE'S OWN SENTENCE IS THE ALGORITHM, and it is two clauses long: "The line break can be triggered either by a
  * HARD BREAK CHARACTER in the stream or by FILLING THE SPECIFIED WIDTH with characters." So this file walks the

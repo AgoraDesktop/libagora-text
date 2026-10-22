@@ -2,8 +2,10 @@
  * CTFont.h — the font itself: the type every other Core Text type is built around, the keys its name table
  * is asked for, the vocabularies that classify it, and the doors for its metrics, its glyphs and its outlines.
  *
- * Copyright © 2026 Kyle J. Cardoza. MIT licensed — see LICENSE.
- * SPDX-License-Identifier: MIT
+ * Copyright © 2026 Kyle J. Cardoza.
+ * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * WRITTEN FROM APPLE'S 10.6 HEADER (PROVENANCE.md). It is the header every other Core Text header includes,
  * which is why it is written after the two leaves and not before: it includes CTFontDescriptor.h, and

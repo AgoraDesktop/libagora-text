@@ -1,8 +1,10 @@
 /*
  * CTFramesetter.c — the framesetter: it fills a shape with lines until the shape or the text runs out.
  *
- * Copyright © 2026 Kyle J. Cardoza. MIT licensed — see LICENSE.
- * SPDX-License-Identifier: MIT
+ * Copyright © 2026 Kyle J. Cardoza.
+ * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * THE LAYOUT LOOP IS SIX LINES LONG AND EVERY DECISION IN IT IS SOMEBODY ELSE'S: the TYPESETTER says where each line
  * ends (this file asks it, in the shape of a width), the LINE says how tall the text is (this file asks it for the

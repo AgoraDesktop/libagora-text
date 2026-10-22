@@ -1,8 +1,10 @@
 /*
  * CTFont.c — the font: its keys, its type, and every door this tree can answer honestly.
  *
- * Copyright © 2026 Kyle J. Cardoza. MIT licensed — see LICENSE.
- * SPDX-License-Identifier: MIT
+ * Copyright © 2026 Kyle J. Cardoza.
+ * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * A FONT IS A FACE, A SIZE AND A MATRIX, AND THE FACE COMES FROM CORE GRAPHICS. That is the shape of this
  * file: `CGFont` already holds the face, already reports its metrics in font units, already maps a glyph name

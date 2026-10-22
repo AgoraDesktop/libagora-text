@@ -1,8 +1,10 @@
 /*
  * CTLine_internal.h — the seam between a line and the things that make one out of part of a string.
  *
- * Copyright © 2026 Kyle J. Cardoza. MIT licensed — see LICENSE.
- * SPDX-License-Identifier: MIT
+ * Copyright © 2026 Kyle J. Cardoza.
+ * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * NOT PART OF CORE TEXT'S SURFACE, AND NOT INCLUDED BY ANY PUBLIC HEADER. Apple has ONE public door that makes a
  * line from an attributed string — `CTLineCreateWithAttributedString`, which takes the WHOLE string — and a

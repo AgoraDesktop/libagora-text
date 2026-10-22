@@ -1,8 +1,10 @@
 /*
  * CTTextTab.h — the tab: one stop in a paragraph's tab vocabulary.
  *
- * Copyright © 2026 Kyle J. Cardoza. MIT licensed — see LICENSE.
- * SPDX-License-Identifier: MIT
+ * Copyright © 2026 Kyle J. Cardoza.
+ * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * WRITTEN FROM APPLE'S 10.6 HEADER (PROVENANCE.md), whose include list is the whole story of this type:
  * `CTParagraphStyle.h` — for `CTTextAlignment`, because a tab's alignment is the SAME VOCABULARY a paragraph's is —

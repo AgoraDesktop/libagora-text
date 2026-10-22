@@ -1,8 +1,10 @@
 /*
  * CTLineBreak.c — UAX #14, the Unicode Line Breaking Algorithm, rule by rule.
  *
- * Copyright © 2026 Kyle J. Cardoza. MIT licensed — see LICENSE.
- * SPDX-License-Identifier: MIT
+ * Copyright © 2026 Kyle J. Cardoza.
+ * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * WHAT THIS IS FOR. A typesetter's whole decision is "how much of this text fits", and the answer depends on WHERE
  * the text MAY be broken — which is not a question a font can answer and not one this tier can invent. UAX #14

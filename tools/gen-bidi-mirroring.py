@@ -1,3 +1,8 @@
+# Copyright © 2026 Kyle J. Cardoza.
+# SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
+
 #!/usr/bin/env python3
 """Emit CTBidiMirroringData.c from the Unicode Character Database's BidiMirroring.txt.
 
@@ -32,8 +37,10 @@ def main():
     out.write("/*\n")
     out.write(" * CTBidiMirroringData.c — the MIRRORED GLYPH of a character, as a table.\n")
     out.write(" *\n")
-    out.write(" * Copyright © 2026 Kyle J. Cardoza. MIT licensed — see LICENSE.\n")
-    out.write(" * SPDX-License-Identifier: MIT\n")
+    out.write(" * Copyright © 2026 Kyle J. Cardoza.\n")
+    out.write(" * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza\n")
+    out.write(" * SPDX-License-Identifier: LGPL-3.0-or-later\n")
+    out.write(" * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.\n")
     out.write(" *\n")
     out.write(" * GENERATED, NOT WRITTEN, by `tools/gen-bidi-mirroring.py` from the Unicode Character Database's\n")
     out.write(" * `BidiMirroring.txt` (the copy at /usr/share/unicode on the machine that generated it). A HAND EDIT\n")

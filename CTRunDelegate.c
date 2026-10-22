@@ -1,8 +1,10 @@
 /*
  * CTRunDelegate.c — the box's three answers, and the Core Foundation object that carries them.
  *
- * Copyright © 2026 Kyle J. Cardoza. MIT licensed — see LICENSE.
- * SPDX-License-Identifier: MIT
+ * Copyright © 2026 Kyle J. Cardoza.
+ * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * THE OBJECT IS A CALLBACK STRUCT AND A POINTER, which is the whole of it: `CTRunDelegateCreate` copies the struct,
  * keeps the reference constant, and every door afterward is a call through one of the three function pointers. There

@@ -1,3 +1,10 @@
+/*
+ * Copyright © 2026 Kyle J. Cardoza.
+ * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
+ */
+
 # THE OWED DOORS ARE DECLARED AND NOT DEFINED, and that is a claim a TEST can hold rather than a comment
 # asserting it. A name a shared library DEFINES comes back from `nm -D --defined-only` with a type letter; a
 # name that is merely declared does not come back at all. So this asks for ABSENCE -- which is the only shape

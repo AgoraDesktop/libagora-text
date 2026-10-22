@@ -1,8 +1,10 @@
 /*
  * CTTextTab.c — the tab: three values and the object that holds them.
  *
- * Copyright © 2026 Kyle J. Cardoza. MIT licensed — see LICENSE.
- * SPDX-License-Identifier: MIT
+ * Copyright © 2026 Kyle J. Cardoza.
+ * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * THE SHORTEST OBJECT IN THIS LIBRARY, AND THE ONE THAT RETIRES A DEVIATION: its three fields are what Apple's creator
  * takes, and the reason it exists at all is that `kCTParagraphStyleSpecifierTabStops`'s DEFAULT is twelve of them.

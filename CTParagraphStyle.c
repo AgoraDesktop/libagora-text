@@ -1,8 +1,10 @@
 /*
  * CTParagraphStyle.c — the paragraph style: a table of fourteen settings, each with its own type and default.
  *
- * Copyright © 2026 Kyle J. Cardoza. MIT licensed — see LICENSE.
- * SPDX-License-Identifier: MIT
+ * Copyright © 2026 Kyle J. Cardoza.
+ * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * THE TABLE BELOW IS THE IMPLEMENTATION, AND THE REST OF THIS FILE IS BOOKKEEPING AROUND IT. A setting is a
  * (type, default) pair — Apple prints both beside each constant in its header — and those two facts are what

@@ -2,8 +2,10 @@
  * CTLine.h — the line: a string and its glyphs in an order, which is the first thing in this library that is
  * not a setting or a face but a RESULT.
  *
- * Copyright © 2026 Kyle J. Cardoza. MIT licensed — see LICENSE.
- * SPDX-License-Identifier: MIT
+ * Copyright © 2026 Kyle J. Cardoza.
+ * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * WRITTEN FROM APPLE'S 10.6 HEADER (PROVENANCE.md). Its includes are Apple's and they are worth stating because
  * of what is MISSING from them: `CFArray.h`, `CFAttributedString.h` and `CGContext.h` — NOT `CTRun.h` and not

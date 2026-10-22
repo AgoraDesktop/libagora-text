@@ -2,8 +2,10 @@
  * CTFontManagerErrors.h — the font manager's error vocabulary: the domain its errors carry, the user-info key
  * that names the URLs which failed, and the codes registration fails with.
  *
- * Copyright © 2026 Kyle J. Cardoza. MIT licensed — see LICENSE.
- * SPDX-License-Identifier: MIT
+ * Copyright © 2026 Kyle J. Cardoza.
+ * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * WRITTEN FROM APPLE'S 10.6 HEADER (PROVENANCE.md), and it is a header of its own because Apple makes it one:
  * `CTFontManager.h` INCLUDES this file and does not carry these declarations itself, so this is written first —

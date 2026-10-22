@@ -1,8 +1,10 @@
 /*
  * CTRun_internal.h — the seam between a run and the line that makes one.
  *
- * Copyright © 2026 Kyle J. Cardoza. MIT licensed — see LICENSE.
- * SPDX-License-Identifier: MIT
+ * Copyright © 2026 Kyle J. Cardoza.
+ * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * NOT PART OF CORE TEXT'S SURFACE, AND NOT INCLUDED BY ANY PUBLIC HEADER. APPLE HAS NO PUBLIC CREATOR FOR A RUN —
  * a run exists because a line (or a typesetter, which does not exist here yet) produced one — so the two files that

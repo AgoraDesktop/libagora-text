@@ -1,8 +1,10 @@
 /*
  * CTFrame.h — the frame: the lines that fit inside a path.
  *
- * Copyright © 2026 Kyle J. Cardoza. MIT licensed — see LICENSE.
- * SPDX-License-Identifier: MIT
+ * Copyright © 2026 Kyle J. Cardoza.
+ * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * WRITTEN FROM APPLE'S 10.6 HEADER (PROVENANCE.md). Its includes are Core Foundation's containers and strings, a
  * `CGContext` for drawing and — the one nothing else in this framework includes — a `CGPath`, because a frame is

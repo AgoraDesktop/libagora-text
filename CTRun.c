@@ -1,8 +1,10 @@
 /*
  * CTRun.c — the run: what a line is made of, and every door Apple puts on it.
  *
- * Copyright © 2026 Kyle J. Cardoza. MIT licensed — see LICENSE.
- * SPDX-License-Identifier: MIT
+ * Copyright © 2026 Kyle J. Cardoza.
+ * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * A RUN OWNS WHAT IT SAYS IT OWNS, which is the whole of this file's design and the reason the "Ptr" doors here
  * never answer NULL: the four arrays are copied in at creation and freed at the end, so a caller that retains a run

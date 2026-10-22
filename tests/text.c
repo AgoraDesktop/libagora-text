@@ -2,8 +2,10 @@
  * Core Text — the facts of the surface written so far: CTFontTraits' values and classes, and
  * CTFontDescriptor's twenty-two attribute keys.
  *
- * Copyright © 2026 Kyle J. Cardoza. MIT licensed — see LICENSE.
- * SPDX-License-Identifier: MIT
+ * Copyright © 2026 Kyle J. Cardoza.
+ * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * WHY THIS IS THE FIRST CASE IN THIS LIBRARY. The values in `CTFontTraits.h` are the one part of that header a
  * reader cannot check by looking, and the library that came before this one recorded its own values as "the

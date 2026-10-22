@@ -1,8 +1,10 @@
 /*
  * CTStringAttributes.c — the fourteen keys, and nothing else: the two enums are in the header.
  *
- * Copyright © 2026 Kyle J. Cardoza. MIT licensed — see LICENSE.
- * SPDX-License-Identifier: MIT
+ * Copyright © 2026 Kyle J. Cardoza.
+ * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * TWELVE OF THESE VALUES ARE PROVEN AND TWO ARE INFERRED, AND WHICH IS WHICH IS THE POINT OF THIS FILE. The proof is
  * the crossing rule the font descriptor's keys were proven by, applied here to a measurement of its own: Apple's

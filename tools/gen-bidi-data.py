@@ -1,3 +1,8 @@
+# Copyright © 2026 Kyle J. Cardoza.
+# SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
+
 #!/usr/bin/env python3
 """Emit CTBidiData.c from the Unicode Character Database that Python carries.
 
@@ -49,8 +54,10 @@ def main():
     out.write("/*\n")
     out.write(" * CTBidiData.c — the Bidi_Class of every code point, as a table of RANGES.\n")
     out.write(" *\n")
-    out.write(" * Copyright © 2026 Kyle J. Cardoza. MIT licensed — see LICENSE.\n")
-    out.write(" * SPDX-License-Identifier: MIT\n")
+    out.write(" * Copyright © 2026 Kyle J. Cardoza.\n")
+    out.write(" * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza\n")
+    out.write(" * SPDX-License-Identifier: LGPL-3.0-or-later\n")
+    out.write(" * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.\n")
     out.write(" *\n")
     out.write(" * GENERATED, NOT WRITTEN. `tools/gen-bidi-data.py` reads Python's `unicodedata` — the\n")
     out.write(" * Unicode Character Database itself, version %s here — and emits this file; ranges of the\n" % unicodedata.unidata_version)

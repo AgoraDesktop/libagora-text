@@ -1,8 +1,10 @@
 /*
  * CoreText.c — the umbrella's one door: the framework's version.
  *
- * Copyright © 2026 Kyle J. Cardoza. MIT licensed — see LICENSE.
- * SPDX-License-Identifier: MIT
+ * Copyright © 2026 Kyle J. Cardoza.
+ * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * `kCTVersionNumber10_6`, AND THE ANSWER IS A CLAIM ABOUT THIS LIBRARY THAT IS WORTH STATING PLAINLY. Apple's door
  * returns "the version of the CoreText framework", and the number a caller compares it against selects a set of
