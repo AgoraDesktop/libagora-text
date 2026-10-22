@@ -5,7 +5,6 @@
  * Copyright © 2026 Kyle J. Cardoza.
  * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
  * SPDX-License-Identifier: LGPL-3.0-or-later
- * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * WHY THIS FILE EXISTS RATHER THAN A LOCAL `extern` IN THE CONSUMER, WHICH IS THE REASON THE OTHER INTERNAL
  * HEADERS EXIST: `CTLine_internal.h` and its neighbours are here "so that the two files agree about how a thing is

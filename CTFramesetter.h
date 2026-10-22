@@ -4,7 +4,6 @@
  * Copyright © 2026 Kyle J. Cardoza.
  * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
  * SPDX-License-Identifier: LGPL-3.0-or-later
- * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * WRITTEN FROM APPLE'S 10.6 HEADER (PROVENANCE.md), whose include list says what this type IS: `CTFrame.h` and
  * `CTTypesetter.h`, and nothing else of the framework's. A framesetter is A TYPESETTER THAT KNOWS WHERE THE TEXT HAS

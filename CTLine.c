@@ -4,7 +4,6 @@
  * Copyright © 2026 Kyle J. Cardoza.
  * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
  * SPDX-License-Identifier: LGPL-3.0-or-later
- * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * THE LINE IS THE FIRST THING HERE THAT IS BUILT RATHER THAN STORED, and the whole of the build is three calls to
  * doors that already existed: `CTFontGetGlyphsForCharacters` turns the string's characters into glyphs — the door

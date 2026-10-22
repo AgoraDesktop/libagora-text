@@ -4,7 +4,6 @@
  * Copyright © 2026 Kyle J. Cardoza.
  * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
  * SPDX-License-Identifier: LGPL-3.0-or-later
- * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * A COLLECTION HOLDS A QUESTION AND NOT AN ANSWER, which is why this file is short and why the two doors that
  * would be long are owed instead. What a collection owns is the descriptors it was asked about, the options

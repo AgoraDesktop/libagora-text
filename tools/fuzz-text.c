@@ -5,7 +5,6 @@
  * Copyright © 2026 Kyle J. Cardoza.
  * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
  * SPDX-License-Identifier: GPL-3.0-or-later
- * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * **WHY THIS EXISTS RATHER THAN A LINE IN THE SUITE.** The suite is 76 cases of strings somebody thought of; a fuzzer
  * is the same doors fed strings nobody thought of, and the two find different things. Everything this tree parses is

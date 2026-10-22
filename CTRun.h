@@ -4,7 +4,6 @@
  * Copyright © 2026 Kyle J. Cardoza.
  * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
  * SPDX-License-Identifier: LGPL-3.0-or-later
- * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * WRITTEN FROM APPLE'S 10.6 HEADER (PROVENANCE.md). Apple's includes for it are `CFDictionary.h` and
  * `CGContext.h` — a run is attributes, glyphs, numbers and a surface to draw on — and THIS IS THE HEADER

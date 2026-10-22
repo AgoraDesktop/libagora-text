@@ -4,7 +4,6 @@
  * Copyright © 2026 Kyle J. Cardoza.
  * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
  * SPDX-License-Identifier: LGPL-3.0-or-later
- * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * WRITTEN FROM APPLE'S 10.6 HEADER (PROVENANCE.md). **A RUN DELEGATE IS HOW A CHARACTER THAT IS NOT A GLYPH GETS A
  * SIZE.** Attachment characters, inline images, text fields in a document and tab stops are all the same problem: a

@@ -4,7 +4,6 @@
  * Copyright © 2026 Kyle J. Cardoza.
  * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
  * SPDX-License-Identifier: LGPL-3.0-or-later
- * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * THE TABLE BELOW IS THE IMPLEMENTATION, AND THE REST OF THIS FILE IS BOOKKEEPING AROUND IT. A setting is a
  * (type, default) pair — Apple prints both beside each constant in its header — and those two facts are what

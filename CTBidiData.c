@@ -4,7 +4,6 @@
  * Copyright © 2026 Kyle J. Cardoza.
  * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
  * SPDX-License-Identifier: LGPL-3.0-or-later
- * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * GENERATED, NOT WRITTEN. `tools/gen-bidi-data.py` reads Python's `unicodedata` — the
  * Unicode Character Database itself, version 15.1.0 here — and emits this file; ranges of the

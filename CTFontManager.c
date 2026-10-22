@@ -4,7 +4,6 @@
  * Copyright © 2026 Kyle J. Cardoza.
  * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
  * SPDX-License-Identifier: LGPL-3.0-or-later
- * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * THE READ-ONLY HALF IS THE ENGINE'S OWN LIST SEEN THREE WAYS, which is the same observation the seam records
  * one framework over: `cg_font_enumerate` walks the configured font directories AND the process's registrations,

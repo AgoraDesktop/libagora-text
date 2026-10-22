@@ -4,7 +4,6 @@
  * Copyright © 2026 Kyle J. Cardoza.
  * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
  * SPDX-License-Identifier: LGPL-3.0-or-later
- * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * NOT PART OF CORE TEXT'S SURFACE. Apple's Core Text applies the Unicode Bidirectional Algorithm inside the
  * typesetter and publishes no door for it; this tier is building that algorithm in slices, and this header is the

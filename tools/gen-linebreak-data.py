@@ -2,7 +2,6 @@
 # Copyright © 2026 Kyle J. Cardoza.
 # SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
 
 """Emit CTLineBreakData.c from the Unicode Character Database's LineBreak.txt and EastAsianWidth.txt.
 
@@ -164,7 +163,6 @@ def main():
  * Copyright © 2026 Kyle J. Cardoza.
  * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
  * SPDX-License-Identifier: LGPL-3.0-or-later
- * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * GENERATED, NOT WRITTEN, by `tools/gen-linebreak-data.py` from the Unicode Character Database
  * (`LineBreak.txt` and `EastAsianWidth.txt`, Unicode 15.1.0, the copies at /usr/share/unicode on the

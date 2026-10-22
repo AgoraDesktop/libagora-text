@@ -4,7 +4,6 @@
  * Copyright © 2026 Kyle J. Cardoza.
  * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
  * SPDX-License-Identifier: LGPL-3.0-or-later
- * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * WRITTEN FROM APPLE'S 10.6 HEADER (PROVENANCE.md), AND IT IS THE LAST HEADER IN THE ORDER FOR A REASON THAT IS NOT
  * ALPHABETICAL: an umbrella is what a caller writes when they want the framework rather than a part of it, so it can

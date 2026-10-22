@@ -5,7 +5,6 @@
  * Copyright © 2026 Kyle J. Cardoza.
  * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
  * SPDX-License-Identifier: LGPL-3.0-or-later
- * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * WRITTEN FROM APPLE'S 10.6 HEADER (PROVENANCE.md), and it is the LAST of the vocabulary headers — the one Apple's
  * own include order puts beside `CTGlyphInfo` and `CTTextTab` at the end. It has no doors at all: a string attribute

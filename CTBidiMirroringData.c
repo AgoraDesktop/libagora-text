@@ -4,7 +4,6 @@
  * Copyright © 2026 Kyle J. Cardoza.
  * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
  * SPDX-License-Identifier: LGPL-3.0-or-later
- * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * GENERATED, NOT WRITTEN, by `tools/gen-bidi-mirroring.py` from the Unicode Character Database's
  * `BidiMirroring.txt` (the copy at /usr/share/unicode on the machine that generated it). A HAND EDIT

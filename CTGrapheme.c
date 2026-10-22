@@ -4,7 +4,6 @@
  * Copyright © 2026 Kyle J. Cardoza.
  * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
  * SPDX-License-Identifier: LGPL-3.0-or-later
- * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * **THE RULES ARE A LIST AND THE LIST IS THE SPECIFICATION**, the same way `CTLineBreak.c` is a transcription of UAX
  * #14: there is no weighting and no scoring, and every rule is "never break here", "always break here", or "break

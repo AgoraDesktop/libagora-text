@@ -4,7 +4,6 @@
  * Copyright © 2026 Kyle J. Cardoza.
  * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
  * SPDX-License-Identifier: LGPL-3.0-or-later
- * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * **THE TABLE ANSWERS THE CLASS; P2 AND P3 ANSWER THE PARAGRAPH.** A binary search over `CTBidiData.c` is the whole
  * of the first, and the second is the fourteen lines below it: find the first strong character while stepping over

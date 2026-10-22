@@ -5,7 +5,6 @@
  * Copyright © 2026 Kyle J. Cardoza.
  * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
  * SPDX-License-Identifier: LGPL-3.0-or-later
- * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * **THE FILE FORMAT, WHICH IS THE WHOLE OF WHAT THIS FILE KNOWS THAT IS NOT THE ALGORITHM.** `thbrk.tri` is libdatrie's
  * serialised trie, and it is three sections in order, every integer BIG-ENDIAN:

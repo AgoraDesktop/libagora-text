@@ -4,7 +4,6 @@
  * Copyright © 2026 Kyle J. Cardoza.
  * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
  * SPDX-License-Identifier: LGPL-3.0-or-later
- * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * THIS FILE OWNS NOTHING BUT WHAT IT WAS HANDED, which is what makes it short: the lines come from the framesetter
  * (see CTFrame_internal.h), the origins come with them, and the path and the frame attributes are retained as they

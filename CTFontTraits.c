@@ -4,7 +4,6 @@
  * Copyright © 2026 Kyle J. Cardoza.
  * SPDX-FileCopyrightText: 2026 Kyle J. Cardoza
  * SPDX-License-Identifier: LGPL-3.0-or-later
- * Portions of this file may derive from GNUstep; see THIRD-PARTY.md.
  *
  * THE STRINGS ARE THE APPKIT'S, and that is deliberate rather than borrowed: `NSFontSymbolicTrait` and its
  * three siblings are the names Foundation uses for the same four traits, because a traits dictionary crosses
