@@ -1071,3 +1071,35 @@ the user's decision is that they stay owed), the ATS pair (permanent), and the f
   alone answered "a disabled face leaves every matching answer, and comes back" from before the disabling. MEASURED: a
   repeated fallback miss **0.0001 s against 0.0070 s**; the app's sanitizer hyphenation case **13 s against more than
   280 s** (most of that half being `libagora-drawing`'s name cache, sized for a cascade when a search walks a font set).
+
+## Astral characters, and the two places that asked for half a character
+
+**AN EMOJI IS TWO UTF-16 UNITS AND ONE GLYPH, AND BOTH HALVES OF THE TEXT TIER USED TO ASK ABOUT ONE UNIT AT A
+TIME.** U+1F600 arrives as `D83D DE00`; the mapping asked the cmap for U+D83D — which no font has — so the character
+was reported UNMAPPED by every face in the tree, including the one installed for it. Three defects followed from that
+one, and each is now a case in `tests/text.c`:
+
+- **`CTFontGetGlyphsForCharacters` READ THE EMPTY SLOT AS A FAILURE.** A pair occupies the high surrogate's slot and
+  leaves 0 in the low one by design, and the door's loop answered NO for any zero slot — so "can this face encode the
+  string" was false for every emoji. It now skips the second unit of a pair, and a pair that mapped counts as two
+  covered units, because the return value is the callers' "did every character map".
+- **THE FALLBACK ASKED FOR HALF A CHARACTER.** `fn_fallback_runs` cut its per-character walk at one UTF-16 unit, so
+  the cascade was asked for U+D83D: no face covers a lone high surrogate, the answer was NULL, and NULL is normalized
+  to the face the run already had. The walk now reads a character's length from the text (and clamps it to what is
+  left of the RUN, so a pair cannot straddle two attributed runs), which is what lets the cascade answer for the
+  character the person actually wrote.
+- **AND THE ANSWER IS NOW A RUN OF ITS OWN.** MEASURED after the two fixes: `a😀b` in the suite's monospaced face is
+  **three runs**, the middle one set in a face the attributed string did not name, carrying ONE GLYPH for the pair's
+  two units and a positive advance. Before, it was one run and a `.notdef`.
+
+**THE PREFERENCE FOR A COLOUR FACE WAS IMPLEMENTED, MEASURED AND WITHDRAWN, AND THE REASON IS AN OPEN DEFECT.** The
+registry's order is by family name, so the first face that covers U+1F600 on this host is DejaVu Sans — a monochrome
+outline smiley — and the colour font that would draw it in colour is never consulted. A walk that remembers the first
+covering candidate and keeps going for one with colour fixes that (and a probe showed `Noto Color Emoji` winning), but
+it also made the FIRST fallback slow: at 13 points the menu bar is measured before the desktop window exists, and an
+application whose first frames are late enough **never orders its menu bar at all**. Two seconds of delay in the same
+place reproduces it with no extra font created, so the fault is in the window ordering, not in the cascade: the bar is
+ordered only while the application is `-isActive`, and the activation is missed. Recorded here rather than worked
+around, because a cascade that must stay fast to keep a window on the screen is a cascade hiding a bug. `text.c`'s
+`case_colour_glyphs` therefore asserts that the fallback ANSWERS for an emoji and is usable, not that it answers with
+the colour face.

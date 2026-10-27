@@ -7443,6 +7443,184 @@ static int case_line_font_fallback(void)
  * gets no levels at all, and a run then has nothing of its own to read — but the paragraph's direction is STATED rather
  * than computed, and every run is drawn in it. Reporting nothing there would call a forced right-to-left paragraph
  * directionless, which is why that path is in the same door. */
+/* **COLOUR GLYPHS ARE A CHAIN, NOT A FLAG, AND THIS CASE HOLDS UP THE LINKS THAT ARE CORE TEXT'S.** A character
+ * outside the BMP arrives as a SURROGATE PAIR; the face that draws emoji on a Linux desktop has NO OUTLINES (Noto
+ * Color Emoji is one bitmap strike, `units_per_EM == 0` in FreeType), so its em grid has to come from the sfnt's
+ * `head` table or every metric here is zero; and the fallback has to ASK FOR THE PAIR rather than for one UTF-16 unit
+ * of it.
+ *
+ * MEASURED BEFORE ANY OF IT: `CTFontGetGlyphsForCharacters` answered NO for every emoji even on the colour face
+ * (because the low surrogate's slot is 0 and the door read that as unmapped), `CTFontCreateForString` answered NULL
+ * for every emoji string, and `CTShaperCreate` refused the face outright for having no units per em. A line mixing
+ * `a`, an emoji and `b` came back as ONE run in the monospaced face with a `.notdef` where the emoji belonged.
+ *
+ * AND THE BOUNDARY IS STATED RATHER THAN LEFT AS A SURPRISE: this case asks that the cascade ANSWER for an emoji,
+ * not that it answer with the colour face. The registry's order is by family name, and on this host the first face
+ * that covers U+1F600 is a monochrome outline face; preferring the colour one was implemented, measured, and
+ * withdrawn — a full preference walk makes the fallback slow enough that the AppKit's menu bar never appears, which
+ * is a defect in the window ordering and recorded as one. See libagora-drawing's README for what IS drawn.
+ *
+ * THE FACE IS THE HOST'S, SO THE SECOND HALF SKIPS WITH A NOTE when no colour family is installed; the pair
+ * semantics are still measurable against this suite's own face, which has no emoji, and that half never skips. */
+static int case_colour_glyphs(void)
+{
+	static const char *const families[] = {
+		"Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", "EmojiOne Color", "Twemoji Mozilla"
+	};
+	int before = g_fail;
+	CTFontRef mono = test_font(13.0);
+	CTFontRef colour = NULL;
+	UniChar pair[2] = { 0xD83D, 0xDE00 };	/* U+1F600 GRINNING FACE */
+	UniChar high[1] = { 0xD83D };
+	CGGlyph glyphs[2] = { 0, 0 };
+	CGGlyph high_glyph[1] = { 0 };
+	CFStringRef emoji;
+	size_t i;
+
+	check(mono != NULL, "the colour case has a face to fall back from");
+	if (mono == NULL) {
+		return g_fail - before;
+	}
+	/* THE SUITE'S FACE HAS NO EMOJI, which is asserted rather than assumed: it is what makes the fallback below
+	 * a fallback rather than the first half of the cascade answering itself. */
+	check(!CTFontGetGlyphsForCharacters(mono, pair, glyphs, 2),
+	      "the suite's monospaced face maps no emoji, so a fallback is what has to answer");
+	check(!CTFontGetGlyphsForCharacters(mono, high, high_glyph, 1),
+	      "and a lone high surrogate is not a character any face claims");
+
+	for (i = 0; i < sizeof families / sizeof families[0]; i++) {
+		CFStringRef name = CFStringCreateWithCString(kCFAllocatorDefault, families[i],
+							     kCFStringEncodingUTF8);
+
+		if (name == NULL) {
+			continue;
+		}
+		colour = CTFontCreateWithName(name, 13.0, NULL);
+		CFRelease(name);
+		if (colour != NULL) {
+			break;
+		}
+	}
+	if (colour == NULL) {
+		printf("  (note: no colour font on this host — the fallback half of this case is skipped)\n");
+		return g_fail - before;
+	}
+	printf("  (colour face: %s)\n", families[i]);
+
+	glyphs[0] = 0;
+	glyphs[1] = 0;
+	check(CTFontGetGlyphsForCharacters(colour, pair, glyphs, 2),
+	      "the colour face CAN encode the pair — the low surrogate's empty slot is not an unmapped character");
+	check(glyphs[0] != 0 && glyphs[1] == 0,
+	      "the pair occupies ONE glyph slot, in the high surrogate's position");
+	check(CTFontGetUnitsPerEm(colour) > 0,
+	      "the face reports a units-per-em (%u) although it has no outlines",
+	      CTFontGetUnitsPerEm(colour));
+	check(CTFontGetAscent(colour) > 0.0 && CTFontGetDescent(colour) > 0.0,
+	      "and vertical metrics: ascent %.2f, descent %.2f",
+	      (double)CTFontGetAscent(colour), (double)CTFontGetDescent(colour));
+
+	emoji = CFStringCreateWithCharacters(kCFAllocatorDefault, pair, 2);
+	{
+		CTFontRef found = (emoji != NULL)
+			? CTFontCreateForString(mono, emoji, CFRangeMake(0, 2)) : NULL;
+		CGGlyph cover[2] = { 0, 0 };
+		CFStringRef wanted_name = CTFontCopyFullName(colour);
+		CFStringRef found_name = (found != NULL) ? CTFontCopyFullName(found) : NULL;
+
+		check(found != NULL, "a fallback for a whole emoji answers a face at all");
+		if (found != NULL) {
+			double advance;
+
+			check(CTFontGetGlyphsForCharacters(found, pair, cover, 2) && cover[0] != 0,
+			      "and the face it answers really covers the pair");
+			advance = CTFontGetAdvancesForGlyphs(found, kCTFontHorizontalOrientation, cover, NULL, 1);
+			check(advance > 0.0, "and the fallback has a real advance for it (%.2f)", advance);
+			/* **WHICH face it is, is the registry's ORDER and not this case's business.** On this host the
+			 * first coverer is a monochrome outline face (DejaVu Sans has a smiley at U+1F600), and preferring
+			 * the colour face would be a separate policy with its own cost — measured, and recorded in the
+			 * README. What this case holds is that a fallback EXISTS and is usable, which is the half that was
+			 * broken. */
+			printf("  (note: the fallback for the emoji is %s)\n",
+			       (found_name != NULL) ? "a covering face" : "unnameable");
+		}
+		(void)wanted_name;
+		if (wanted_name != NULL) {
+			CFRelease(wanted_name);
+		}
+		if (found_name != NULL) {
+			CFRelease(found_name);
+		}
+		if (found != NULL) {
+			CFRelease(found);
+		}
+	}
+
+	/* **AND A MIXED LINE IS THREE RUNS, WITH THE EMOJI IN ITS OWN FACE AND ONE GLYPH WIDE.** The two character
+	 * spans are what a line's runs are counted in, so a pair that produced one glyph has to keep its two units in
+	 * the run while contributing one glyph — which is the mapping the cluster doors already carry. */
+	if (emoji != NULL) {
+		UniChar mixed[4] = { 'a', pair[0], pair[1], 'b' };
+		CFStringRef text = CFStringCreateWithCharacters(kCFAllocatorDefault, mixed, 4);
+		CFMutableDictionaryRef attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
+			&kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+
+		CFDictionarySetValue(attrs, kCTFontAttributeName, mono);
+		if (text != NULL && attrs != NULL) {
+			CFAttributedStringRef astr = CFAttributedStringCreate(kCFAllocatorDefault, text, attrs);
+			CTLineRef line = (astr != NULL) ? CTLineCreateWithAttributedString(astr) : NULL;
+
+			check(line != NULL, "a line of `a`, an emoji and `b` is made");
+			if (line != NULL) {
+				CFArrayRef runs = CTLineGetGlyphRuns(line);
+				CFIndex count = (runs != NULL) ? CFArrayGetCount(runs) : 0;
+
+				check(count == 3, "it is THREE runs: the two letters and the emoji between them (was %ld)",
+				      (long)count);
+				if (count == 3) {
+					CTRunRef middle = (CTRunRef)CFArrayGetValueAtIndex(runs, 1);
+					CFDictionaryRef runAttrs = CTRunGetAttributes(middle);
+					CTFontRef runFont = (runAttrs != NULL)
+						? (CTFontRef)CFDictionaryGetValue(runAttrs, kCTFontAttributeName) : NULL;
+					CFStringRef runName = (runFont != NULL) ? CTFontCopyFullName(runFont) : NULL;
+					CFStringRef colourName = CTFontCopyFullName(colour);
+					double width = CTRunGetTypographicBounds(middle, CFRangeMake(0, 0), NULL, NULL, NULL);
+
+					/* THE SUBSTITUTION IS THE ASSERTION, NOT THE FACE'S NAME: the middle run must be in
+					 * a face that is NOT the attributed one, because that is what fallback means. WHICH face
+					 * is the registry's order (see this case's head). */
+					check(runFont != NULL && !CFEqual(runFont, mono),
+					      "the middle run is set in a face the attributed string did not name");
+					check(CTRunGetGlyphCount(middle) == 1,
+					      "the emoji is ONE GLYPH for its two UTF-16 units (was %ld)",
+					      (long)CTRunGetGlyphCount(middle));
+					check(width > 0.0, "and it has a positive advance (%.2f)", width);
+					if (runName != NULL) {
+						CFRelease(runName);
+					}
+					if (colourName != NULL) {
+						CFRelease(colourName);
+					}
+				}
+				CFRelease(line);
+			}
+			if (astr != NULL) {
+				CFRelease(astr);
+			}
+		}
+		if (attrs != NULL) {
+			CFRelease(attrs);
+		}
+		if (text != NULL) {
+			CFRelease(text);
+		}
+		CFRelease(emoji);
+	}
+
+	CFRelease(colour);
+	return g_fail - before;
+}
+
 static int case_run_direction_is_its_own(void)
 {
 	int before = g_fail;
@@ -8322,6 +8500,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "A newline beyond the width does not make the line fit", case_typesetter_hard_break_width },
 	{ "A run is itemized by script, and the caller can still state one", case_shaping_itemization },
 	{ "A face that cannot render a character is replaced, and only it moves", case_line_font_fallback },
+	{ "An emoji is a pair, a strike and a face the cascade can answer", case_colour_glyphs },
 	{ "A run reports its own direction, because a run is one level", case_run_direction_is_its_own },
 	{ "Thai breaks where its dictionary says, which the rule list cannot", case_line_break_thai },
 	{ "A ligature is one glyph for three characters", case_shaping_ligatures },

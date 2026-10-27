@@ -1270,3 +1270,26 @@ does not own one — so the same rule `libagora-core/CFHyphenation.c` follows ap
 - **THE ORACLE IS `th_brk()` from libthai 0.1.29**, called from a throwaway program in `/tmp` (never from this
   repository, and never linked into it). It produced the 800-run differential recorded in `README.md` and it produced
   EVERY expected value the suite asserts, so the Thai case measures the engine against the library the data came from.
+
+## The half-character, and the fallback that had to stop asking for one (2026-10-26)
+
+`CTFontGetGlyphsForCharacters` and `fn_fallback_runs` both walked UTF-16 UNITS, and a character outside the BMP is two
+of them. The first read the pair's empty second slot as an unmapped character ("true if the font could encode all the
+characters" was answered NO for every emoji ever written); the second asked `CTFontCreateForString` for the high
+surrogate alone, which no face covers, and normalized the NULL that came back to the face the run already had. Both are
+now character-aware: the mapping combines a pair, writes its glyph in the high unit's slot, leaves 0 in the low one and
+counts the pair as two covered units, and the fallback walk reads each character's length from the text and clamps it
+to the run.
+
+`libagora-drawing`'s `cg_font_glyphs_for_unichars` is the mapping behind the first door, and the same combination
+happens there — the tier owns the cmap, so the tier combines the pair.
+
+**AND THE COLOUR-FACE PREFERENCE IS A RECORDED NON-CHANGE.** Preferring a face with colour glyphs over the first
+covering outline face is a one-function change and was made, measured and taken back out: the walk has to visit the
+whole registry to find a colour coverer among 245 candidates, and the resulting delay in the FIRST fallback left the
+AppKit's menu bar unpainted. A `usleep(2 s)` in the first covering candidate reproduced it with no extra font, which
+puts the fault in the window ordering (the bar is ordered only while the application is active) rather than in the
+cascade. It is written down here and in `README.md` so the next attempt starts from the measurement instead of from
+the idea.
+
+`README.md` records the state; the suite holds it in `case_colour_glyphs`.

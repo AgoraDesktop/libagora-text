@@ -474,6 +474,30 @@ static CTFontRef fn_run_font(const struct __CTLine *line, CFIndex charIndex)
  *
  * THE LINE'S `runFonts` RETAINS EVERY FACE THAT ENDS UP IN A RUN, including the substituted ones, which is what lets
  * the runs BORROW from it — see the field's own comment. */
+
+/* **A CHARACTER CAN BE ONE UTF-16 UNIT OR TWO, AND A FALLBACK ASKED FOR HALF A CHARACTER IS ASKED FOR NOTHING.**
+ * This walk used to ask one unit at a time, which for an emoji means asking for U+D83D alone: no font covers a lone
+ * high surrogate, so the answer was NULL, and NULL is normalized to the face the run already had. MEASURED: a line
+ * mixing `a`, an emoji and `b` came back as ONE run in IBM Plex Mono with a `.notdef` where the emoji should be, and
+ * the colour font that covers it was never consulted.
+ *
+ * THE LENGTH IS READ FROM THE TEXT RATHER THAN ASSUMED, and it is CLAMPED TO WHAT IS LEFT OF THE RUN, because the
+ * pair's second unit has to belong to the same attributed run for the substitution to mean what it says. */
+static CFIndex fn_character_length(CFStringRef text, CFIndex index, CFIndex available)
+{
+	UniChar high, low;
+
+	if (index + 1 >= CFStringGetLength(text) || available < 2) {
+		return 1;
+	}
+	high = CFStringGetCharacterAtIndex(text, index);
+	low = CFStringGetCharacterAtIndex(text, index + 1);
+	if (high >= 0xD800 && high <= 0xDBFF && low >= 0xDC00 && low <= 0xDFFF) {
+		return 2;
+	}
+	return 1;
+}
+
 static void fn_fallback_runs(struct __CTLine *line, CFAttributedStringRef string, CFStringRef text)
 {
 	struct ct_line_run *scratch;
@@ -509,9 +533,12 @@ static void fn_fallback_runs(struct __CTLine *line, CFAttributedStringRef string
 			}
 		}
 		for (i = 0; i < run->count;) {
-			CFIndex end = i + 1;
+			CFIndex length = fn_character_length(text, line->range.location + run->start + i,
+							   run->count - i);
+			CFIndex end = i + length;
 			CTFontRef face = CTFontCreateForString(font, text,
-							       CFRangeMake(line->range.location + run->start + i, 1));
+							       CFRangeMake(line->range.location + run->start + i,
+									   length));
 
 			/* **A CHARACTER NOTHING ANSWERS FOR IS NORMALIZED TO THE ATTRIBUTED FACE, NOT LEFT AS A NULL.** The door
 			 * answers NULL when no face covers the character, and the line's answer for that is the face it already
@@ -523,9 +550,12 @@ static void fn_fallback_runs(struct __CTLine *line, CFAttributedStringRef string
 			}
 			/* AND THE SPAN IS EVERY FOLLOWING CHARACTER THE SAME FACE ANSWERS FOR, normalized the same way. */
 			while (end < run->count) {
+				CFIndex next_length = fn_character_length(text,
+									  line->range.location + run->start + end,
+									  run->count - end);
 				CTFontRef next = CTFontCreateForString(font, text,
 								       CFRangeMake(line->range.location + run->start + end,
-										   1));
+										   next_length));
 				Boolean same;
 
 				if (next == NULL) {
@@ -536,7 +566,7 @@ static void fn_fallback_runs(struct __CTLine *line, CFAttributedStringRef string
 				if (!same) {
 					break;
 				}
-				end++;
+				end += next_length;
 			}
 			line->runInfo[out].start = run->start + i;
 			line->runInfo[out].count = end - i;

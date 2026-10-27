@@ -1189,9 +1189,25 @@ bool CTFontGetGlyphsForCharacters(CTFontRef font, const UniChar characters[], CG
 	}
 	/* APPLE'S CONTRACT IS YES OR NO: "true if the font could encode all the characters". The mapping
 	 * answers HOW MANY in one batch, and a slot that could not be mapped is left at zero -- `.notdef`'s
-	 * index -- which is what Apple's own door puts there. */
+	 * index -- which is what Apple's own door puts there.
+	 *
+	 * **AND THE SECOND HALF OF A SURROGATE PAIR HAS NO GLYPH OF ITS OWN, WHICH IS NOT A FAILURE.** A character
+	 * outside the BMP occupies two UTF-16 units and one glyph, and the mapping leaves 0 in the low unit's slot by
+	 * design (see `cg_font_glyphs_for_unichars`). Reading that zero as "unmapped" made this door answer NO for
+	 * every emoji, which is why an emoji could never be covered by any face — the mapping this door carries was
+	 * the reason the character map appeared not to have them. A pair counts as one character and the low unit is
+	 * skipped rather than asked. */
 	mapped = cg_font_glyphs_for_unichars(f->graphics, (const uint16_t *)characters, glyphs, (size_t)count);
 	for (i = 0; i < count; i++) {
+		if (i + 1 < count
+		    && characters[i] >= 0xD800 && characters[i] <= 0xDBFF
+		    && characters[i + 1] >= 0xDC00 && characters[i + 1] <= 0xDFFF) {
+			if (glyphs[i] == 0) {
+				return false;
+			}
+			i++;
+			continue;
+		}
 		if (glyphs[i] == 0) {
 			return false;
 		}
