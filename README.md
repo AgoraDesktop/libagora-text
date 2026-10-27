@@ -1092,14 +1092,31 @@ one, and each is now a case in `tests/text.c`:
   **three runs**, the middle one set in a face the attributed string did not name, carrying ONE GLYPH for the pair's
   two units and a positive advance. Before, it was one run and a `.notdef`.
 
-**THE PREFERENCE FOR A COLOUR FACE WAS IMPLEMENTED, MEASURED AND WITHDRAWN, AND THE REASON IS AN OPEN DEFECT.** The
-registry's order is by family name, so the first face that covers U+1F600 on this host is DejaVu Sans — a monochrome
-outline smiley — and the colour font that would draw it in colour is never consulted. A walk that remembers the first
-covering candidate and keeps going for one with colour fixes that (and a probe showed `Noto Color Emoji` winning), but
-it also made the FIRST fallback slow: at 13 points the menu bar is measured before the desktop window exists, and an
-application whose first frames are late enough **never orders its menu bar at all**. Two seconds of delay in the same
-place reproduces it with no extra font created, so the fault is in the window ordering, not in the cascade: the bar is
-ordered only while the application is `-isActive`, and the activation is missed. Recorded here rather than worked
-around, because a cascade that must stay fast to keep a window on the screen is a cascade hiding a bug. `text.c`'s
-`case_colour_glyphs` therefore asserts that the fallback ANSWERS for an emoji and is usable, not that it answers with
-the colour face.
+**AND THE FACE THAT DRAWS IT IN COLOUR IS PREFERRED, ONCE, AT A COST THAT WAS MEASURED THREE TIMES.** The registry's
+order is by family name, so the first face that covers U+1F600 on this host is DejaVu Sans — a monochrome outline
+smiley — and the colour font that would draw it in colour was never consulted. The preference now lives in
+`CTFontCreateForString`, AFTER the caller's own cascade list (an explicit list is a decision) and BEFORE the
+registry's order, and the two wrong ways to build it are recorded because each was measured:
+
+- **Inside `ct_font_search`, the shared search, it cost every font the AppKit asked for.** That door is also what
+  `CTFontCreateUIFontForLanguage` goes through, so the walk was paid per *font*, not per fallback: a 300 ms cost per
+  search left Workspace's menu bar still being measured when the desktop's checker looked (a slow start, not a lost
+  window). The correction belongs where the cost is, not in the window ordering.
+- **Asking the registry for each candidate's NAME cost 6.0 s the first time** — `CGFontCreateWithFontName` searches the
+  directories for every name it does not already know, and 245 unknown names is 245 directory walks.
+- **So the walk reads PATHS** (`cg_font_enumerate`, the door the font collection already uses) and opens each file
+  directly, skipping the name search, and **keeps the open face** rather than a name: the first fallback for an emoji
+  costs **17.9 ms**, and the next **1 µs**, because it is one `CTFontCreateWithGraphicsFont` over an open face. The
+  font set's own generation is the signal to look again, and a scan that finds nothing is remembered too, so a machine
+  with no colour font does not repeat it.
+
+MEASURED after it: `a😀b` in the suite's monospaced face comes out as three runs with the middle one in **Noto Color
+Emoji**, one glyph for the pair's two units, advance 16.19 at 13 points — and the same string drawn through `CTLineDraw`
+at 32 points inks 821 coloured of 1287 pixels. The case's second query asserts the cache answers the same face.
+
+THE BOUNDARY: one colour face is found (the first the enumeration reaches) and it is preferred only for characters it
+covers; a variation selector is not honoured, because this tier has no emoji-presentation policy; and a face that mixes
+colour with ordinary glyphs gives up sub-pixel coverage for the ordinary ones (a picture has no sub-pixel columns, and
+the request is part of the glyph cache's key). `libagora-drawing`'s README says what the picture is and how it is
+painted.
+

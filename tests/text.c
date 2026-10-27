@@ -7454,11 +7454,10 @@ static int case_line_font_fallback(void)
  * for every emoji string, and `CTShaperCreate` refused the face outright for having no units per em. A line mixing
  * `a`, an emoji and `b` came back as ONE run in the monospaced face with a `.notdef` where the emoji belonged.
  *
- * AND THE BOUNDARY IS STATED RATHER THAN LEFT AS A SURPRISE: this case asks that the cascade ANSWER for an emoji,
- * not that it answer with the colour face. The registry's order is by family name, and on this host the first face
- * that covers U+1F600 is a monochrome outline face; preferring the colour one was implemented, measured, and
- * withdrawn — a full preference walk makes the fallback slow enough that the AppKit's menu bar never appears, which
- * is a defect in the window ordering and recorded as one. See libagora-drawing's README for what IS drawn.
+ * AND THE PREFERENCE IS PART OF THE CASE: the face the cascade answers for an emoji is the COLOUR face, not the
+ * first outline face with a glyph for the code point (the registry's order is by family name, and on this host that
+ * is DejaVu Sans with a monochrome smiley). The cost of preferring it is paid once — the search reads PATHS and keeps
+ * the open face — which is what makes the preference affordable; see `fn_colour_face_get`.
  *
  * THE FACE IS THE HOST'S, SO THE SECOND HALF SKIPS WITH A NOTE when no colour family is installed; the pair
  * semantics are still measurable against this suite's own face, which has no emoji, and that half never skips. */
@@ -7536,15 +7535,32 @@ static int case_colour_glyphs(void)
 			      "and the face it answers really covers the pair");
 			advance = CTFontGetAdvancesForGlyphs(found, kCTFontHorizontalOrientation, cover, NULL, 1);
 			check(advance > 0.0, "and the fallback has a real advance for it (%.2f)", advance);
-			/* **WHICH face it is, is the registry's ORDER and not this case's business.** On this host the
-			 * first coverer is a monochrome outline face (DejaVu Sans has a smiley at U+1F600), and preferring
-			 * the colour face would be a separate policy with its own cost — measured, and recorded in the
-			 * README. What this case holds is that a fallback EXISTS and is usable, which is the half that was
-			 * broken. */
-			printf("  (note: the fallback for the emoji is %s)\n",
-			       (found_name != NULL) ? "a covering face" : "unnameable");
+			/* **AND IT IS THE COLOUR FACE, WHICH IS THE PREFERENCE THIS TIER OWES.** The registry's order is by
+			 * family name and the first face covering U+1F600 here is a monochrome outline face, so without the
+			 * preference the emoji is painted in the caller's ink. MEASURED: `DejaVu Sans Bold` before it,
+			 * `Noto Color Emoji` after. */
+			check(found_name != NULL && wanted_name != NULL && CFEqual(found_name, wanted_name),
+			      "and it is the COLOUR face, not the first outline face with a glyph for the code point");
+			/* THE SECOND ASK IS THE CACHE'S, and the assertion is that it answers the SAME face: a scan that
+			 * is remembered must be remembered with its answer, not as a "no" that falls back to the registry. */
+			{
+				CGGlyph again[2] = { 0, 0 };
+				CTFontRef second = CTFontCreateForString(mono, emoji, CFRangeMake(0, 2));
+				CFStringRef second_name = (second != NULL) ? CTFontCopyFullName(second) : NULL;
+
+				check(second != NULL && second_name != NULL && found_name != NULL &&
+				      CFEqual(second_name, found_name),
+				      "a second query for the same character answers the same face");
+				check(CTFontGetGlyphsForCharacters(second, pair, again, 2) && again[0] != 0,
+				      "and still covers the pair");
+				if (second_name != NULL) {
+					CFRelease(second_name);
+				}
+				if (second != NULL) {
+					CFRelease(second);
+				}
+			}
 		}
-		(void)wanted_name;
 		if (wanted_name != NULL) {
 			CFRelease(wanted_name);
 		}
@@ -8500,7 +8516,7 @@ static const struct { const char *name; int (*fn)(void); } g_cases[] = {
 	{ "A newline beyond the width does not make the line fit", case_typesetter_hard_break_width },
 	{ "A run is itemized by script, and the caller can still state one", case_shaping_itemization },
 	{ "A face that cannot render a character is replaced, and only it moves", case_line_font_fallback },
-	{ "An emoji is a pair, a strike and a face the cascade can answer", case_colour_glyphs },
+	{ "An emoji is a pair, a strike and the colour face the cascade prefers", case_colour_glyphs },
 	{ "A run reports its own direction, because a run is one level", case_run_direction_is_its_own },
 	{ "Thai breaks where its dictionary says, which the rule list cannot", case_line_break_thai },
 	{ "A ligature is one glyph for three characters", case_shaping_ligatures },

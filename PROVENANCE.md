@@ -1284,12 +1284,21 @@ to the run.
 `libagora-drawing`'s `cg_font_glyphs_for_unichars` is the mapping behind the first door, and the same combination
 happens there — the tier owns the cmap, so the tier combines the pair.
 
-**AND THE COLOUR-FACE PREFERENCE IS A RECORDED NON-CHANGE.** Preferring a face with colour glyphs over the first
-covering outline face is a one-function change and was made, measured and taken back out: the walk has to visit the
-whole registry to find a colour coverer among 245 candidates, and the resulting delay in the FIRST fallback left the
-AppKit's menu bar unpainted. A `usleep(2 s)` in the first covering candidate reproduced it with no extra font, which
-puts the fault in the window ordering (the bar is ordered only while the application is active) rather than in the
-cascade. It is written down here and in `README.md` so the next attempt starts from the measurement instead of from
-the idea.
+**AND THE COLOUR-FACE PREFERENCE IS A CHANGE, MADE ON THE THIRD ATTEMPT AND MEASURED EACH TIME.** A character some
+face draws in colour should be drawn in colour; the registry's order is by family name, so U+1F600 reached DejaVu Sans
+(an outline smiley) and the colour face was never consulted. The first two shapes were wrong and are recorded because
+their numbers are the reason the third one looks the way it does:
 
-`README.md` records the state; the suite holds it in `case_colour_glyphs`.
+1. **The walk inside `ct_font_search`** — the shared search, also used by `CTFontCreateUIFontForLanguage` — made every
+   font the AppKit asked for pay for the registry: 300 ms a search left Workspace's menu bar unmeasured when the
+   desktop's checker looked at it, which is a slow start rather than a lost window, and it is the reason the
+   correction is here and not in the window ordering.
+2. **A walk that asked the registry for each candidate's NAME** cost **6.0 s** on the first fallback: a name this
+   process has not asked for before is a directory walk (`CGFontCreateWithFontName`), and 245 of them is 245 walks.
+3. **A walk that reads PATHS** (`cg_font_enumerate`) and opens each file directly costs **17.9 ms** once, and the face
+   it finds is KEPT — a `CGFontRef`, so a later query is one `CTFontCreateWithGraphicsFont` over an open face and
+   answers in **1 µs**. The font set's generation is the signal to look again; a scan that finds nothing is remembered
+   as a "no" so a machine without a colour font pays nothing repeatedly.
+
+It sits after the caller's cascade list and before the registry's order, and `case_colour_glyphs` now asserts that a
+fallback for an emoji IS the colour face and that a second query answers the same one.

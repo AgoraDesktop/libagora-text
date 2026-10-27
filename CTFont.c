@@ -526,6 +526,74 @@ static bool ct_accept_covers(CTFontRef candidate, void *info)
 	return covered;
 }
 
+/* **THE COLOUR FACE, FOUND AT MOST ONCE AND THEN KEPT AS A FACE.** A character that some face draws in colour should
+ * be drawn in colour, and the registry's order is by family name — so a fallback for U+1F600 reaches DejaVu Sans first
+ * (it HAS a glyph for that code point: an outline smiley) and the colour font that covers the same character is never
+ * consulted. MEASURED before this door existed: a mixed line's emoji run came back as `DejaVu Sans Bold` glyph 5837.
+ *
+ * **THE SHAPE IS A SEARCH THAT HAPPENS ONCE, AND WORKING OUT WHY IS THE WHOLE OF THIS COMMENT.** Two cheaper-looking
+ * versions were measured and rejected first:
+ *
+ *   * PREFERRING COLOUR INSIDE `ct_font_search` made EVERY font the AppKit asked for walk the registry, because that
+ *     door is also what `CTFontCreateUIFontForLanguage` goes through — 300 ms a search left Workspace's menu bar
+ *     unmeasured when the desktop's checker looked. A slow application is not a lost window, and the correction
+ *     belongs where the cost is, not in the window ordering.
+ *   * FINDING THE FACE BY ASKING THE REGISTRY FOR EACH NAME cost **6.0 s** the first time: `CGFontCreateWithFontName`
+ *     searches the directories for every name it does not already know, and 245 unknown names is 245 directory walks.
+ *
+ * So the walk reads PATHS (`cg_font_enumerate`, the door the font collection already uses) and opens each file
+ * directly, which skips the name search entirely; and the face it finds is KEPT — a `CGFontRef`, not a path and not a
+ * name — so a later query is one `CTFontCreateWithGraphicsFont` over an open face. The font set's own generation is
+ * the signal to look again, because a registration or an `FN_FONT_PATH` change can add or remove one.
+ *
+ * A SCAN THAT FINDS NOTHING IS REMEMBERED TOO. A machine with no colour font must not repeat the walk on every
+ * fallback; the answer stays NULL and the caller keeps the covering face it already had. */
+static CGFontRef fn_colour_face;
+static unsigned long fn_colour_face_generation;
+static int fn_colour_face_scanned;
+
+static void fn_colour_face_visit(void *info, const char *path)
+{
+	CGFontRef *found = (CGFontRef *)info;
+	CGDataProviderRef provider;
+	CGFontRef font;
+
+	if (*found != NULL) {
+		return;
+	}
+	provider = CGDataProviderCreateWithFilename(path);
+	if (provider == NULL) {
+		return;
+	}
+	font = CGFontCreateWithDataProvider(provider);
+	CGDataProviderRelease(provider);
+	if (font == NULL) {
+		return;
+	}
+	if (cg_font_has_colour(font)) {
+		*found = font;
+		return;
+	}
+	CGFontRelease(font);
+}
+
+static CGFontRef fn_colour_face_get(void)
+{
+	unsigned long generation = cg_font_registry_generation();
+
+	if (fn_colour_face_scanned && fn_colour_face_generation == generation) {
+		return fn_colour_face;
+	}
+	if (fn_colour_face != NULL) {
+		CGFontRelease(fn_colour_face);
+		fn_colour_face = NULL;
+	}
+	cg_font_enumerate(fn_colour_face_visit, &fn_colour_face);
+	fn_colour_face_scanned = 1;
+	fn_colour_face_generation = generation;
+	return fn_colour_face;
+}
+
 /* A FACE THAT CAN ENCODE THIS STRING, AND APPLE'S TWO HALVES ARE BOTH ANSWERED: "If the current font is capable of
  * encoding the string range then it will be RETAINED and returned" -- so the first question is asked of the font
  * the caller already has, and only a font that fails it sends the door to the registry. THE TEST IS THIS
@@ -636,6 +704,26 @@ CTFontRef CTFontCreateForString(CTFontRef currentFont, CFStringRef string, CFRan
 	}
 	if (cascade != NULL) {
 		CFRelease(cascade);
+	}
+	/* **AND A CHARACTER SOME FACE DRAWS IN COLOUR IS DRAWN IN COLOUR.** Asked AFTER the caller's own cascade list
+	 * (an explicit list is a decision) and BEFORE the registry's family-name order. MEASURED: `a😀b` in a mono face
+	 * comes out as three runs with the middle one in `Noto Color Emoji` after this, where the registry's order
+	 * answered `DejaVu Sans` and painted the emoji in the caller's ink. */
+	if (found == NULL) {
+		CGFontRef colour_face = fn_colour_face_get();
+
+		if (colour_face != NULL) {
+			CTFontRef colour = CTFontCreateWithGraphicsFont(colour_face, original->size,
+									&original->matrix, NULL);
+
+			if (colour != NULL) {
+				if (ct_accept_covers(colour, &want)) {
+					found = colour;
+				} else {
+					CFRelease(colour);
+				}
+			}
+		}
 	}
 	if (found == NULL) {
 		CFArrayRef candidates = CTFontMatchingCopyAvailableDescriptors();
