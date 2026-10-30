@@ -1081,6 +1081,13 @@ the user's decision is that they stay owed), the ATS pair (permanent), and the f
   a directory walk, 33 ms, when the process has not asked for it before — the same lesson `fn_colour_face_get`
   records for the colour face). See PROVENANCE.md, "The search asks the descriptor".
 
+- **AND A CONTROL CHARACTER IS NOT A GLYPH, WHICH IS THE DIFFERENCE BETWEEN A LAYOUT AND A WALK OF THE FONT SET.** A
+  line's range includes its terminator, and no face has a glyph for a newline — so asking the registry "which face
+  covers this line" with the newline in it makes every candidate answer NO, the walk reads every installed face (opening
+  each file) and answers "nothing", once per line. The units that need a glyph are gathered before the question is put;
+  a range with nothing left answers NULL, which is "the caller keeps its own face". MEASURED: Forge opening its own
+  project **49.7 s → 1.05 s** (1596 walks of ~30 ms over `p`, `/`, ` ` and `\n`).
+
 ## Astral characters, and the two places that asked for half a character
 
 **AN EMOJI IS TWO UTF-16 UNITS AND ONE GLYPH, AND BOTH HALVES OF THE TEXT TIER USED TO ASK ABOUT ONE UNIT AT A

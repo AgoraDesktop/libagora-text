@@ -4041,6 +4041,28 @@ static int case_font_cascade_and_roles(void)
 		CFRelease(kept);
 	}
 
+	/* **AND A CONTROL CHARACTER IS NOT A GLYPH, WHICH IS THE DIFFERENCE BETWEEN A LAYOUT AND A WALK OF THE FONT SET.**
+	 * A line's range ends with its newline, and a newline maps in NO face — so asking the registry "which face covers
+	 * this line" with the newline in it makes every candidate answer NO, the walk reads the whole font set, and the
+	 * answer is "nothing", once per line. MEASURED: Forge opening its own project took 46 s, in 1596 walks of 30 ms,
+	 * over the characters `p`, `/`, ` ` and `\n`. The text is covered by the caller's own face, so the honest answers
+	 * are "the font you gave me" and — for a range with nothing to draw — "no fallback needed". */
+	{
+		CTFontRef line = CTFontCreateForString(mono, CFSTR("int main(void)\n"), CFRangeMake(0, 15));
+		CTFontRef blank = CTFontCreateForString(mono, CFSTR("\n"), CFRangeMake(0, 1));
+
+		check(line == mono,
+		      "a line whose only unmapped unit is its NEWLINE is answered by the current font, not by a walk");
+		check(blank == NULL,
+		      "and a blank line needs no fallback at all, so the registry is never asked about it");
+		if (line != NULL) {
+			CFRelease(line);
+		}
+		if (blank != NULL) {
+			CFRelease(blank);
+		}
+	}
+
 	/* **AND THE CASCADE EITHER ANSWERS NOTHING OR ANSWERS A FACE THAT REALLY COVERS HEBREW — WHICH IS THE
 	 * INVARIANT. "NOTHING" WAS ONLY EVER AN ACCIDENT OF THIS HOST.**
 	 *

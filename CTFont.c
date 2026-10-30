@@ -682,6 +682,16 @@ static bool ct_is_private_use(UniChar c)
 	return c >= 0xE000 && c <= 0xF8FF;
 }
 
+/* **A CONTROL CHARACTER IS NOT A GLYPH, SO IT IS NOT A QUESTION FOR THE REGISTRY.** C0, DEL and C1 are the units a
+ * layout handles itself: a newline ends a line, a tab moves to a stop, and no face has ever drawn one. Asking "which
+ * face covers this" about them is answered by every candidate with NO, which is the worst possible answer: the walk
+ * cannot stop early, so it reads the whole font set. MEASURED, Forge opening its own project took 46 s in 1596 walks of
+ * ~30 ms — ONE PER LINE of the file — because the range the layout asks about is the line INCLUDING its newline. */
+static bool ct_is_control(UniChar c)
+{
+	return (c < 0x20) || (c >= 0x7F && c <= 0x9F);
+}
+
 CTFontRef CTFontCreateForString(CTFontRef currentFont, CFStringRef string, CFRange range)
 {
 	const struct __CTFont *original = (const struct __CTFont *)currentFont;
@@ -722,6 +732,36 @@ CTFontRef CTFontCreateForString(CTFontRef currentFont, CFStringRef string, CFRan
 		free(characters);
 		free(glyphs);
 		return (CTFontRef)CFRetain(currentFont);	/* Apple's own first half, word for word */
+	}
+	/* **AND THE CONTROL CHARACTERS ARE DROPPED BEFORE ANYTHING IS ASKED, BECAUSE NOBODY CAN COVER THEM.**
+	 * A line's range ends with its newline, so the whole-range test above fails for EVERY line of every file, and the
+	 * question that follows — "which face covers this text" — has an answer for the text and none for the newline.
+	 * Asking it with the newline in it makes every candidate answer NO, the walk reads the whole font set, and the
+	 * answer is "nothing" — once per line. MEASURED: Forge's own project opened in 46 s, 1596 walks of 30 ms, and the
+	 * characters being asked about were `p`, `/`, ` ` and `\n`.
+	 *
+	 * So the units that need a glyph are gathered once, in place, and everything below asks about THOSE. A range with
+	 * nothing left is answered with NULL — "the caller keeps its own face" — which is the same answer the private-use
+	 * rule below gives and the reason a blank line costs nothing at all. */
+	{
+		CFIndex meaningful = 0;
+
+		for (i = 0; i < asked.length; i++) {
+			if (!ct_is_control(characters[i])) {
+				characters[meaningful++] = characters[i];
+			}
+		}
+		if (meaningful == 0) {
+			free(characters);
+			free(glyphs);
+			return NULL;
+		}
+		if (CTFontGetGlyphsForCharacters(currentFont, characters, glyphs, meaningful)) {
+			free(characters);
+			free(glyphs);
+			return (CTFontRef)CFRetain(currentFont);
+		}
+		asked.length = meaningful;
 	}
 	/* AND A STRING THAT IS ENTIRELY PRIVATE USE IS ANSWERED AT ONCE, WITH NO FACE: the caller keeps its own, which
 	 * draws `.notdef` — the honest answer, and the one that does not walk the font list. */

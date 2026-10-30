@@ -1343,3 +1343,37 @@ asserts the relation the emphasized role is built on — same family as the plai
 the base is not bold — and the cases for clearing bold, for the family door and for a request nothing can satisfy all
 went through the filtered walk unchanged. A filter that rejected a family would fail the first of them by answering
 NULL; that is the case that keeps this honest.
+
+## A control character is not a glyph: the cascade stopped reading the font set once per line
+
+**REPORTED AS "FORGE IS VERY SLOW TO OPEN A PROJECT", AND THE NUMBER WAS 46 SECONDS.** MEASURED with a zero-length run
+(`Forge --project <dir> --seconds 0`): **1.05 s now, 49.7 s before**, against 0.19 s for the same binary with no
+project at all — so the open itself was the whole of it. A sampling profiler put every sample in one place:
+`ct_line_create_with_font` → `CTFontCreateForString` → `ct_font_search` → `ct_font_from_descriptor` →
+`CGDataProviderCreateWithFilename`, i.e. the text layout walking the font registry and opening font files.
+
+**THE ASK WAS "WHICH FACE COVERS THIS LINE", AND THE LINE ENDS WITH A NEWLINE.** A line's range includes its terminator,
+`CTFontCreateForString`'s first half asks whether the current font "could encode all the characters" — it cannot encode
+a newline, because no face has a glyph for one — and the cascade that follows asks every candidate the same question
+WITH THE NEWLINE IN IT. So no candidate could ever answer YES, the walk could never stop early, and it read all 245
+faces (opening each file) to answer "nothing". **Once per line.** The instrumented run printed 1596 walks of ~30 ms
+over the characters `p`, `/`, ` ` and `\n`.
+
+**THE FIX IS TO ASK ABOUT THE UNITS THAT NEED A GLYPH.** The control characters (C0, DEL, C1) are dropped from the
+range before the current-font test and before the cascade; a range with nothing left answers NULL — "the caller keeps
+its own face" — which is exactly the answer the private-use rule already gives, and the reason a blank line now costs
+nothing. Everything else is unchanged: a line of ASCII is answered by the font the caller gave, and a character that
+really needs another face (Hebrew, an emoji, `©` in a comment) still walks the registry, where it now stops at the
+first face that covers the VISIBLE text.
+
+MEASURED after: Forge's project open **49.7 s → 1.05 s**; text, AppKit, Workspace and Dock suites unmoved.
+
+**AND THE ~0.9 s THAT IS LEFT IS A DIFFERENT COST, NAMED RATHER THAN FIXED**: with the cascade quiet, the profile is
+`CTTypesetterSuggestLineBreak` → `ct_lb_break_before_utf16` / `ct_lb_break_at` — the line breaker laying out a
+2000-line file. That is the next thing to look at, and it is not this bug.
+
+**THE CASE THAT PINS IT IS IN `tests/text.c`'s cascade case**: "a line whose only unmapped unit is its NEWLINE is
+answered by the current font, not by a walk". It was verified to FAIL with the hunk removed — after rebuilding the
+test, which is the second thing this one taught: the suite's binary in `build/` was THREE WEEKS older than the case,
+because that build directory had `BUILD_TESTING=OFF` and `cmake --build` therefore never compiled it. A green test that
+never ran is the same trap as a passing test that loaded the installed library.
