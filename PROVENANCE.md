@@ -1302,3 +1302,44 @@ their numbers are the reason the third one looks the way it does:
 
 It sits after the caller's cascade list and before the registry's order, and `case_colour_glyphs` now asserts that a
 fallback for an emoji IS the colour face and that a second query answers the same one.
+
+## The search asks the descriptor, and an application's first window stops costing a second and a half
+
+**MEASURED FROM THE OUTSIDE AS "APPLICATIONS ARE VERY SLOW TO START", and it was one function.** A fresh AppKit
+process reached its first window in **1.7 s**; with the compositor's own accounting and a sampling profiler the wait
+was inside `fn_title_attributes` — the title bar's font — and inside that, `CTFontCreateCopyWithSymbolicTraits`.
+A zero-length run of Workspace and of Forge (`--seconds 0`, so the number is start plus quit and nothing else) was
+1.81 s and 1.74 s, and the AppKit suite took 98.7 s, most of it paying the same bill once per test process. THIS IS
+A STARTUP COST AND NOT A DRAWING COST: the same paint that costs 1.7 s the first time costs 0.3 s once the process
+has answered the font questions, and an already-running application's frame is milliseconds.
+
+**THE COST HAD TWO HALVES, BOTH IN `ct_font_search`, AND BOTH WERE ANSWERS THE REGISTRY ALREADY HELD.**
+
+1. **It built a font for every candidate before asking whether the candidate was the answer.** The acceptance test for
+   a traits request requires the candidate's FAMILY to equal the request's, and a family name is an attribute the
+   enumeration has already put in the descriptor — so `Figtree` (behind forty families alphabetically) cost forty
+   fonts before the first possible match. `ct_font_descriptor_names_family` asks the descriptor first; a request that
+   names no family (the cascade, the role fallback) passes NULL and walks exactly as before.
+2. **It made that font BY NAME**, which for a name this process has not resolved is a walk of every font directory
+   opening every file: **33 ms a face** on this host. The descriptor names the FILE it came from, and the
+   enumeration paid for that path already, so the face is now opened from the URL (`CGDataProviderCreateWithFilename`
+   + `CGFontCreateWithDataProvider` + `CTFontCreateWithGraphicsFont`) and the name is only the fallback, for a
+   descriptor a caller built without a URL. This is the route `fn_colour_face_get` already takes, for the reason its
+   own note gives: a name the registry has not been asked for is a directory walk.
+
+**MEASURED AFTER THE TWO**, same commands, same machine: Workspace's zero-length run **0.22 s**, Forge **0.19 s**, the
+AppKit suite **39.6 s** (206/206), the workspace suite 11.9 s (15/15). The remaining tenth of a second is the font
+set's one enumeration — every installed file opened once to read its names — which is the price of a registry with no
+on-disk index and is paid once per process rather than once per font request.
+
+**WHAT IT LOOKED LIKE FROM A PERSON'S SIDE, AND WHY IT READ AS A QUIT AS WELL AS A START.** A quit is the framework's
+own 20 ms (MEASURED: `--seconds 1` on Workspace ends 18-21 ms after the last loop pass), but the window that takes the
+keyboard when an application goes away is drawn by the application that is LEFT, and its first chrome paint is what
+asks for the title font. So in a two-application session the wait appeared at the moment something else was quit, and
+the fix is the same one: the question is answered in the tenth of a second it costs, whenever it is asked.
+
+**AND THE FIX IS A PURE PRE-FILTER ON THE ANSWER, WHICH IS WHY THE CASES DID NOT CHANGE.** `tests/text.c` already
+asserts the relation the emphasized role is built on — same family as the plain role, bold set, a different face when
+the base is not bold — and the cases for clearing bold, for the family door and for a request nothing can satisfy all
+went through the filtered walk unchanged. A filter that rejected a family would fail the first of them by answering
+NULL; that is the case that keeps this honest.

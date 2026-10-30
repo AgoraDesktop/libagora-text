@@ -330,38 +330,97 @@ CTFontRef CTFontCreateCopyWithAttributes(CTFontRef font, CGFloat size, const CGA
  * the directory walk happened to reach first.
  * =============================================================================================== */
 
-/* ONE WALK, USED BY ALL FOUR: each candidate is turned into a font BY NAME -- the route the suite measures every
- * run, and the only one a descriptor offers -- and the door's own test decides whether that font is the answer. A
- * candidate that cannot be made into a font is SKIPPED rather than fatal, which is the rule the matching tier
- * already applies to a listing door: the registry names FILES, and one the engine will not open is not a reason to
- * fail the others. */
+/* ONE WALK, USED BY ALL FOUR: each candidate is turned into a font, and the door's own test decides whether that
+ * font is the answer. A candidate that cannot be made into a font is SKIPPED rather than fatal, which is the rule
+ * the matching tier already applies to a listing door: the registry names FILES, and one the engine will not open is
+ * not a reason to fail the others.
+ *
+ * **AND THE CANDIDATE NAMES ITS FILE, SO THE FILE IS WHAT IS OPENED.** A descriptor the matching list built carries
+ * the URL it was read from as well as the PostScript name, and resolving the NAME instead is a walk of every font
+ * directory looking for the best answer to it — one file read per face the walk tries, and 33 ms per name MEASURED on
+ * this host. The name was the only route this door had while a descriptor was a name; the URL is the route the
+ * enumeration already paid for, and it is also the exact face the list named rather than whatever a name search would
+ * rank first. The name stays as the fallback, because a descriptor a CALLER built may name a face without naming a
+ * file (a registration, or an attribute dictionary).
+ *
+ * THE PATTERN IS THE ONE `fn_colour_face_get`, ABOVE, ALREADY USES: open the PATH the registry gave rather than ask
+ * the registry to find a name again, because a name it has not been asked for is a directory walk. MEASURED on this
+ * host, the whole of Workspace's start: 1.7 s before, of which 1.5 s was this door opening every family that sorts
+ * before the wanted one, and 0.22 s after. */
 static CTFontRef ct_font_from_descriptor(CTFontDescriptorRef candidate, CGFloat size,
 					 const CGAffineTransform *matrix)
 {
+	CFURLRef url = (CFURLRef)CTFontDescriptorCopyAttribute(candidate, kCTFontURLAttribute);
 	CFStringRef name = (CFStringRef)CTFontDescriptorCopyAttribute(candidate, kCTFontNameAttribute);
-	CTFontRef font;
+	CTFontRef font = NULL;
 
-	if (name == NULL || CFGetTypeID(name) != CFStringGetTypeID()) {
-		if (name != NULL) {
-			CFRelease(name);
+	if (url != NULL && CFGetTypeID(url) == CFURLGetTypeID()) {
+		char path[1024];
+
+		if (CFURLGetFileSystemRepresentation(url, false, (UInt8 *)path, (CFIndex)sizeof path)) {
+			CGDataProviderRef provider = CGDataProviderCreateWithFilename(path);
+
+			if (provider != NULL) {
+				CGFontRef face = CGFontCreateWithDataProvider(provider);
+
+				if (face != NULL) {
+					font = CTFontCreateWithGraphicsFont(face, size, matrix, candidate);
+					CGFontRelease(face);
+				}
+				CGDataProviderRelease(provider);
+			}
 		}
-		return NULL;
 	}
-	font = CTFontCreateWithName(name, size, matrix);
-	CFRelease(name);
+	if (url != NULL) {
+		CFRelease(url);
+	}
+	if (font == NULL && name != NULL && CFGetTypeID(name) == CFStringGetTypeID()) {
+		font = CTFontCreateWithName(name, size, matrix);
+	}
+	if (name != NULL) {
+		CFRelease(name);
+	}
 	return font;
 }
 
 typedef bool (*ct_font_accept)(CTFontRef candidate, void *info);
 
+/* **A CANDIDATE'S FAMILY IS A QUESTION THE DESCRIPTOR CAN ANSWER, AND ASKING THE FONT INSTEAD COSTS A FILE.**
+ * `CTFontDescriptorCopyAttribute` reads a `CFString` the enumeration already put there, where making a font out of
+ * the descriptor opens the face. That is the shape of this tier's slowest start: a traits request names a FAMILY
+ * (`CTFontCreateCopyWithSymbolicTraits` carries the original's), the candidate list is sorted by family name, and the
+ * walk built a font for every unrelated family that sorts before the wanted one — `Figtree` sits behind forty of them
+ * on a stock host. The families the ACCEPTANCE test requires are filtered here, before anything is opened; a request
+ * that names no family (the cascade, the role fallback) passes NULL and is answered exactly as before. */
+static bool ct_font_descriptor_names_family(CTFontDescriptorRef descriptor, CFStringRef family)
+{
+	CFStringRef got;
+	bool same;
+
+	if (family == NULL) {
+		return true;
+	}
+	got = (CFStringRef)CTFontDescriptorCopyAttribute(descriptor, kCTFontFamilyNameAttribute);
+	same = (got != NULL) && CFEqual(got, family);
+	if (got != NULL) {
+		CFRelease(got);
+	}
+	return same;
+}
+
 static CTFontRef ct_font_search(CFArrayRef candidates, CGFloat size, const CGAffineTransform *matrix,
-				ct_font_accept accept, void *info)
+				CFStringRef family, ct_font_accept accept, void *info)
 {
 	CFIndex i, count = (candidates != NULL) ? CFArrayGetCount(candidates) : 0;
 
 	for (i = 0; i < count; i++) {
-		CTFontRef candidate = ct_font_from_descriptor(
-			(CTFontDescriptorRef)CFArrayGetValueAtIndex(candidates, i), size, matrix);
+		CTFontDescriptorRef descriptor = (CTFontDescriptorRef)CFArrayGetValueAtIndex(candidates, i);
+		CTFontRef candidate;
+
+		if (!ct_font_descriptor_names_family(descriptor, family)) {
+			continue;	/* not this face, and a font built to find that out is a file read */
+		}
+		candidate = ct_font_from_descriptor(descriptor, size, matrix);
 
 		if (candidate == NULL) {
 			continue;
@@ -453,7 +512,7 @@ CTFontRef CTFontCreateCopyWithSymbolicTraits(CTFontRef font, CGFloat size, const
 	want.value = (CTFontGetSymbolicTraits(font) & ~symTraitMask) | (symTraitValue & symTraitMask);
 	want.family = CTFontCopyFamilyName(font);
 	candidates = CTFontMatchingCopyAvailableDescriptors();
-	found = ct_font_search(candidates, size, matrix, ct_accept_traits, &want);
+	found = ct_font_search(candidates, size, matrix, want.family, ct_accept_traits, &want);
 	if (candidates != NULL) {
 		CFRelease(candidates);
 	}
@@ -500,7 +559,7 @@ CTFontRef CTFontCreateCopyWithFamily(CTFontRef font, CGFloat size, const CGAffin
 	want.family = family;
 	want.traits = CTFontGetSymbolicTraits(font);
 	candidates = CTFontMatchingCopyAvailableDescriptors();
-	found = ct_font_search(candidates, size, matrix, ct_accept_family, &want);
+	found = ct_font_search(candidates, size, matrix, want.family, ct_accept_family, &want);
 	if (candidates != NULL) {
 		CFRelease(candidates);
 	}
@@ -698,7 +757,7 @@ CTFontRef CTFontCreateForString(CTFontRef currentFont, CFStringRef string, CFRan
 					CFArrayAppendValue(kept, entry);
 				}
 			}
-			found = ct_font_search(kept, original->size, &original->matrix, ct_accept_covers, &want);
+			found = ct_font_search(kept, original->size, &original->matrix, NULL, ct_accept_covers, &want);
 			CFRelease(kept);
 		}
 	}
@@ -728,7 +787,7 @@ CTFontRef CTFontCreateForString(CTFontRef currentFont, CFStringRef string, CFRan
 	if (found == NULL) {
 		CFArrayRef candidates = CTFontMatchingCopyAvailableDescriptors();
 
-		found = ct_font_search(candidates, original->size, &original->matrix, ct_accept_covers, &want);
+		found = ct_font_search(candidates, original->size, &original->matrix, NULL, ct_accept_covers, &want);
 		if (candidates != NULL) {
 			CFRelease(candidates);
 		}
@@ -1087,7 +1146,7 @@ CTFontRef CTFontCreateUIFontForLanguage(CTFontUIFontType uiType, CGFloat size, C
 	if (base == NULL) {
 		/* AND ONLY THEN ANY REGULAR FACE AT ALL, so that a host with none of these families still gets a UI font
 		 * rather than none — the preference being declined rather than enforced. */
-		base = ct_font_search(candidates, size, NULL, ct_accept_role, &want);
+		base = ct_font_search(candidates, size, NULL, NULL, ct_accept_role, &want);
 	}
 	if (candidates != NULL) {
 		CFRelease(candidates);

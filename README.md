@@ -1071,6 +1071,15 @@ the user's decision is that they stay owed), the ATS pair (permanent), and the f
   alone answered "a disabled face leaves every matching answer, and comes back" from before the disabling. MEASURED: a
   repeated fallback miss **0.0001 s against 0.0070 s**; the app's sanitizer hyphenation case **13 s against more than
   280 s** (most of that half being `libagora-drawing`'s name cache, sized for a cascade when a search walks a font set).
+- **AND THE SEARCH DOES NOT BUILD A FONT TO ASK IT A QUESTION IT COULD ASK THE DESCRIPTOR.** `-ct_font_search`
+  instantiated every candidate before testing it, and a candidate is a FILE OPEN, so a traits request — which names
+  a FAMILY — paid for every family in the registry that sorts before the wanted one. That was the whole of an
+  application's first second and a half: MEASURED, Workspace's first window 1.7 s before and 0.22 s after, Forge
+  1.74 s against 0.19 s, and the AppKit suite 98.7 s against 39.6 s. Two lines of the fix are the two facts the
+  matching tier already holds: the descriptor's FAMILY answers the pre-filter, and the descriptor's URL is the file
+  the enumeration already opened, so the face is read from it instead of being looked up by name (a name lookup is
+  a directory walk, 33 ms, when the process has not asked for it before — the same lesson `fn_colour_face_get`
+  records for the colour face). See PROVENANCE.md, "The search asks the descriptor".
 
 ## Astral characters, and the two places that asked for half a character
 
