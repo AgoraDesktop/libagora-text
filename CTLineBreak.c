@@ -711,12 +711,38 @@ CFIndex ct_lb_break_before_utf16(const UniChar *chars, CFIndex count, CFIndex st
 	UTF32Char *points;
 	CFIndex *units;
 	CFIndex pointCount = 0, i, answer, mapped;
+	CFIndex from, to, startPoint = 0, limitPoint;
 
 	if (chars == NULL || count <= 0 || start >= count) {
 		return start;
 	}
-	points = (UTF32Char *)malloc((size_t)count * sizeof(UTF32Char));
-	units = (CFIndex *)malloc((size_t)(count + 1) * sizeof(CFIndex));
+	/* **ONLY THE WINDOW THE QUESTION IS ABOUT IS DECODED, WHICH IS WHAT MAKES A LINE BREAK COST ITS OWN LINE.**
+	 * This used to decode the ENTIRE string on every call — two allocations of `count` and a UTF-32 conversion — so a
+	 * typesetter asked for one line at a time was quadratic in the document: MEASURED, 6.5 s of Core Text's own
+	 * `CTTypesetterSuggestLineBreak` to lay out a 1,600-line file, and every keystroke paying it again through the
+	 * layout manager. The rules look at most one character BACK across a break, so the window starts one unit earlier
+	 * than the question does — and a window edge that would split a surrogate pair is moved out to keep the pair whole,
+	 * because a lone surrogate has no UAX #14 class and would answer for a character the text does not contain.
+	 *
+	 * `units` keeps ABSOLUTE unit indexes, so the answer comes back in the caller's own coordinates. */
+	if (limit > count) {
+		limit = count;
+	}
+	if (limit < start) {
+		limit = start;
+	}
+	from = (start > 0) ? start - 1 : 0;
+	if (from > 0 && chars[from] >= 0xDC00 && chars[from] <= 0xDFFF
+	    && chars[from - 1] >= 0xD800 && chars[from - 1] <= 0xDBFF) {
+		from -= 1;		/* the pair straddles the window's leading edge */
+	}
+	to = limit;
+	if (to > 0 && to < count && chars[to - 1] >= 0xD800 && chars[to - 1] <= 0xDBFF
+	    && chars[to] >= 0xDC00 && chars[to] <= 0xDFFF) {
+		to += 1;		/* and the trailing one */
+	}
+	points = (UTF32Char *)malloc((size_t)(to - from + 1) * sizeof(UTF32Char));
+	units = (CFIndex *)malloc((size_t)(to - from + 2) * sizeof(CFIndex));
 	if (points == NULL || units == NULL) {
 		free(points);
 		free(units);
@@ -726,11 +752,14 @@ CFIndex ct_lb_break_before_utf16(const UniChar *chars, CFIndex count, CFIndex st
 	 * point and the map remembers the unit it started at, so a code point index can be turned back into the index
 	 * the caller asked in. `units[pointCount]` is the end of the run, which is what an answer of "the last code
 	 * point" maps to. */
-	for (i = 0; i < count;) {
+	for (i = from; i < to;) {
 		UTF32Char c = (UTF32Char)chars[i];
 
+		if (i == start) {
+			startPoint = pointCount;
+		}
 		units[pointCount] = i;
-		if (c >= 0xD800 && c <= 0xDBFF && i + 1 < count && chars[i + 1] >= 0xDC00 && chars[i + 1] <= 0xDFFF) {
+		if (c >= 0xD800 && c <= 0xDBFF && i + 1 < to && chars[i + 1] >= 0xDC00 && chars[i + 1] <= 0xDFFF) {
 			c = (UTF32Char)(0x10000 + ((c - 0xD800) << 10) + (chars[i + 1] - 0xDC00));
 			i += 2;
 		} else {
@@ -738,11 +767,14 @@ CFIndex ct_lb_break_before_utf16(const UniChar *chars, CFIndex count, CFIndex st
 		}
 		points[pointCount++] = c;
 	}
-	units[pointCount] = count;
+	units[pointCount] = to;
+	limitPoint = pointCount;
+	if (limit >= start) {
+		/* the code point that BEGINS at `limit`, which is what the rules are asked about */
+		limitPoint = fn_lb_codepoint_for_unit(units, pointCount, limit);
+	}
 
-	answer = ct_lb_break_before(points, pointCount, fn_lb_codepoint_for_unit(units, pointCount, start),
-				    fn_lb_codepoint_for_unit(units, pointCount,
-							     (limit < count) ? limit : count));
+	answer = ct_lb_break_before(points, pointCount, startPoint, limitPoint);
 	mapped = units[answer];
 	free(points);
 	free(units);
